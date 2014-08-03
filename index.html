@@ -38,11 +38,14 @@
       }
     </style>
     <section class="container" id="id">
+      <p style="margin-left: 17px; font-size: 14px; font-family: sans-serif;">
+        <i>// Демонстрация идеи "живого" заполнения формы  </i>
+      </p>
       <h4 style="margin-left: 17px">
         Пожалуйста, опишите Вашу проблему 
       </h4>
       <p style="font-size: 14px; margin-left: 17px; color: #999;">
-        Описание проблемы займет всего 3 шага (осталось <span class="counter" style="color: #000">3</span>) 
+        Описание проблемы займет всего 4 шага (осталось <span class="counter" style="color: #000">4</span>) 
       </p>
       <select class="chosen clicker" data-change="show1" data-placeholder="Например: яма во дворе" multiple="1"><option>не работает газ</option><option>не работает сантехника</option><option>не работает жена</option><option>не работает то, что должно работать</option><option>шум под окном</option><option>соседи шумят</option><option>не пришел участковый</option><option>в кране нет воды</option><option>авария кран</option><option>яма во дворе</option></select>
       <div class="booyah" style="margin-left: 17px">
@@ -56,6 +59,19 @@
         <div class="show2" style="display: none; margin-top: 24px">
           <hr />
           <h5>
+            Опишите проблему подробнее 
+          </h5>
+          <p style="font-size: 14px">
+            <label for="tr1">Формулировка проблемы </label><input id="tr1" placeholder="Например: Слышен запах газа" style="float: right; margin-right: 200px; width: 44%" />
+          </p>
+          <p style="font-size: 14px">
+            <label for="tr3">Локализуйте проблему </label><input id="tr3" placeholder="Например: на лестничной клетке" style="float: right; margin-right: 200px; width: 44%" />
+          </p>
+          <input class="clicker" data-change="show3" style="margin-left: 180px" type="checkbox"> Подтвердить данные </input>
+        </div>
+        <div class="show3" style="display: none; margin-top: 24px">
+          <hr />
+          <h5>
             Как с Вами связаться? 
           </h5>
           <p style="font-size: 14px">
@@ -67,7 +83,7 @@
           <p style="font-size: 14px">
             <label for="boo2">Адрес электронной почты </label><input id="boo2" style="float: right; margin-right: 200px;width: 40%" />
           </p>
-          <button style="margin-left: 210px">Подтвердить данные </button>
+          <input style="margin-left: 210px" type="checkbox"> Подтвердить данные </input>
         </div>
       </div>
     </section>
