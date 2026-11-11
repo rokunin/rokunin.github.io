@@ -2677,7 +2677,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 74, buildEl = document.getElementById('build');
+  const BUILD = 75, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4068,6 +4068,53 @@ laugh(r) {                                       // a big man's belly laugh: bre
     flash(o, 0x5ff5e6, 7, 0.25, 3); SFX.play('nova', car.pos);
   }
 
+  // ---- beam nova: the halo throws out a star of light beams that hold for a while; the unicorn shoots a rainbow out of both ends ----
+  const beams = [], bmV = new THREE.Vector3();
+  const beamGeo = new THREE.BoxGeometry(1, 1, 1); beamGeo.translate(0, 0, 0.5);         // runs along +z from its origin
+  const beamMatOf = (c, k, add = true) => glow(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false }), k);
+  const RAINBOW = [0xff4a5a, 0xff9a3a, 0xffe14a, 0x5fd36a, 0x4f9dff, 0xb06cff];
+  function fireBeams() {
+    const L = weapons.nova - 1, dmg = W_STATS.nova.dmg[L];
+    if (ride === 'halo') {
+      const n = Math.max(4, Math.round(W_STATS.nova.n[L] * 0.5)), len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, mat = beamMatOf(0x9af7ff, 2.6), dirs = [];
+      for (let i = 0; i < n; i++) { const g = new THREE.Group(), m = new THREE.Mesh(beamGeo, mat); m.scale.set(0.7, 0.45, len); g.add(m); scene.add(g); dirs.push({ g, a: ph + i / n * 6.283 }); }
+      beams.push({ kind: 'halo', dirs, mats: [mat], len, w: 0.9, t: 0, T: 1.4, tick: 0, dmg: dmg * 0.7 });
+    } else {
+      const len = [14, 17, 20, 23, 27][L], mats = RAINBOW.map(c => beamMatOf(c, 1.15, false)), dirs = [];      // plain blending: the stripes keep their colours instead of adding up to white
+      for (const off of [0, Math.PI]) {                  // out of the mouth, and out of the other end
+        const g = new THREE.Group(); mats.forEach((mt, i) => { const m = new THREE.Mesh(beamGeo, mt); m.scale.set(0.26, 0.3, len); m.position.x = (i - 2.5) * 0.26; g.add(m); }); scene.add(g); dirs.push({ g, off });
+      }
+      beams.push({ kind: 'rainbow', dirs, mats, len, w: 1.6, t: 0, T: 1.0, tick: 0, dmg: dmg * 0.9 });
+    }
+    SFX.play('nova', car.pos, { rate: ride === 'halo' ? 0.75 : 1.3 });
+  }
+  function beamHits(ox, oz, dx, dz, len, w, dmg) {       // everything lying across the beam takes a tick of damage
+    const on = (px, pz, r) => { const rx = px - ox, rz = pz - oz, t = rx * dx + rz * dz; return t > -r && t < len + r && Math.abs(rx * dz - rz * dx) < r + w * 0.5; };
+    bmV.set(dx, 0, dz);
+    for (const e of enemies) if (!e.dead && !e.carried && on(e.pos.x, e.pos.z, e.r)) hitEnemy(e, bmV, dmg, 2);
+    for (const m of swarm) if (!m.dead && on(m.pos.x, m.pos.z, m.r)) hitCritter(m, dmg, bmV, 2);
+    for (const o of obstacles) if (o.crate && active(o) && on(o.mesh.position.x, o.mesh.position.z, Math.max(o.hx, o.hz))) damageCrate(o, dmg);
+    if (boss.state === 'fight' && on(BOSS_POS.x, BOSS_POS.z, 4)) bossDamage(dmg);
+  }
+  function updateBeams(dt) {
+    for (let i = beams.length - 1; i >= 0; i--) {
+      const B = beams[i]; B.t += dt;
+      const k = B.t / B.T, a = Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25);           // snap on, fade off
+      for (const mt of B.mats) mt.opacity = Math.max(0, a) * (0.75 + 0.25 * Math.sin(elapsed * 40));
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading), alive = car.alive && car.depth < 0.3;
+      for (const D of B.dirs) {
+        let ang, ox = car.pos.x, oz = car.pos.z, oy;
+        if (B.kind === 'halo') { D.a += dt * 0.5; ang = D.a; oy = 2.0 + car.y; }
+        else { ang = car.heading + D.off; const fwd = D.off === 0; ox += fx * (fwd ? 2.3 : -1.7); oz += fz * (fwd ? 2.3 : -1.7); oy = (fwd ? 2.9 : 2.1) + car.y; }
+        D.g.position.set(ox, oy, oz); D.g.rotation.y = ang; D.g.scale.set(1 + 0.25 * Math.sin(elapsed * 30), 1, Math.min(1, B.t / 0.12));
+        D.g.visible = alive;
+        D.dx = Math.sin(ang); D.dz = Math.cos(ang); D.ox = ox; D.oz = oz;
+      }
+      if (alive && (B.tick -= dt) <= 0) { B.tick = 0.12; for (const D of B.dirs) beamHits(D.ox, D.oz, D.dx, D.dz, B.len, B.w, B.dmg); }
+      if (k >= 1) { for (const D of B.dirs) scene.remove(D.g); for (const mt of B.mats) mt.dispose(); beams.splice(i, 1); }
+    }
+  }
+
   // ---- orbit: spinning saws ----
   const sawMat = new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 1, roughness: 0.25, emissive: 0x5a0a0a, flatShading: true });
   const sawGeo = (() => {
@@ -4083,10 +4130,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
     return m;
   })();
   const saws = []; let sawAngle = 0;
+  const dodecaGeo = new THREE.DodecahedronGeometry(0.62, 0);
+  const dodecaMats = RAINBOW.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.2, flatShading: true }));
   function buildSaws() {
-    const n = W_STATS.orbit.n[weapons.orbit - 1];
+    const n = W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1);
     while (saws.length < n) {
-      const m = new THREE.Mesh(sawGeo, sawMat); m.scale.setScalar(1.4); m.castShadow = true; scene.add(m);
+      const uni = ride === 'unicorn', m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[saws.length % dodecaMats.length] : sawMat); m.scale.setScalar(uni ? 1.1 : 1.4); m.castShadow = true; scene.add(m);
+      if (uni) { saws.push({ m, pos: new THREE.Vector3() }); continue; }
       const glowRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.8, 16), glow(new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }), 2.5));
       glowRing.rotation.x = -Math.PI / 2; m.add(glowRing);
       saws.push({ m, pos: new THREE.Vector3() });
@@ -4096,11 +4146,21 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateSaws(dt) {
     if (!weapons.orbit) return;
     const L = weapons.orbit - 1, S = W_STATS.orbit, on = car.alive && car.depth < 0.3;
-    sawAngle += S.spd[L] * dt;
+    sawAngle += S.spd[L] * dt * (ride === 'halo' ? 2 : 1);
     saws.forEach((s, i) => {
       const a = sawAngle + i / saws.length * Math.PI * 2;
       s.pos.set(car.pos.x + Math.sin(a) * S.r[L], 1.0 + car.y, car.pos.z + Math.cos(a) * S.r[L]);
-      s.m.position.copy(s.pos); s.m.rotation.y += dt * 22; s.m.visible = on;
+      s.m.position.copy(s.pos); s.m.visible = on;
+      if (ride === 'unicorn') {                          // dodecahedra: no cutting, every monster they touch (cubes aside) is stunned for half a second
+        s.m.rotation.x += dt * 3; s.m.rotation.y += dt * 4; if (!on) return;
+        for (const m of swarm) {
+          if (m.dead || m.sawCd > 0) continue;
+          const dx = m.pos.x - s.pos.x, dz = m.pos.z - s.pos.z, d = Math.hypot(dx, dz);
+          if (d < m.r + 0.75) { m.sawCd = 0.5; stunCritter(m, 0.5); spawnParticles(sawHitPos.copy(s.pos).setY(1.6), 0xffe14a, 4, 4); SFX.play('hit_stone', s.pos, { vol: 0.35, rate: 1.6 }); }
+        }
+        return;
+      }
+      s.m.rotation.y += dt * 22;
       if (!on) return;
       for (const e of enemies) {
         if (e.dead || e.carried || (e.sawCd || 0) > 0) continue;
@@ -4194,8 +4254,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function updateWeapons(dt) {
     const ready = car.alive && car.depth < 0.3;
-    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; fireNova(); } else novaT = 0.15; } }
+    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
     updateSaws(dt);
+    updateBeams(dt);
     if (weapons.mortar) {
       mortarT -= dt;
       if (mortarT <= 0 && ready) {
@@ -4636,7 +4697,7 @@ const MONSTERS = [
         drawCritter(x, kind, spec, f);
         if (white) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = '#fff'; x.fillRect(0, 0, SW_PX, SW_PX); }
         const m = new THREE.SpriteMaterial({ map: srgbTex(cv), transparent: true, alphaTest: 0.35, depthWrite: true });
-        if (white) m.color.setRGB(0.62, 0.44, 0.38); else m.color.setScalar(SW_TINT);   // hit frame: warm tint, not a white strobe
+        if (white) m.color.setRGB(0.6, 0.24, 0.2); else m.color.setScalar(SW_TINT);   // hit frame: warm tint, not a white strobe
         return m;
       });
       return { walk: mk(false), hit: mk(true), color: new THREE.Color(hsl(spec.h, 0.62, 0.5)).getHex() };
@@ -4672,10 +4733,11 @@ const MONSTERS = [
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
     if (m.net) { m.flash = 0.08; m.myHit = elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
-    m.hp -= dmg; m.flash = 0.08;
+    m.hp -= dmg; if (m.flash < -0.12) m.flash = 0.08;      // blinks under constant fire instead of staying lit
     if (dir) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
     if (m.hp <= 0) killCritter(m, dir);
   }
+  function stunCritter(m, t) { if (m.net) { netEv({ t: 'stun', i: m.id, s: t }, NET.hostPeer); return; } m.stun = Math.max(m.stun || 0, t); }
   const critterTop = m => (m.K.fly || 0) + m.K.size * 0.85;
 
   // waves: a new pack arrives off-screen every ~35 s (or sooner once the last one is nearly gone)
@@ -4769,6 +4831,7 @@ const MONSTERS = [
           if (Math.abs(sx) > md || Math.abs(sz) > md) continue;
           const sd = Math.hypot(sx, sz) || 1e-3; if (sd < md) { tx += sx / sd * 8 * (md - sd); tz += sz / sd * 8 * (md - sd); }
         }
+        const dazed = m.stun > 0; if (dazed) { m.stun -= dt; tx = 0; tz = 0; }      // knocked silly by the unicorn's dodecahedra
         const k = Math.min(1, 4 * dt);
         m.vel.x += (tx - m.vel.x) * k; m.vel.z += (tz - m.vel.z) * k;
         m.pos.addScaledVector(m.vel, dt);
@@ -4783,13 +4846,13 @@ const MONSTERS = [
           const push = reachR - dist;
           m.pos.x -= nx * push; m.pos.z -= nz * push;
           if (K.heavy && mine) { car.pos.x += nx * push * 0.5; car.pos.z += nz * push * 0.5; }
-          if (airOK && m.cd <= 0 && T.burrow === 'up') { m.cd = 0.9; SFX.play('chomp', m.pos, { rate: K.heavy ? 0.8 : 1.25 }); if (mine) hurtCar(K.bite, swA.set(nx, 0, nz).clone()); else netEv({ t: 'hurt', i: m.id, d: K.bite, x: r2(nx), z: r2(nz) }, T.R.peer); }
+          if (airOK && m.cd <= 0 && !dazed && T.burrow === 'up') { m.cd = 0.9; SFX.play('chomp', m.pos, { rate: K.heavy ? 0.8 : 1.25 }); if (mine) hurtCar(K.bite, swA.set(nx, 0, nz).clone()); else netEv({ t: 'hurt', i: m.id, d: K.bite, x: r2(nx), z: r2(nz) }, T.R.peer); }
         }
         if (!mine && T.R.cn > 0 && m.cd <= 0 && Math.hypot(m.pos.x - T.R.cpos.x, m.pos.z - T.R.cpos.z) < 1.7 + m.r) {      // snatch a passenger off another player's cart
           m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
         }
         // spitters lob acid
-        if (seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
+        if (!dazed && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
           if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
           else { m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
@@ -4797,7 +4860,7 @@ const MONSTERS = [
 
         }
         if (K.ranged) {                                    // the car if it is in range, otherwise whoever sits on a rock
-          m.spitT -= dt;
+          if (!dazed) m.spitT -= dt;
           if (m.spitT <= 0) {
             if (seen && dist < 17) { m.spitT = 2.6 + Math.random(); spit(m, null, T); }
             else { const c = perchedNear(m.pos, 19); if (c) { m.spitT = 3.5 + Math.random() * 2.5; spit(m, c); } else m.spitT = 0.4; }
@@ -6475,6 +6538,7 @@ const MONSTERS = [
       else if (d.t === 'eg') { const e = enemies[d.i]; if (!NET.client && e && !e.dead) {
         if (d.c === 1) { if (e.carried) releaseIfHeld(e); e.carried = true; e.root.visible = false; }
         else { e.carried = false; e.root.visible = true; e.pos.set(num(d.x, -ARENA, ARENA), 0, num(d.z, -ARENA, ARENA)); e.stun = 1.1; e.biteCd = 1.2; e.vel.set(0, 0, 0); e.root.rotation.set(0, e.yaw, 0); } } }
+      else if (d.t === 'stun') { const m = swById.get(d.i); if (!NET.client && m && !m.dead) m.stun = Math.max(m.stun || 0, num(d.s, 0, 2)); }
       else if (d.t === 'hit') { const m = swById.get(d.i); if (!NET.client && m && !m.dead && !m.net) hitCritter(m, num(d.d, 0, 9999), tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.p, 0, 20)); }
       else if (d.t === 'log') { if (typeof d.s === 'string') diagAdd(DG.nick(from), d.s.slice(0, 160)); }
       else if (d.t === 'st') { if (d.o && typeof d.o === 'object') DG.stats.set(String(from), { o: d.o, at: performance.now() }); }
