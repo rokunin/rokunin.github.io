@@ -4559,7 +4559,7 @@ const MONSTERS = [
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
     const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp, dead: false, awake: true, carried: false,
-                flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 1.5 + Math.random() * 5, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
+                flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 1 + Math.random() * 3, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
     m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
     swarm.push(m);
     burst(tmp.set(x, 0.3, z), 0x8a7a6a, 2, 1.2, 2, 0.3);
@@ -4697,10 +4697,10 @@ const MONSTERS = [
           m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
         }
         // spitters lob acid
-        if (seen && dist > 3.5 && dist < 19 && (m.throwT -= dt) <= 0) {      // every kind has a shot of its own: straight, fan or ring
+        if (seen && dist < 24 && (m.throwT -= dt) <= 0) {      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
-          if (mobShots > 30 || (pat === 2 && dist > 12)) m.throwT = 0.6 + Math.random();      // too much in the air already, or a ring would not reach
-          else { m.throwT = (pat === 2 ? 6.5 : pat === 1 ? 5.5 : 4.5) + Math.random() * 4 + (mob > 6 ? 2 : 0);
+          if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
+          else { m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
           mobThrow(m, nx, nz, dist, pat); netEv({ t: 'fx', k: 'th', i: m.id, x: r2(nx), z: r2(nz), d: r1(dist), p: pat }); }
 
         }
@@ -5867,6 +5867,10 @@ const MONSTERS = [
       car.pos.x = SPD.p.x; car.pos.z = SPD.p.z; car.y = SPD.p.y; car.vel.set(SPD.vel.x, 0, SPD.vel.z);
     }
     car.speed = SPD.vel.length(); car.steer = 0;
+    { const wall = !car.airborne && n.y < 0.5;            // scuttling up a wall shakes the passengers out: one as it mounts, then one a second while it climbs
+      if (wall && !SPD.wasWall) { cartKick(4); cartSpill(1); SPD.wallT = 1; }
+      else if (wall && car.speed > 3 && (SPD.wallT -= dt) <= 0) { SPD.wallT = 1; cartKick(3); cartSpill(1); }
+      SPD.wasWall = wall; }
     // facing and orientation: up is the surface normal
     spV.copy(SPD.vel).addScaledVector(n, -SPD.vel.dot(n));
     if (spV.length() > 1) SPD.fwd.lerp(spV.normalize(), 1 - Math.exp(-12 * dt));
