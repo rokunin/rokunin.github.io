@@ -2353,6 +2353,16 @@ laugh(r) {                                       // a big man's belly laugh: bre
       };
     }
   }
+  let cloud = null;
+  function buildCloud() {                              // the halo's cart: a little cloud for the chubziks to ride on, no wheels, no hitch
+    const g = new THREE.Group(); cartG.add(g);
+    const fluff = new THREE.MeshStandardMaterial({ color: 0x9aa3c4, emissive: 0x2a3050, emissiveIntensity: 0.3, roughness: 1, flatShading: true });
+    const puffs = [[0, 0.3, 0, 1.0], [-0.95, 0.3, 0.3, 0.72], [0.95, 0.32, -0.25, 0.75], [0.1, 0.3, 1.05, 0.7], [-0.15, 0.3, -1.05, 0.72], [-0.7, 0.25, -0.75, 0.55], [0.75, 0.25, 0.75, 0.55], [0, 0.15, 0, 1.35]].map(([x, y, z, r], i) => {
+      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), fluff); m.position.set(x, y, z); m.scale.y = i === 7 ? 0.3 : 0.55; m.castShadow = true; g.add(m); return m; });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.05, 5, 24), glow(new THREE.MeshBasicMaterial({ color: 0xffe07a }), 2.2)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.2; g.add(ring);
+    cloud = { g, puffs };
+  }
+  const cartFor = c => (bug && c === bug.g) ? 'spider' : (cloud && c === cloud.g) ? 'halo' : null;      // which ride a cart model belongs to (null: the wooden cart)
   let bug = null, bugPhase = 0; const bugPrev = new THREE.Vector3();
   function buildBug() {                                // the spider's cart: a smaller bug trotting behind on its own, no hitch
     const g = new THREE.Group(); cartG.add(g);
@@ -2383,7 +2393,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     hoverShadow.visible = k === 'halo';
     car.maxHp = k === 'spider' ? 50 : 100; car.hp = car.maxHp;      // the spider is quick and fragile
     if (k === 'spider' && !bug) buildBug();
-    for (const c of cartG.children) c.visible = (bug && c === bug.g) ? k === 'spider' : k !== 'spider';
+    if (k === 'halo' && !cloud) buildCloud();
+    for (const c of cartG.children) c.visible = cartFor(c) ? cartFor(c) === k : (k !== 'spider' && k !== 'halo');
     carBub.mats = bubbleMats(k); carBub.vee.material = carBub.mats.q1; carBub.roxy.material = carBub.mats.ok;
     try { localStorage.setItem('carproto.ride', k); } catch (e) {}
   }
@@ -2401,7 +2412,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
     const cartM = new THREE.Group();
     if (k === 'spider' && !bug) { buildBug(); bug.g.visible = ride === 'spider'; }
-    for (const c of cartG.children) if ((bug && c === bug.g) === (k === 'spider')) take(c, cartM);
+    if (k === 'halo' && !cloud) { buildCloud(); cloud.g.visible = ride === 'halo'; }
+    for (const c of cartG.children) if (cartFor(c) ? cartFor(c) === k : (k !== 'spider' && k !== 'halo')) take(c, cartM);
     const anim = [];                                     // moving parts of the copy: spider legs, unicorn legs, halo rings
     g.traverse(o => { const u = o.userData; if (u.leg) { const fem = o.children.find(c => c.isGroup); anim.push({ t: 'leg', o, fem, grp: u.leg - 1, by: o.rotation.y, bx: fem ? fem.rotation.x : 0 }); }
       else if (u.uleg) anim.push({ t: 'uleg', o, grp: u.uleg - 1 }); else if (u.spin) anim.push({ t: 'spin', o, k: u.spin }); });
@@ -2426,6 +2438,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const sp = Math.hypot(car.vel.x, car.vel.z); ridePhase += sp * dt * 0.45;
     if (rideG[ride]) rideG[ride].anim(dt, sp);
     if (hoverShadow.visible) hoverShadow.position.y = 0.04 - carGroup.position.y;
+    if (ride === 'halo' && cloud) {                      // the cloud bobs, leans with the sway and breathes
+      cloud.g.position.y = 0.12 + Math.sin(elapsed * 2) * 0.08; cloud.g.rotation.z = cart.phi * 0.6;
+      cloud.puffs.forEach((m, i) => { if (i < 7) m.scale.x = m.scale.z = 1 + Math.sin(elapsed * 1.7 + i * 1.3) * 0.06; });
+    }
     if (ride === 'spider' && bug) {                      // the bug sways and tips exactly like the cart it replaces
       bugPhase += Math.hypot(cart.pos.x - bugPrev.x, cart.pos.z - bugPrev.z) * 1.6; bugPrev.copy(cart.pos);
       bug.g.rotation.z = cartBody.rotation.z; bug.g.position.y = cartBody.position.y + Math.abs(Math.sin(bugPhase)) * 0.05;
@@ -2678,7 +2694,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 77, buildEl = document.getElementById('build');
+  const BUILD = 78, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4108,13 +4124,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
         float a = max(inside, halo);
         gl_FragColor = vec4(col * a, 1.0) * alpha;
       }` });
+  const SWORD_T = [1.2, 1.5, 1.9, 2.3, 2.8];             // the swords stay out longer with every nova level
   const haloHoly = () => ride === 'halo' && beams.some(B => B.kind === 'halo');
   function fireBeams() {
     const L = weapons.nova - 1, dmg = W_STATS.nova.dmg[L];
     if (ride === 'halo') {                               // a ring of angelic swords; while they are out nothing can hurt the halo
       const n = [4, 5, 6, 7, 8][L], len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, dirs = [], mt = swordMat();
       for (let i = 0; i < n; i++) { const g = new THREE.Group(), m = new THREE.Mesh(rbGeo, mt); m.scale.set(2.3, 1, len); m.renderOrder = 4; g.add(m); scene.add(g); dirs.push({ g, a: ph + i / n * 6.283 }); }
-      beams.push({ kind: 'halo', dirs, mats: [mt], len, w: 1.1, t: 0, T: 1.4, tick: 0, every: 0.12, dmg: dmg * 0.9 });
+      beams.push({ kind: 'halo', dirs, mats: [mt], len, w: 1.1, t: 0, T: SWORD_T[L], tick: 0, every: 0.12, dmg: dmg * 0.9 });
       flash(tmp.set(car.pos.x, 2 + car.y, car.pos.z), 0xfff0c0, 8, 0.3, 2.5);
     } else {
       const per = [1, 2, 2, 3, 3][L], offs = per === 1 ? [0] : per === 2 ? [-0.2, 0.2] : [-0.38, 0, 0.38], len = 2 * ARENA + 80, dirs = [], mats = [];   // \|/ at full power, both ends
@@ -4144,7 +4161,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       for (const D of B.dirs) {
         let ang, ox = car.pos.x, oz = car.pos.z, oy;
         if (B.kind === 'halo') {
-          D.a += dt * 0.9; ang = D.a; oy = 1.6 + car.y; D.g.scale.set(1, 1, grow);
+          D.a += dt * 0.28; ang = D.a; oy = 1.6 + car.y; D.g.scale.set(1, 1, grow);
         } else {
           ang = car.heading + D.off; ox += fx * (D.fwd ? 2.3 : -1.7); oz += fz * (D.fwd ? 2.3 : -1.7); oy = (D.fwd ? 2.9 : 2.1) + car.y; D.g.scale.set(1, 1, grow);
           if (alive && Math.random() < 0.5) { const d = 3 + Math.random() * 40; spawnParticles(tmp.set(ox + Math.sin(ang) * d, oy, oz + Math.cos(ang) * d), RAINBOW[Math.floor(Math.random() * 6)], 1, 4); }
@@ -4188,7 +4205,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateSaws(dt) {
     if (!weapons.orbit) return;
     const L = weapons.orbit - 1, S = W_STATS.orbit, on = car.alive && car.depth < 0.3;
-    sawAngle += S.spd[L] * dt * (ride === 'halo' ? 2 : 1);
+    sawAngle += S.spd[L] * dt * (ride === 'halo' ? 1.86 : 1);
     saws.forEach((s, i) => {
       const a = sawAngle + i / saws.length * Math.PI * 2;
       s.pos.set(car.pos.x + Math.sin(a) * S.r[L], 1.0 + car.y, car.pos.z + Math.cos(a) * S.r[L]);
@@ -4296,7 +4313,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function updateWeapons(dt) {
     const ready = car.alive && car.depth < 0.3;
-    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + 1.4; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
+    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + SWORD_T[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
     updateSaws(dt);
     updateBeams(dt);
     if (weapons.mortar) {
