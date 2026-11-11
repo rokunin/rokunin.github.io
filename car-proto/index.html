@@ -97,6 +97,11 @@
   #rides button.last { outline: 3px solid #fffdf4; }
   #lobbyStep { display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(460px, 92vw); max-height: 100%; overflow: auto; cursor: default;
                background: rgba(26,22,34,.92); border: 2px solid #4a4458; border-radius: 16px; padding: 18px 20px; box-sizing: border-box; font-size: 14px; color: #cfc8dc; }
+  #lobbyStep { width: min(600px, 94vw) !important; }
+  #how { display: flex; gap: 6px; justify-content: center; align-items: flex-start; width: 100%; }
+  #how div { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .03em; text-transform: uppercase; color: #ffd27a; text-align: center; }
+  #how canvas { width: 100%; max-width: 92px; aspect-ratio: 1; border-radius: 10px; background: #2a2433; border: 1px solid #4a4458; }
+  #how div span { color: #8d8799; font-weight: 800; }
   #lobbyStep h1 { margin: 0; font: 900 26px Impact, "Arial Black", system-ui, sans-serif; letter-spacing: 2px; color: #ff8c32; }
   #lobbyStep input { width: 140px; margin-left: 6px; background: #221d2b; border: 1px solid #4a4458; color: #fff; border-radius: 6px; padding: 7px 9px; font: 600 15px system-ui, sans-serif; }
   #mpState { text-align: center; line-height: 1.4; }
@@ -185,6 +190,7 @@
 <div id="start">
   <div id="lobbyStep">
     <h1>CAR PROTO</h1>
+    <div id="how"></div>
     <label>Your name <input id="nick" maxlength="12" autocomplete="off" spellcheck="false"></label>
     <div id="mpState">Multiplayer: connecting…</div>
     <div id="mpList"></div>
@@ -2657,7 +2663,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 67, buildEl = document.getElementById('build');
+  const BUILD = 68, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6560,6 +6566,29 @@ const MONSTERS = [
       scene.add(g); renderer.compile(scene, camera); scene.remove(g);
       for (const c of [...g.children]) if (c.isSprite && c.material.map === softTex) { c.visible = false; scene.add(c); (c.material.blending === THREE.AdditiveBlending ? flashPool : puffPool).push(c); }
     } catch (e) { console.warn('prewarm', e); }
+  })();
+  // ---- the five things to do, on the lobby panel, illustrated with shots of the game itself ----
+  (function howTo() {
+    const box = document.getElementById('how'); if (!box) return;
+    const cell = (label, n) => { const d = document.createElement('div'), cv = mkCanvas(160); d.appendChild(cv); const t = document.createElement('div'); t.style.display = 'block'; t.innerHTML = `<span>${n}.</span> ${label}`; d.appendChild(t); box.appendChild(d); return cv.getContext('2d'); };
+    const sprites = (x, list) => { x.fillStyle = '#3b2f33'; x.fillRect(0, 0, 160, 160); for (const [img, dx, dy, sz] of list) x.drawImage(img, dx, dy, sz, sz); };
+    const shot = (x, tx, ty, tz, half) => {              // a real render of that spot through the game's own post-processing
+      try {
+        if (!composer) throw 0;
+        const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = composer.passes[0], keep = rp.camera;
+        tmp.set(tx, ty, tz); cam.position.copy(tmp).add(ISO_OFFSET); cam.lookAt(tmp);
+        cam.left = -half * asp; cam.right = half * asp; cam.top = half; cam.bottom = -half; cam.zoom = 1; cam.updateProjectionMatrix();
+        sun.position.copy(tmp).add(SUN_OFFSET); sun.target.position.copy(tmp); sun.target.updateMatrixWorld(); renderer.shadowMap.needsUpdate = true;
+        rp.camera = cam; composer.render(); rp.camera = keep;
+        const sq = Math.min(cv.width, cv.height); x.drawImage(cv, (cv.width - sq) / 2, (cv.height - sq) / 2, sq, sq, 0, 0, 160, 160);
+      } catch (e) { x.fillStyle = '#3b2f33'; x.fillRect(0, 0, 160, 160); }
+    };
+    const img = (kind, v) => SW_ART[kind][v].walk[1].map.image;
+    sprites(cell('Kill monsters', 1), [[img('grubber', 0), 52, 6, 112], [img('maw', 0), -6, 48, 96], [img('gremlin', 1), 62, 86, 72]]);
+    const crate = obstacles.find(o => o.crate && !o.room); const c2 = cell('Smash crates', 2); if (crate) shot(c2, crate.mesh.position.x, 0.9, crate.mesh.position.z, 3.2);
+    const ch = chubMats[0][0].map.image, ch2 = chubMats[1][1].map.image; sprites(cell('Save chubziks', 3), [[ch, 4, 40, 84], [ch2, 70, 14, 84], [ch, 52, 78, 78]]);
+    const c4 = cell('Feed the altars', 4); if (altars[0]) shot(c4, altars[0].x, 2.6, altars[0].z, 5.5);
+    shot(cell('Unlock the boss', 5), ROOM_X1 - 2, 2.2, 0, 8.5);
   })();
   Math.random = trueRandom;                             // world is built: back to real randomness for the simulation
   camFocus.copy(car.pos);
