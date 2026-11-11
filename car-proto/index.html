@@ -209,7 +209,9 @@
   renderer.setPixelRatio(PR);
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = COARSE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;                // refreshed from frame(): every frame on desktop, every 2nd-3rd on phones
+  let shadowEvery = COARSE ? 2 : 1, shadowTick = 0, bloomPass = null;
   document.body.appendChild(renderer.domElement);
   const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 
@@ -235,7 +237,7 @@
   scene.add(new THREE.HemisphereLight(0xa6b0e6, 0x33262a, 0.17));
   const sun = new THREE.DirectionalLight(0xffc091, 1.35);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(COARSE ? 1024 : 2048, COARSE ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 1, far: 140 });
   sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
@@ -277,7 +279,9 @@
     composer = new THREE.EffectComposer(renderer, rt);
     composer.setPixelRatio(PR); composer.setSize(innerWidth, innerHeight);
     composer.addPass(new THREE.RenderPass(scene, camera));
-    const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.6, hdr ? 1.0 : 0.82);
+    const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.36, 0.55, hdr ? 1.15 : 0.86);
+    bloomPass = bloom;
+    { const ss = bloom.setSize.bind(bloom), k = COARSE ? 0.5 : 0.75; bloom.setSize = (w, h) => ss(Math.round(w * k), Math.round(h * k)); bloom.setSize(innerWidth * PR, innerHeight * PR); }   // blur chain on a smaller buffer
     if (hdr) [bloom.renderTargetBright, ...bloom.renderTargetsHorizontal, ...bloom.renderTargetsVertical]
       .forEach(t => { t.texture.type = THREE.HalfFloatType; });
     composer.addPass(bloom);
@@ -323,31 +327,45 @@
     return new THREE.CanvasTexture(c);
   })();
   const puffs = [], flashes = [];
+  const puffPool = [], flashPool = [];
+  function fxSprite(pool, additive) {
+    const m = pool.pop() || new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending }));
+    m.visible = true; if (!m.parent) scene.add(m); return m;
+  }
   function puff(pos, color, size, life, vx, vy, vz, alpha = 0.45, grow = 1.6) {
-    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color, transparent: true, opacity: alpha, depthWrite: false }));
-    m.position.copy(pos); m.scale.setScalar(size); scene.add(m);
+    if (puffs.length > (COARSE ? 70 : 160)) return;
+    const m = fxSprite(puffPool, false); m.material.color.set(color); m.material.opacity = alpha;
+    m.position.copy(pos); m.scale.setScalar(size);
     puffs.push({ m, life, max: life, a: alpha, v: new THREE.Vector3(vx, vy, vz), grow });
   }
   function burst(pos, color, n, size, speed = 3, alpha = 0.4) {       // ring of dust/smoke
+    if (COARSE) n = Math.ceil(n * 0.6);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, sp = speed * (0.4 + Math.random() * 0.8);
       puff(pos, color, size * (0.7 + Math.random() * 0.6), 0.6 + Math.random() * 0.5, Math.cos(a) * sp, 0.6 + Math.random() * 1.2, Math.sin(a) * sp, alpha, 1.8);
     }
   }
-  const fxLights = [0, 1, 2].map(() => { const L = new THREE.PointLight(0xffffff, 0, 30, 2); L.userData = { life: 0, max: 1, i: 0 }; scene.add(L); return L; });
+  const fxLights = (COARSE ? [0] : [0, 1]).map(() => { const L = new THREE.PointLight(0xffffff, 0, 30, 2); L.userData = { life: 0, max: 1, i: 0 }; scene.add(L); return L; });
   let fxNext = 0;
   const muzzleLight = new THREE.PointLight(0xffb060, 0, 20, 2); scene.add(muzzleLight);
+  let flashLightCd = 0;
   function flash(pos, color, size, life = 0.22, power = 3, light = true) {
-    const mat = new THREE.SpriteMaterial({ map: softTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    mat.color.multiplyScalar(power);
-    const m = new THREE.Sprite(mat); m.position.copy(pos); m.scale.setScalar(size * 0.35); scene.add(m);
+    if (flashes.length > 40) return;
+    life *= 1.35;                                          // slower bloom-and-fade instead of a strobe pop
+    const m = fxSprite(flashPool, true), c = m.material.color.set(color);
+    c.multiplyScalar(0.45 + power * 0.3);
+    const mx = Math.max(c.r, c.g, c.b); if (mx > 1) c.multiplyScalar(1 / mx);
+    c.lerp(flashTint.set(color), 0.25);                    // keeps the hue: near-white pops were the harsh ones
+    m.material.opacity = 0; m.position.copy(pos); m.scale.setScalar(size * 0.35);
     flashes.push({ m, life, max: life, size });
-    if (light) {
+    if (light && flashLightCd <= 0) {
+      flashLightCd = 0.25;
       const L = fxLights[fxNext]; fxNext = (fxNext + 1) % fxLights.length;
       L.color.set(color); L.position.copy(pos); L.position.y += 1.5;
-      L.userData.life = L.userData.max = life * 1.8; L.userData.i = Math.min(3, size * 0.3);
+      L.userData.life = L.userData.max = life * 1.8; L.userData.i = Math.min(1.3, size * 0.12);
     }
   }
+  const flashTint = new THREE.Color();
   function updateFx(dt) {
     for (let i = puffs.length - 1; i >= 0; i--) {
       const p = puffs[i];
@@ -355,21 +373,23 @@
       p.m.position.addScaledVector(p.v, dt); p.v.multiplyScalar(Math.max(0, 1 - 1.8 * dt));
       p.m.scale.multiplyScalar(1 + p.grow * dt);
       p.m.material.opacity = Math.max(0, p.a * p.life / p.max);
-      if (p.life <= 0) { scene.remove(p.m); p.m.material.dispose(); puffs.splice(i, 1); }
+      if (p.life <= 0) { p.m.visible = false; puffPool.push(p.m); puffs.splice(i, 1); }
     }
     for (let i = flashes.length - 1; i >= 0; i--) {
       const f = flashes[i];
       f.life -= dt;
       const k = 1 - Math.max(0, f.life / f.max);
       f.m.scale.setScalar(f.size * (0.35 + 0.65 * Math.sqrt(k)));
-      f.m.material.opacity = 1 - k * k;
-      if (f.life <= 0) { scene.remove(f.m); f.m.material.dispose(); flashes.splice(i, 1); }
+      f.m.material.opacity = Math.min(1, k * 7) * (1 - k * k) * 0.7;      // short ramp up: no single-frame pop
+      if (f.life <= 0) { f.m.visible = false; flashPool.push(f.m); flashes.splice(i, 1); }
     }
+    flashLightCd -= dt;
     for (const L of fxLights) {
       L.userData.life -= dt;
-      L.intensity = L.userData.life > 0 ? L.userData.i * L.userData.life / L.userData.max : 0;
+      const q = L.userData.life > 0 ? L.userData.life / L.userData.max : 0;
+      L.intensity = L.userData.i * q * Math.min(1, (1 - q) * 6);
     }
-    muzzleLight.intensity *= Math.max(0, 1 - 28 * dt);
+    muzzleLight.intensity *= Math.max(0, 1 - 14 * dt);
   }
 
   // Pure DSP + recipes. No DOM, no THREE: the same source runs inside a Web Worker.
@@ -1441,7 +1461,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   obstacles.push(door);
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0xb4b8c2, map: concreteTex.map, roughnessMap: concreteTex.rough, normalMap: concreteTex.normal, roughness: 1, flatShading: true });
   const crateMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, map: crateTex.map, roughnessMap: crateTex.rough, normalMap: crateTex.normal, roughness: 1 });
-  const crateHitMat = new THREE.MeshStandardMaterial({ color: 0xffe2c0, map: crateTex.map, normalMap: crateTex.normal, emissive: 0x6a3a14, roughness: 0.8 });
+  const crateHitMat = new THREE.MeshStandardMaterial({ color: 0xf2d2b0, map: crateTex.map, normalMap: crateTex.normal, emissive: 0x3a200c, roughness: 0.8 });
   const rand = (a, b) => a + Math.random() * (b - a);
   // the map is generated from the UTC date, so everyone who opens the page on the same day gets the same pillars, rocks, crates and altars
   const SEED = (() => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); })();
@@ -1983,7 +2003,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     put(box(0.1, 0.1, 0.5), skinV, x, -0.1, -0.42, turret).rotation.x = -0.2;
   }
   const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6),
-    glow(new THREE.MeshBasicMaterial({ color: 0xffb860, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }), 6));
+    glow(new THREE.MeshBasicMaterial({ color: 0xffb860, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }), 2.6));
   muzzle.position.set(0, 0.2, 2.1); muzzle.visible = false; turret.add(muzzle);
   // fenders: rear ones sit higher over the big tyres
   const archGeo = prism([[-0.8, 0.48], [-0.68, 1.0], [-0.34, 1.24], [0.34, 1.24], [0.68, 1.0], [0.8, 0.48],
@@ -2331,12 +2351,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // ---------- bullets & particles ----------
   const bullets = [];
   const bulletGeo = new THREE.CylinderGeometry(0.075, 0.075, 2.0, 6); bulletGeo.rotateX(Math.PI / 2);   // tracer along +z
-  const bulletMat = glow(new THREE.MeshBasicMaterial({ color: 0xffd070 }), 7);
+  const bulletMat = glow(new THREE.MeshBasicMaterial({ color: 0xffc060 }), 3.6);
   const particles = [];
   const partGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
 
+  const partMats = new Map();
   function spawnParticles(p, color, n, power) {
-    const mat = new THREE.MeshStandardMaterial({ color });
+    let mat = partMats.get(color); if (!mat) partMats.set(color, mat = new THREE.MeshStandardMaterial({ color }));
+    if (COARSE) n = Math.ceil(n * 0.6);
     for (let i = 0; i < n; i++) {
       const m = new THREE.Mesh(partGeo, mat);
       m.position.copy(p);
@@ -2432,7 +2454,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       bullets.push({ m, v: dir.multiplyScalar(star ? 52 : 70), life: star ? 1.4 : 1.1, spin: star });
     }
     muzzleTimer = 0.04;
-    muzzleLight.position.copy(tip); muzzleLight.intensity = 1.6;
+    muzzleLight.position.copy(tip); muzzleLight.intensity = Math.max(muzzleLight.intensity, 0.55);
     SFX.play('shot', tip); NET.fireSeq = (NET.fireSeq + 1) % 100000;
   }
 
@@ -2552,7 +2574,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   document.getElementById('soloBtn').addEventListener('click', () => toComic('solo'));
   startEl.addEventListener('click', () => {
     if (comicStep.style.display === 'none') return;
-    setRide(lastRide); if (NET.game) NET.on = true;
+    setRide(lastRide); if (NET.game) { NET.on = true; if (!NET.isHost) { NET.client = true; netPurge(); } }
     SFX.init(); startEl.remove(); renderer.domElement.focus();
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
@@ -2576,7 +2598,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     car.pos.set(0, 0, 0); car.vel.set(0, 0, 0); car.speed = 0; car.heading = 0;
     car.hp = car.maxHp; car.alive = true; carGroup.visible = true;
     car.burrow = 'up'; car.depth = 0; car.y = 0; car.vy = 0; car.airborne = false;
-    resetBoss(); clearSwarm(); clearEShots(); crewSay('respawn', 1, true);
+    resetBoss(); if (NET.on && NET.game) { cartFling(cart.riders.length, 0); cartReset(); } else clearSwarm(); clearEShots(); crewSay('respawn', 1, true);
     document.getElementById('dead').style.display = 'none';
     // разогнать злюк от точки спавна
     for (const e of enemies) if (!e.dead && Math.hypot(e.pos.x, e.pos.z) < 25) placeEnemy(e);
@@ -2595,7 +2617,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // ---------- evil cubes ----------
   // Спят под видом ящиков, просыпаются когда подъезжаешь (или в них стреляешь), потом скачут и кусаются.
   const enemyRed = new THREE.MeshStandardMaterial({ color: 0xd42a36, emissive: 0x3a0406, roughness: 0.4, metalness: 0.15 });
-  const enemyFlash = new THREE.MeshStandardMaterial({ color: 0xffb4a8, emissive: 0x7a1a14, roughness: 0.5 });
+  const enemyFlash = new THREE.MeshStandardMaterial({ color: 0xf09a8c, emissive: 0x4a100c, roughness: 0.5 });
   const toothMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c0, roughness: 0.35, flatShading: true });
   const hornMat = new THREE.MeshStandardMaterial({ color: 0x2a2024, roughness: 0.45, metalness: 0.2, flatShading: true });
   const redTrim = new THREE.MeshStandardMaterial({ color: 0x6e1018, roughness: 0.5, flatShading: true });
@@ -3856,7 +3878,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
 
   // ---- nova: a ring of bullets ----
-  const novaMat = glow(new THREE.MeshBasicMaterial({ color: 0x5ff5e6 }), 6);
+  const novaMat = glow(new THREE.MeshBasicMaterial({ color: 0x5ff5e6 }), 3.5);
   let novaT = 0;
   function fireNova() {
     const L = weapons.nova - 1, n = W_STATS.nova.n[L], o = new THREE.Vector3(car.pos.x, 1.0 + car.y, car.pos.z), ph = Math.random() * 6.283;
@@ -4139,7 +4161,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         drawCritter(x, kind, spec, f);
         if (white) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = '#fff'; x.fillRect(0, 0, SW_PX, SW_PX); }
         const m = new THREE.SpriteMaterial({ map: srgbTex(cv), transparent: true, alphaTest: 0.35, depthWrite: true });
-        m.color.setScalar(white ? 1.6 : SW_TINT);
+        if (white) m.color.setRGB(0.95, 0.72, 0.62); else m.color.setScalar(SW_TINT);   // hit frame: warm tint, not a white strobe
         return m;
       });
       return { walk: mk(false), hit: mk(true), color: new THREE.Color(hsl(spec.h, 0.62, 0.5)).getHex() };
@@ -4148,28 +4170,32 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   const swarm = [], globs = [];
   const SW_CAP = 110;
-  function spawnCritter(kind, x, z) {
-    const K = SW_KINDS[kind], art = SW_ART[kind][Math.floor(Math.random() * 3)];
+  let swId = 0; const swById = new Map(), SW_KEYS = Object.keys(SW_KINDS);
+  function spawnCritter(kind, x, z, variant, id) {
+    const v = variant == null ? Math.floor(Math.random() * 3) : variant, K = SW_KINDS[kind], art = SW_ART[kind][v];
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
     const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp, dead: false, awake: true, carried: false,
                 flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 1.5 + Math.random() * 5, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
+    m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
     swarm.push(m);
     burst(tmp.set(x, 0.3, z), 0x8a7a6a, 2, 1.2, 2, 0.3);
     return m;
   }
   function killCritter(m, dir) {
     if (m.dead) return;
+    if (m.net) { hitCritter(m, 9999, dir, 0); return; }          // not ours to kill: the lobby host decides
     m.dead = true; scene.remove(m.sprite, m.shadow);
     const p = tmp.set(m.pos.x, (m.K.fly || 0) + m.K.size * 0.4, m.pos.z);
     spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7);
     flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false);
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
-    enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false);
+    if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
     waves.lastKill.copy(m.pos);
   }
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
+    if (m.net) { m.flash = 0.08; m.myHit = elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
     m.hp -= dmg; m.flash = 0.08;
     if (dir) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
     if (m.hp <= 0) killCritter(m, dir);
@@ -4191,14 +4217,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
       : [[['gremlin', 'stilt', 'flapper', 'spitter'][Math.floor(Math.random() * 4)], 10 + Math.min(14, n * 2)],
          [['brute', 'spitter', 'gremlin'][Math.floor(Math.random() * 3)], 3 + Math.min(6, n >> 1)]];
     const reach = Math.max(camera.right, camera.top * 1.5) + 5;
-    const base = Math.random() * 6.283;
+    const base = Math.random() * 6.283, wp = netAnyPlayer();      // in a lobby the pack turns up next to a random player
     plan.forEach(([kind, count], gi) => {
       const ang = base + gi * (2.2 + Math.random());
       for (let i = 0; i < count && swarm.length < SW_CAP; i++) {
         let x = 0, z = 0, ok = false;
         for (let tries = 0; tries < 8 && !ok; tries++) {
           const a = ang + (Math.random() - 0.5) * 0.9 + tries * 0.7, d = reach + Math.random() * 6;
-          x = car.pos.x + Math.sin(a) * d; z = car.pos.z + Math.cos(a) * d;
+          x = wp.x + Math.sin(a) * d; z = wp.z + Math.cos(a) * d;
           ok = Math.abs(x) < ARENA - 3 && Math.abs(z) < ARENA - 3;
         }
         if (!ok) { x = THREE.MathUtils.clamp(x, -ARENA + 3, ARENA - 3); z = THREE.MathUtils.clamp(z, -ARENA + 3, ARENA - 3); }
@@ -4206,7 +4232,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       }
     });
     waves.since = 0; waves.t = 35; waves.pending = true;
-    flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true);
+    flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: 'WAVE ' + (n + 1) });
   }
 
   const swA = new THREE.Vector3();
@@ -4217,75 +4243,87 @@ laugh(r) {                                       // a big man's belly laugh: bre
     for (const m of swarm) if (!m.dead) { if (!m.home) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
     if (!car.alive || threatNear(45)) crew.calm = 0; else if ((crew.calm += dt) > 24) { crew.calm = 0; crewSay('idle'); }
-    if (!calm) {
+    if (!calm && !NET.client) {
       waves.t -= dt; waves.since += dt;
       if (waves.t <= 0 || (alive <= 2 && waves.since > 10 && waves.n > 0)) spawnWave();
     }
-    if (waves.pending && alive === 0 && waves.since > 1) {     // wave cleared: pay out a weapon chip
+    if (!NET.client && waves.pending && alive === 0 && waves.since > 1) {     // wave cleared: pay out a weapon chip
       waves.pending = false; dropWeapon(waves.lastKill);
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
       const m = swarm[i];
-      if (m.dead) { swarm.splice(i, 1); continue; }
+      if (m.dead) { swarm.splice(i, 1); if (swById.get(m.id) === m) swById.delete(m.id); continue; }
       const K = m.K; m.born += dt; m.cd -= dt; m.flash -= dt;
-      const dx = car.pos.x - m.pos.x, dz = car.pos.z - m.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist;
-      // steering
-      let tx = 0, tz = 0;
-      if ((m.think -= dt) <= 0) { m.think = 0.3 + Math.random() * 0.25; m.prey = pickPrey(m, dist); }
-      const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null;
-      if (prey) {                                        // run a chubzik down and eat it
-        const px = prey.pos.x - m.pos.x, pz = prey.pos.z - m.pos.z, pd = Math.hypot(px, pz) || 1e-4;
-        tx = px / pd * K.speed; tz = pz / pd * K.speed;
-        if (pd < K.r + 0.6 && m.cd <= 0) { m.cd = 0.7; eatChub(prey, m); }
-      }
-      else if (m.home && (dist > 24 || !carSeen())) {    // residents circle their rock while the car is far away
-        const R = m.home, a = m.phase * 0.12 + R.r, rr = R.r + (K.ranged ? 8 : 4.5);
-        const lx = R.mesh.position.x + Math.cos(a) * rr - m.pos.x, lz = R.mesh.position.z + Math.sin(a) * rr - m.pos.z, ld = Math.hypot(lx, lz) || 1;
-        tx = lx / ld * K.speed * 0.45; tz = lz / ld * K.speed * 0.45;
-      }
-      else if (!carSeen()) { tx = -nx * K.speed * 0.8; tz = -nz * K.speed * 0.8; }            // car went underground: scatter
-      else if (inRoom(car.pos.x, car.pos.z) !== inRoom(m.pos.x, m.pos.z)) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is off-limits: loiter
-      else if (K.ranged && dist < 11) { tx = -nx * K.speed; tz = -nz * K.speed; }         // spitters keep their distance
-      else if (K.ranged && dist < 15) { tx = -nz * K.speed * 0.6; tz = nx * K.speed * 0.6; }   // and strafe
-      else if (m.cartFan && cart.riders.length) {        // half of them go for the cart instead of the car
-        const cx = cart.pos.x - m.pos.x, cz = cart.pos.z - m.pos.z, cd = Math.hypot(cx, cz) || 1; tx = cx / cd * K.speed; tz = cz / cd * K.speed;
-      }
-      else { tx = nx * K.speed; tz = nz * K.speed; }
-      for (const o of swarm) {                           // separation (local only)
-        if (o === m || o.dead) continue;
-        const sx = m.pos.x - o.pos.x, sz = m.pos.z - o.pos.z, md = K.r + o.K.r + 0.3;
-        if (Math.abs(sx) > md || Math.abs(sz) > md) continue;
-        const sd = Math.hypot(sx, sz) || 1e-3; if (sd < md) { tx += sx / sd * 8 * (md - sd); tz += sz / sd * 8 * (md - sd); }
-      }
-      const k = Math.min(1, 4 * dt);
-      m.vel.x += (tx - m.vel.x) * k; m.vel.z += (tz - m.vel.z) * k;
-      m.pos.addScaledVector(m.vel, dt);
-      if (!K.fly) for (const o of obstacles) if (active(o)) pushOutOfBox(m.pos, K.r, o);
-      if (!inWorld(m.pos.x, m.pos.z)) { m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 1.5, ARENA - 1.5); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 1.5, ARENA - 1.5); }
-
-      // contact with the car: get run over, get shoved, or bite
-      const reachR = car.radius + K.r;
-      if (car.alive && car.depth < 0.3 && dist < reachR) {
-        const carSpeed = Math.hypot(car.vel.x, car.vel.z), airOK = K.fly ? car.y < K.fly + 1.5 : car.y < 1.2;
-        if (!K.fly && !K.heavy && carSpeed > 9 && car.y < 0.8) { killCritter(m, swA.set(-nx, 0, -nz)); SFX.play('hit_flesh', m.pos); continue; }
-        const push = reachR - dist;
-        m.pos.x -= nx * push; m.pos.z -= nz * push;
-        if (K.heavy) { car.pos.x += nx * push * 0.5; car.pos.z += nz * push * 0.5; }
-        if (airOK && m.cd <= 0 && car.burrow === 'up') { m.cd = 0.9; SFX.play('chomp', m.pos, { rate: K.heavy ? 0.8 : 1.25 }); hurtCar(K.bite, swA.set(nx, 0, nz).clone()); }
-      }
-      // spitters lob acid
-      if (!K.ranged && mob >= 3 && carSeen() && dist > 4 && dist < 15 && (m.throwT -= dt) <= 0) {      // a crowd of biters lobs the odd scrap at the car
-        m.throwT = 5 + Math.random() * 6; mobThrow(m, nx, nz, dist);
-      }
-      if (K.ranged) {                                    // the car if it is in range, otherwise whoever sits on a rock
-        m.spitT -= dt;
-        if (m.spitT <= 0) {
-          if (carSeen() && dist < 17) { m.spitT = 2.6 + Math.random(); spit(m); }
-          else { const c = perchedNear(m.pos, 19); if (c) { m.spitT = 3.5 + Math.random() * 2.5; spit(m, c); } else m.spitT = 0.4; }
+      ai: {
+        if (m.net) {                                     // mirrored from the lobby host: glide to the last reported spot
+          const k = 1 - Math.exp(-10 * dt), ox = m.pos.x, oz = m.pos.z;
+          if (Math.abs(m.tx - ox) + Math.abs(m.tz - oz) > 20) { m.pos.x = m.tx; m.pos.z = m.tz; } else { m.pos.x += (m.tx - ox) * k; m.pos.z += (m.tz - oz) * k; }
+          m.vel.set((m.pos.x - ox) / Math.max(dt, 1e-3), 0, (m.pos.z - oz) / Math.max(dt, 1e-3));
+          break ai;
         }
+        const T = m.tgt && m.tgt.up && NET.remotes.get(m.tgt.peer) === m.tgt ? m.tgt.tc : car, mine = T === car, seen = mine ? carSeen() : true;
+        const dx = T.pos.x - m.pos.x, dz = T.pos.z - m.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist;
+        // steering
+        let tx = 0, tz = 0;
+        if ((m.think -= dt) <= 0) { m.think = 0.3 + Math.random() * 0.25; m.prey = pickPrey(m, dist); m.tgt = netPick(m); }
+        const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null;
+        if (prey) {                                        // run a chubzik down and eat it
+          const px = prey.pos.x - m.pos.x, pz = prey.pos.z - m.pos.z, pd = Math.hypot(px, pz) || 1e-4;
+          tx = px / pd * K.speed; tz = pz / pd * K.speed;
+          if (pd < K.r + 0.6 && m.cd <= 0) { m.cd = 0.7; eatChub(prey, m); }
+        }
+        else if (m.home && (dist > 24 || !seen)) {    // residents circle their rock while the car is far away
+          const R = m.home, a = m.phase * 0.12 + R.r, rr = R.r + (K.ranged ? 8 : 4.5);
+          const lx = R.mesh.position.x + Math.cos(a) * rr - m.pos.x, lz = R.mesh.position.z + Math.sin(a) * rr - m.pos.z, ld = Math.hypot(lx, lz) || 1;
+          tx = lx / ld * K.speed * 0.45; tz = lz / ld * K.speed * 0.45;
+        }
+        else if (!seen) { tx = -nx * K.speed * 0.8; tz = -nz * K.speed * 0.8; }            // car went underground: scatter
+        else if (inRoom(T.pos.x, T.pos.z) !== inRoom(m.pos.x, m.pos.z)) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is off-limits: loiter
+        else if (K.ranged && dist < 11) { tx = -nx * K.speed; tz = -nz * K.speed; }         // spitters keep their distance
+        else if (K.ranged && dist < 15) { tx = -nz * K.speed * 0.6; tz = nx * K.speed * 0.6; }   // and strafe
+        else if (m.cartFan && (mine ? cart.riders.length : T.R.cn)) {        // half of them go for the cart instead of the car
+          const cp = mine ? cart.pos : T.R.cpos, cx = cp.x - m.pos.x, cz = cp.z - m.pos.z, cd = Math.hypot(cx, cz) || 1; tx = cx / cd * K.speed; tz = cz / cd * K.speed;
+        }
+        else { tx = nx * K.speed; tz = nz * K.speed; }
+        for (const o of swarm) {                           // separation (local only)
+          if (o === m || o.dead) continue;
+          const sx = m.pos.x - o.pos.x, sz = m.pos.z - o.pos.z, md = K.r + o.K.r + 0.3;
+          if (Math.abs(sx) > md || Math.abs(sz) > md) continue;
+          const sd = Math.hypot(sx, sz) || 1e-3; if (sd < md) { tx += sx / sd * 8 * (md - sd); tz += sz / sd * 8 * (md - sd); }
+        }
+        const k = Math.min(1, 4 * dt);
+        m.vel.x += (tx - m.vel.x) * k; m.vel.z += (tz - m.vel.z) * k;
+        m.pos.addScaledVector(m.vel, dt);
+        if (!K.fly) for (const o of obstacles) if (active(o)) pushOutOfBox(m.pos, K.r, o);
+        if (!inWorld(m.pos.x, m.pos.z)) { m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 1.5, ARENA - 1.5); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 1.5, ARENA - 1.5); }
+  
+        // contact with the car: get run over, get shoved, or bite
+        const reachR = T.radius + K.r;
+        if (T.alive && T.depth < 0.3 && dist < reachR) {
+          const carSpeed = Math.hypot(T.vel.x, T.vel.z), airOK = K.fly ? T.y < K.fly + 1.5 : T.y < 1.2;
+          if (!K.fly && !K.heavy && carSpeed > 9 && T.y < 0.8) { killCritter(m, swA.set(-nx, 0, -nz)); SFX.play('hit_flesh', m.pos); continue; }
+          const push = reachR - dist;
+          m.pos.x -= nx * push; m.pos.z -= nz * push;
+          if (K.heavy && mine) { car.pos.x += nx * push * 0.5; car.pos.z += nz * push * 0.5; }
+          if (airOK && m.cd <= 0 && T.burrow === 'up') { m.cd = 0.9; SFX.play('chomp', m.pos, { rate: K.heavy ? 0.8 : 1.25 }); if (mine) hurtCar(K.bite, swA.set(nx, 0, nz).clone()); else netEv({ t: 'hurt', d: K.bite, x: r2(nx), z: r2(nz) }, T.R.peer); }
+        }
+        if (!mine && T.R.cn > 0 && m.cd <= 0 && Math.hypot(m.pos.x - T.R.cpos.x, m.pos.z - T.R.cpos.z) < 1.7 + m.r) {      // snatch a passenger off another player's cart
+          m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
+        }
+        // spitters lob acid
+        if (!K.ranged && mob >= 3 && seen && dist > 4 && dist < 15 && (m.throwT -= dt) <= 0) {      // a crowd of biters lobs the odd scrap at the car
+          m.throwT = 5 + Math.random() * 6; mobThrow(m, nx, nz, dist); netEv({ t: 'fx', k: 'th', i: m.id, x: r2(nx), z: r2(nz), d: r1(dist) });
+        }
+        if (K.ranged) {                                    // the car if it is in range, otherwise whoever sits on a rock
+          m.spitT -= dt;
+          if (m.spitT <= 0) {
+            if (seen && dist < 17) { m.spitT = 2.6 + Math.random(); spit(m, null, T); }
+            else { const c = perchedNear(m.pos, 19); if (c) { m.spitT = 3.5 + Math.random() * 2.5; spit(m, c); } else m.spitT = 0.4; }
+          }
+        }
+  
       }
-
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
@@ -4304,9 +4342,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   // ---- spitter acid globs: lobbed at where the car will be, telegraphed on the ground ----
   const globGeo = new THREE.IcosahedronGeometry(0.38, 0), globMat = glow(new THREE.MeshBasicMaterial({ color: 0x9cff3a }), 2.6);
-  function spit(m, chub) {
+  function spit(m, chub, tg, at) {
     const from = new THREE.Vector3(m.pos.x, m.K.size * 0.6, m.pos.z);
-    const lead = chub ? chub.pos.clone().add(swA.set(rand(-1.3, 1.3), 0, rand(-1.3, 1.3))) : new THREE.Vector3(car.pos.x + car.vel.x * 0.6, 0, car.pos.z + car.vel.z * 0.6);
+    tg = tg || car;
+    const lead = at || (chub ? chub.pos.clone().add(swA.set(rand(-1.3, 1.3), 0, rand(-1.3, 1.3))) : new THREE.Vector3(tg.pos.x + tg.vel.x * 0.6, 0, tg.pos.z + tg.vel.z * 0.6));
+    if (!at) netEv({ t: 'fx', k: 'sp', i: m.id, x: r1(lead.x), y: r1(lead.y), z: r1(lead.z) });
     const T = THREE.MathUtils.clamp(from.distanceTo(lead) / 15, 0.6, 1.2);
     const g = new THREE.Mesh(globGeo, globMat); g.position.copy(from); scene.add(g);
     const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.45, 24), glow(new THREE.MeshBasicMaterial({ color: 0x9cff3a, transparent: true, opacity: 0.6, depthWrite: false }), 1.5));
@@ -4379,6 +4419,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const chubVulnerable = c => !c.dead && !angel.on && (c.state === 'roam' || c.state === 'flee' || c.state === 'tocar' || c.state === 'dazed');
   const carOK = () => car.alive && car.depth < 0.3 && car.y < 1;
   function perchSlot(rock) { const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * rock.top * 0.62; return new THREE.Vector3(rock.mesh.position.x + Math.cos(a) * d, rock.h, rock.mesh.position.z + Math.sin(a) * d); }
+  let chubId = 0;
   function spawnChub(rock, perched) {
     const sprite = new THREE.Sprite(chubMats[0][0]); sprite.center.set(0.5, 0.04); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(1, 1, 0.8); scene.add(shadow);
@@ -4386,7 +4427,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
                 goal: new THREE.Vector3(), from: new THREE.Vector3(), to: new THREE.Vector3(), T: 1, arcH: 1, next: 'roam', face: 1, calm: 0, dead: false, threat: 99 };
     if (perched) { c.pos.copy(perchSlot(rock)); c.state = 'perch'; }
     else { const a = Math.random() * 6.283, d = rock.r + 2 + Math.random() * 5; c.pos.set(rock.mesh.position.x + Math.cos(a) * d, 0, rock.mesh.position.z + Math.sin(a) * d); c.goal.copy(c.pos); }
-    chubs.push(c); return c;
+    c.id = ++chubId; chubs.push(c); return c;
   }
   function monsterDist(x, z) {                         // distance to the nearest thing with teeth
     let best = 99;
@@ -4415,7 +4456,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     tmp.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
     spawnParticles(tmp, 0x4f9dff, 10, 7); spawnParticles(tmp, 0xffffff, 4, 5);
     SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 });
-    chubEaten++; eatNEl.textContent = chubEaten;
+    chubEaten++; eatNEl.textContent = chubEaten; if (!NET.client) netEv({ t: 'eat', x: r1(c.pos.x), z: r1(c.pos.z) });
     if (Math.hypot(c.pos.x - car.pos.x, c.pos.z - car.pos.z) < 30) crewSay('eaten', 0.5);
   }
 
@@ -4491,7 +4532,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     });
     // anything that catches the cart helps itself
     if (up && n) {
-      for (const m of swarm) if (!m.dead && m.cd <= 0 && cart.riders.length && Math.hypot(m.pos.x - cart.pos.x, m.pos.z - cart.pos.z) < 1.7 + m.r) { m.cd = 1; eatChub(cart.riders.pop(), m); cartKick(2); }
+      for (const m of swarm) if (!m.dead && !m.net && m.cd <= 0 && cart.riders.length && Math.hypot(m.pos.x - cart.pos.x, m.pos.z - cart.pos.z) < 1.7 + m.r) { m.cd = 1; eatChub(cart.riders.pop(), m); cartKick(2); }
       for (const e of enemies) if (!e.dead && e.awake && !e.carried && e.biteCd <= 0 && cart.riders.length && Math.hypot(e.pos.x - cart.pos.x, e.pos.z - cart.pos.z) < 1.7 + e.r) { e.biteCd = 0.8; eatChub(cart.riders.pop(), e); cartKick(3); }
       cartNEl.textContent = cart.riders.length;
     }
@@ -4546,6 +4587,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
   }
   function altarGuards(A, n) {
+    if (NET.client) { netEv({ t: 'guards', k: altars.indexOf(A), n }, NET.hostPeer); return; }
     const kinds = ['gremlin', 'gremlin', 'stilt', 'gremlin', 'spitter', 'gremlin', 'stilt', 'brute'];
     for (let i = 0; i < n && swarm.length < SW_CAP; i++) {
       const a = Math.random() * 6.283, d = 5 + Math.random() * 6;
@@ -4782,16 +4824,16 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
 
   function seedResidents() {                           // packs that live around some of the rocks and lay siege to them
-    if (!rocks.length) return;
+    if (!rocks.length || NET.client) return;
     for (const R of rocks.slice().sort(() => Math.random() - 0.5).slice(0, 9)) {
       const kinds = ['gremlin', 'gremlin', 'stilt', 'spitter'];
       kinds.forEach((k, i) => { const a = i * 1.6 + Math.random(), m = spawnCritter(k, R.mesh.position.x + Math.cos(a) * (R.r + 6), R.mesh.position.z + Math.sin(a) * (R.r + 6)); m.home = R; });
     }
   }
   function updateChubs(dt) {
-    if (!chubInit) { chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); seedResidents(); }
+    if (!chubInit && !NET.client) { chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); seedResidents(); }
     chubSpawnT -= dt;
-    if (chubSpawnT <= 0) {                             // the colony slowly refills, a resident pack too
+    if (chubSpawnT <= 0 && !NET.client) {                             // the colony slowly refills, a resident pack too
       chubSpawnT = 3; chubTick++;
       let loose = 0; for (const c of chubs) if (c.state !== 'cart') loose++;
       if (rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);   // only surviving rocks breed
@@ -4802,6 +4844,22 @@ laugh(r) {                                       // a big man's belly laugh: bre
     for (let i = chubs.length - 1; i >= 0; i--) {
       const c = chubs[i];
       if (c.dead) { chubs.splice(i, 1); continue; }
+      if (c.net && !angel.on) {                          // mirrored from the lobby host
+        const k = 1 - Math.exp(-9 * dt), ox = c.pos.x, oz = c.pos.z;
+        if (c.pos.distanceTo(c.tp) > 12) c.pos.copy(c.tp); else c.pos.lerp(c.tp, k);
+        const mx = c.pos.x - ox, mz = c.pos.z - oz, sp = Math.hypot(mx, mz) / Math.max(dt, 1e-3);
+        if (Math.abs(mx - mz) > 0.3 * dt) c.face = mx - mz > 0 ? -1 : 1;
+        c.phase += dt * (sp > 0.5 ? 3 + Math.min(9, sp) * 0.9 : 2.2);
+        c.sprite.material = chubMats[c.fl & 1 ? 1 : 0][Math.floor(c.phase) % CHUB_FR];
+        c.sprite.position.set(c.pos.x, c.pos.y + (sp > 0.5 ? Math.abs(Math.sin(c.phase * Math.PI * 0.5)) * 0.22 : 0), c.pos.z); c.sprite.scale.set(CHUB_SIZE * c.face, CHUB_SIZE, 1);
+        c.shadow.position.set(c.pos.x, (c.fl & 2 ? c.tp.y : 0) + 0.04, c.pos.z);
+        continue;
+      }
+      if (NET.client && !c.net && !angel.on && c.state !== 'cart' && c.state !== 'ascend' && c.state !== 'sacrifice' && !(c.state === 'arc' && c.next === 'sacrifice')) {
+        const q = c.state === 'arc' ? c.to : c.pos;      // fell off my cart: from here on it lives in the host's world
+        netEv({ t: 'drop', fx: r1(c.pos.x), fz: r1(c.pos.z), x: r1(q.x), z: r1(q.z) }, NET.hostPeer);
+        c.dead = true; scene.remove(c.sprite, c.shadow); chubs.splice(i, 1); continue;
+      }
       if (c.state === 'ascend') continue;
       if (c.state === 'cart') { c.phase += dt * 3; c.sprite.material = chubMats[Math.abs(cart.phi) > 0.25 ? 1 : 0][Math.floor(c.phase) % CHUB_FR]; c.sprite.position.copy(c.pos); c.sprite.scale.set(CHUB_SIZE * 0.85, CHUB_SIZE * 0.85, 1); continue; }
       let dcx = car.pos.x - c.pos.x, dcz = car.pos.z - c.pos.z, dCar = Math.hypot(dcx, dcz), ok = okMe, other = null;
@@ -4822,6 +4880,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
         }
       } else if (c.state === 'perch') {
         if (ride === 'spider' && !other && car.alive && dCar < car.radius + 0.7 && Math.abs(car.y - c.pos.y) < 1.3) { c.pos.y = 0; cartAdd(c); continue; }
+        { let got = null; for (const R of NET.remotes.values()) if (R.up && R.ride === 'spider' && Math.hypot(R.pos.x - c.pos.x, R.pos.z - c.pos.z) < car.radius + 0.7 && Math.abs(R.pos.y - c.pos.y) < 1.3) got = R;
+          if (got) { netEv({ t: 'chub' }, got.peer); c.dead = true; scene.remove(c.sprite, c.shadow); continue; } }
         c.calm = c.threat > 12 ? c.calm + dt : 0; scared = c.threat < 9;
         const comeDown = ok && dCar < 11 && c.threat > 8;
         if (c.calm > 2.5 || comeDown) {
@@ -5596,16 +5656,21 @@ laugh(r) {                                       // a big man's belly laugh: bre
     perfT += raw; perfN++;
     if (perfT < 1 || perfN < 3) return;
     const avg = perfT / perfN; perfT = 0; perfN = 0;
-    if (avg > 1 / 40 && PR > 0.6) {
-      PR = Math.max(0.6, PR * 0.8);
+    const floor = COARSE ? 0.5 : 0.6;
+    if (avg > 1 / 45 && PR > floor) {
+      PR = Math.max(floor, PR * 0.8);
       renderer.setPixelRatio(PR);
       if (composer) composer.setPixelRatio(PR);
       if (fxaaPass) fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
+    } else if (avg > 1 / 38 && PR <= floor) {             // resolution is at the floor and it still drags: shed effects
+      if (shadowEvery < 3) shadowEvery = 3;
+      else if (fxaaPass && fxaaPass.enabled) fxaaPass.enabled = false;
+      else if (bloomPass && bloomPass.enabled) bloomPass.enabled = false;
     }
   }
 
   // ---------- multiplayer over the artifact's room channel: lobby list on the start screen, other players as ghost rides ----------
-  // Everything travels in presence (who I am, which lobby, where my ride is). Monsters and chubziks are still simulated per player.
+  // Rides travel in presence. Monsters and chubziks are simulated by the lobby host and mirrored to the others; cubes and the boss stay per player.
   const NET = { room: null, on: false, game: null, hostNick: '', nick: '', sel: null, sendT: 0, fireSeq: 0, remotes: new Map(), shots: [] };
   const mpState = document.getElementById('mpState'), mpList = document.getElementById('mpList'), nickEl = document.getElementById('nick'), netEl = document.getElementById('net');
   const cleanNick = v => String(v == null ? '' : v).replace(/[^\p{L}\p{N} _.-]/gu, '').trim().slice(0, 12);
@@ -5690,11 +5755,75 @@ laugh(r) {                                       // a big man's belly laugh: bre
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
     return { t: 'sync', sm, cr, al: altars.map(A => A.n) };
   }
-  function netAmHost() {                                 // the host answers; if the host is gone, the lowest peer id stands in
-    const mine = netMe(), ps = NET.room.peers().filter(p => (p.presence || {}).game === NET.game);
-    const host = ps.find(p => (p.presence || {}).hp === 1);
-    if (host) return host.peer === mine;
-    return ps.map(p => p.peer).sort()[0] === mine;
+  const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game);
+  function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
+  function netAmHost() { const h = netHostPeer(); return h ? h === String(netMe()) : !NET.client; }
+  function netRole() {                                   // the lobby host runs monsters and chubziks; if it leaves, the lowest peer id takes over
+    const h = netHostPeer(), me = String(netMe());
+    if (h) { NET.noHost = 0; NET.hostPeer = h === me ? null : h;
+      if (h === me) { if (NET.client) netAdopt(); }
+      else { if (!NET.client) netPurge(); NET.client = true; NET.isHost = false; } }
+    else if ((NET.noHost = (NET.noHost || 0) + 1) > 6 && NET.client && netGamePeers().map(p => String(p.peer)).sort()[0] === me) netAdopt();
+  }
+  const rockStub = (x, z) => nearestRock(x, z) || { mesh: { position: new THREE.Vector3(x, 0, z), visible: true }, r: 3, h: 2.5, top: 2 };
+  function netPurge() {                                  // joining someone's lobby: their monsters and chubziks replace mine
+    for (const m of swarm) { m.dead = true; scene.remove(m.sprite, m.shadow); } swarm.length = 0; swById.clear();
+    for (const g of globs) scene.remove(g.g, g.ring); globs.length = 0;
+    for (let i = chubs.length - 1; i >= 0; i--) { const c = chubs[i]; if (c.state !== 'cart') { c.dead = true; scene.remove(c.sprite, c.shadow); chubs.splice(i, 1); } }
+    chubInit = true; waves.pending = false; NET.chMir = new Map();
+  }
+  function netAdopt() {                                  // the host left and I am next in line: the mirrors become mine to simulate
+    for (const m of swarm) { swId = Math.max(swId, m.id); if (m.net) { m.net = false; m.think = Math.random() * 0.3; m.cd = 0.5; } }
+    for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
+      if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = 'perch'; else { c.pos.y = 0; c.state = 'roam'; c.goal.copy(c.pos); c.t = 0; } }
+    NET.client = false; NET.isHost = true; NET.hostPeer = null; NET.chMir = new Map(); waves.t = Math.max(waves.t, 10);
+  }
+  function netPick(m) {                                  // host: each monster goes for the nearest player
+    if (NET.client || !NET.remotes.size) return null;
+    let best = null, bd = carSeen() ? Math.hypot(car.pos.x - m.pos.x, car.pos.z - m.pos.z) : 1e9;
+    for (const R of NET.remotes.values()) if (R.up && R.tc) { const d = Math.hypot(R.pos.x - m.pos.x, R.pos.z - m.pos.z); if (d < bd) { bd = d; best = R; } }
+    return best;
+  }
+  function netAnyPlayer() { const a = [car.pos]; if (NET.on && !NET.client) for (const R of NET.remotes.values()) if (R.up) a.push(R.pos); return a[Math.floor(Math.random() * a.length)]; }
+  function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
+    const q = NET.q = (NET.q || 0) + 1;
+    const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), m.flash > 0 ? 1 : 0]);
+    chunks(sw, 60, 'sw');
+    if (q % 2) return;
+    const ch = []; for (const c of chubs) if (!c.dead && c.state !== 'cart') ch.push([c.id, r1(c.pos.x), r1(c.pos.z), r1(c.pos.y), (c.state === 'flee' || c.state === 'dazed' || c.state === 'tocar' || (c.state === 'arc' && c.next === 'dazed') ? 1 : 0) | (c.state === 'perch' ? 2 : 0)]);
+    chunks(ch, 70, 'ch');
+  }
+  function netMirror(d, from) {
+    if (!NET.client || (NET.hostPeer && String(from) !== NET.hostPeer) || !Array.isArray(d.a)) return;
+    const q = num(d.q, 0, 1e9), last = d.c === d.n - 1;
+    if (d.t === 'sw') {
+      for (const e of d.a.slice(0, 80)) {
+        if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
+        const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)], x = num(e[2], -ARENA, ARENA), z = num(e[3], -ARENA, ARENA); if (!kind) continue;
+        let m = swById.get(e[0]);
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; }
+        m.tx = x; m.tz = z; m.q = q; if (e[4] === 1 && m.flash <= 0) m.flash = 0.1;
+      }
+      if (last) for (const m of swarm) if (m.net && !m.dead && m.q !== q) {             // not in the host's list any more: it died
+        m.dead = true; scene.remove(m.sprite, m.shadow);
+        if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 60) {
+          const p = tmp.set(m.pos.x, (m.K.fly || 0) + m.K.size * 0.4, m.pos.z);
+          spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7); flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false); SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
+        }
+        if (elapsed - (m.myHit || -9) < 1.2) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
+      }
+    } else if (!angel.on) {
+      const M = NET.chMir || (NET.chMir = new Map());
+      for (const e of d.a.slice(0, 90)) {
+        if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
+        const x = num(e[1], -ARENA, ARENA), z = num(e[2], -ARENA, ARENA), y = num(e[3], 0, 40);
+        let c = M.get(e[0]);
+        if (!c || c.dead) { if (M.size > 400) continue; c = spawnChub(rockStub(x, z), false); c.net = true; c.state = 'net'; c.tp = new THREE.Vector3(); c.pos.set(x, y, z); M.set(e[0], c); }
+        c.tp.set(x, y, z); c.q = q; c.fl = num(e[4], 0, 3);
+      }
+      if (last) for (const [id, c] of M) if (c.q !== q) { c.dead = true; scene.remove(c.sprite, c.shadow); M.delete(id); }
+    }
   }
   function netOnEv(d, from) {
     if (!NET.on || d.g !== NET.game) return;
@@ -5704,6 +5833,18 @@ laugh(r) {                                       // a big man's belly laugh: bre
       else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
       else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
       else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
+      else if (d.t === 'hit') { const m = swById.get(d.i); if (!NET.client && m && !m.dead && !m.net) hitCritter(m, num(d.d, 0, 9999), tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.p, 0, 20)); }
+      else if (d.t === 'hurt') { if (NET.client) hurtCar(num(d.d, 0, 30), new THREE.Vector3(num(d.x, -1, 1), 0, num(d.z, -1, 1))); }
+      else if (d.t === 'lose') { if (NET.client && cart.riders.length) { eatChub(cart.riders.pop()); cartNEl.textContent = cart.riders.length; cartKick(2); } }
+      else if (d.t === 'drop') { if (!NET.client && chubs.length < 500) { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), c = spawnChub(rockStub(x, z), false);
+        c.pos.set(num(d.fx, -ARENA, ARENA), 0.8, num(d.fz, -ARENA, ARENA)); chubArc(c, tmp.set(x, 0, z), 0.7, 'dazed', 3); c.dazeT = 0.7; } }
+      else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
+      else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
+      else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
+      else if (d.t === 'fx') { const m = swById.get(d.i); if (NET.client && m && !m.dead && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 70) {
+        if (d.k === 'th') mobThrow(m, num(d.x, -1, 1), num(d.z, -1, 1), num(d.d, 1, 40));
+        else if (d.k === 'sp') spit(m, null, null, new THREE.Vector3(num(d.x, -ARENA, ARENA), num(d.y, 0, 20), num(d.z, -ARENA, ARENA))); } }
       else if (d.t === 'sync?') { if (netAmHost()) netEv(netWorld(), from); }
       else if (d.t === 'sync') {
         for (const i of Array.isArray(d.sm) ? d.sm.slice(0, 400) : []) { const o = obAt(i); if (o && (o.pillar || o.rock) && o.mesh.visible) { o.mesh.visible = false; if (o.rock) rockSmashed(o); } }
@@ -5742,7 +5883,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0 }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -5787,7 +5928,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const m = buildProxy(k), cartM = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 2.3), new THREE.MeshStandardMaterial({ color: k === 'spider' ? 0x2a2630 : 0x8a5a30, roughness: 0.85, flatShading: true }));
       cartM.castShadow = true; const label = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false })); label.scale.set(5, 1.25, 1); label.renderOrder = 25; label.material.color.setScalar(0.8);
       scene.add(m.g, cartM, label);
-      R = { ride: k, g: m.g, tur: m.tur, cart: cartM, label, pos: new THREE.Vector3(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400)), h: num(pr.h, -99, 99), lastF: pr.f, cpos: new THREE.Vector3(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)) };
+      R = { ride: k, g: m.g, tur: m.tur, cart: cartM, label, pos: new THREE.Vector3(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400)), h: num(pr.h, -99, 99), lastF: pr.f, cpos: new THREE.Vector3(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), vel: new THREE.Vector3(), cn: 0 };
+      R.tc = { pos: R.pos, vel: R.vel, alive: false, depth: 0, y: 0, radius: car.radius, burrow: 'up', R };
       NET.remotes.set(p.peer, R);
     }
     return R;
@@ -5795,6 +5937,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateNet(dt) {
     if (!NET.on || !NET.room) { netEl.textContent = ''; return; }
     if ((NET.sendT -= dt) <= 0) { NET.sendT = 0.08; netSend(); }
+    if (netMe() && (NET.roleT = (NET.roleT || 0) - dt) <= 0) { NET.roleT = 0.5; netRole(); }
+    if (!NET.client && NET.remotes.size && (NET.snapT = (NET.snapT || 0) - dt) <= 0) { NET.snapT = 0.16; netSnap(); }
     if (!NET.synced && netMe()) { NET.synced = true; if (!NET.isHost) netEv({ t: 'sync?' }); }      // ask the host what has already been broken and fed
     const seen = new Set(); let n = 1;
     for (const p of NET.room.peers()) {
@@ -5803,14 +5947,15 @@ laugh(r) {                                       // a big man's belly laugh: bre
       n++; seen.add(p.peer);
       const R = netRemote(p, pr), k = 1 - Math.exp(-12 * dt);
       tmp.set(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400));
-      if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else R.pos.lerp(tmp, k);
+      const ox = R.pos.x, oz = R.pos.z;
+      if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
-      const up = pr.a === 1; R.up = up; R.peer = p.peer;
+      const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
       R.g.visible = up; R.g.position.copy(R.pos); R.g.rotation.y = R.h; R.tur.rotation.y = num(pr.t, -99, 99) - R.h;
       R.cpos.lerp(tmp.set(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), k);
       R.cart.visible = up && pr.cs === 1; R.cart.position.set(R.cpos.x, 0.75, R.cpos.z); R.cart.rotation.y = num(pr.ch, -99, 99);
       R.label.visible = up; R.label.position.set(R.pos.x, R.pos.y + 5.2, R.pos.z);
-      const cn = Math.round(num(pr.cn, 0, 999)); netLabel(R, (cleanNick(pr.nick) || 'Driver') + (cn ? ' · ' + cn : ''));
+      const cn = Math.round(num(pr.cn, 0, 999)); if (pr !== R.lastPr) { R.lastPr = pr; R.cn = cn; } netLabel(R, (cleanNick(pr.nick) || 'Driver') + (cn ? ' · ' + cn : ''));
       if (pr.f !== R.lastF) {                            // they fired: a tracer for show, no damage
         R.lastF = pr.f;
         if (up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < 70) {
@@ -5826,12 +5971,26 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const t = `Lobby: ${NET.hostNick}'s · ${n} player${n > 1 ? 's' : ''}`; if (netEl.textContent !== t) netEl.textContent = t;
   }
 
+  (function prewarm() {
+    try {
+      const g = new THREE.Group(), mats = [];
+      for (const k in SW_ART) for (const v of SW_ART[k]) mats.push(...v.walk, ...v.hit);
+      for (const row of chubMats) mats.push(...row);
+      for (const m of mats) { if (m.map) renderer.initTexture(m.map); }
+      for (const m of [mats[0], chubMats[0][0]]) g.add(new THREE.Sprite(m));
+      g.add(fxSprite(puffPool, false), fxSprite(flashPool, true));
+      for (const m of [bulletMat, enemyFlash, crateHitMat, novaMat, new THREE.MeshStandardMaterial({ color: 0xffffff })]) g.add(new THREE.Mesh(partGeo, m));
+      scene.add(g); renderer.compile(scene, camera); scene.remove(g);
+      for (const c of [...g.children]) if (c.isSprite && c.material.map === softTex) { c.visible = false; scene.add(c); (c.material.blending === THREE.AdditiveBlending ? flashPool : puffPool).push(c); }
+    } catch (e) { console.warn('prewarm', e); }
+  })();
   Math.random = trueRandom;                             // world is built: back to real randomness for the simulation
   camFocus.copy(car.pos);
   function frame() {
     const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
     adaptQuality(raw);
     update(dt);
+    if (++shadowTick >= shadowEvery) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }
     if (composer) {
       gradePass.uniforms.time.value = elapsed;
       gradePass.uniforms.hurt.value = Math.max(0, hurtFlash) / 0.18;
