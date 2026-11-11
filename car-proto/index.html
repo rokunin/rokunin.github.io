@@ -167,6 +167,9 @@
 <div id="hp"><div id="hpfill"></div></div>
 <div id="dead">DEVOURED</div>
 <div id="alert"></div>
+<div id="diag" style="display:none;position:fixed;left:50%;top:26px;transform:translateX(-50%);z-index:31;width:min(96vw,760px);max-height:70vh;overflow:auto;background:rgba(14,15,19,.93);color:#dcd9d2;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;border-radius:8px;padding:8px 10px;box-sizing:border-box">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><b style="color:#ffd27a">Lobby diagnostics</b><span style="opacity:.6">L or tap the build tag</span><span style="flex:1"></span><button id="diagCopy" style="font:inherit;padding:2px 8px">copy all</button><button id="diagClose" style="font:inherit;padding:2px 8px">×</button></div>
+  <table id="diagT" style="border-collapse:collapse;width:100%;margin-bottom:6px"></table><div id="diagL" style="white-space:pre-wrap;word-break:break-word"></div></div>
 <div id="build" style="position:fixed;left:50%;top:4px;transform:translateX(-50%);font:700 12px system-ui,sans-serif;color:#ffd27a;background:rgba(20,22,26,.8);padding:2px 8px;border-radius:6px;pointer-events:none;z-index:30;white-space:nowrap"></div>
 <div id="bossbar"><div id="bossname">PYRAMIDON</div><div id="bosshp"><div id="bossfill"></div></div></div>
 <div id="speed"><span id="spd">0</span><small>km/h</small></div>
@@ -2540,6 +2543,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     keys[e.code] = true;
     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
     if (e.code === 'KeyR') respawn();
+    if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
     if (e.code === 'KeyF' && !e.repeat) {
       const order = ['human', 'cursor', 'car'], names = { human: 'spin in place', cursor: 'follow cursor', car: 'car' };
@@ -2652,7 +2656,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 65, buildEl = document.getElementById('build');
+  const BUILD = 66, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2660,9 +2664,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
   buildEl.textContent = 'build ' + BUILD;
   function checkBuild() {                                // on a normal web host: is there a newer build than the one that is running?
     try { fetch(location.href.split('#')[0], { cache: 'no-store' }).then(r => r.text()).then(t => { const m = /const BUILD = (\d+)/.exec(t);
-      if (m && +m[1] > BUILD) { buildEl.textContent = `build ${BUILD} → ${m[1]} is out · tap to update`; buildEl.style.pointerEvents = 'auto'; buildEl.style.cursor = 'pointer'; buildEl.style.background = '#b0401a'; buildEl.style.color = '#fff'; } }).catch(() => {}); } catch (e) {}
+      if (m && +m[1] > BUILD) { buildEl.dataset.upd = '1'; buildEl.textContent = `build ${BUILD} → ${m[1]} is out · tap to update`; buildEl.style.pointerEvents = 'auto'; buildEl.style.cursor = 'pointer'; buildEl.style.background = '#b0401a'; buildEl.style.color = '#fff'; } }).catch(() => {}); } catch (e) {}
   }
-  for (const ev of ['mousedown', 'touchstart', 'pointerdown', 'click']) buildEl.addEventListener(ev, e => { e.stopPropagation(); if (ev === 'click') hardReload(); });
+  for (const ev of ['mousedown', 'touchstart', 'pointerdown', 'click']) buildEl.addEventListener(ev, e => { e.stopPropagation(); if (ev === 'click') { if (buildEl.dataset.upd) hardReload(); else diagToggle(); } });
+  buildEl.style.pointerEvents = 'auto'; buildEl.style.cursor = 'pointer';
   checkBuild(); setInterval(checkBuild, 90000);
   const restartBtn = document.getElementById('restart'); let restartT = 0;
   for (const ev of ['mousedown', 'touchstart', 'pointerdown']) restartBtn.addEventListener(ev, e => e.stopPropagation(), { passive: true });
@@ -6089,6 +6094,7 @@ const MONSTERS = [
     updateRide(dt);
     updateNet(dt);
     updateHints(dt);
+    updateDiag();
 
     hurtFlash -= dt;
     paint.emissive.setHex(hurtFlash > 0 ? 0xaa1111 : 0x000000);
@@ -6243,12 +6249,15 @@ const MONSTERS = [
   }
   const rockStub = (x, z) => nearestRock(x, z) || { mesh: { position: new THREE.Vector3(x, 0, z), visible: true }, r: 3, h: 2.5, top: 2 };
   function netPurge() {                                  // joining someone's lobby: their monsters and chubziks replace mine
+    netLog('became a guest: dropped my own monsters, mirroring the host');
+    DG.lastSw = performance.now(); DG.gap = false;
     for (const m of swarm) { m.dead = true; scene.remove(m.sprite, m.shadow); } swarm.length = 0; swById.clear();
     for (const g of globs) scene.remove(g.g, g.ring); globs.length = 0;
     for (let i = chubs.length - 1; i >= 0; i--) { const c = chubs[i]; if (c.state !== 'cart') { c.dead = true; scene.remove(c.sprite, c.shadow); chubs.splice(i, 1); } }
     chubInit = true; waves.pending = false; NET.chMir = new Map();
   }
   function netAdopt() {                                  // the host left and I am next in line: the mirrors become mine to simulate
+    netLog('host is gone: I took over the monsters (' + swarm.length + ') and chubziks');
     for (const m of swarm) { swId = Math.max(swId, m.id); if (m.net) { m.net = false; m.think = Math.random() * 0.3; m.cd = 0.5; } }
     for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
       if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = 'perch'; else { c.pos.y = 0; c.state = 'roam'; c.goal.copy(c.pos); c.t = 0; } }
@@ -6272,6 +6281,7 @@ const MONSTERS = [
   }
   function netMirror(d, from) {
     if (!NET.client || (NET.hostPeer && String(from) !== NET.hostPeer) || !Array.isArray(d.a)) return;
+    DG.rx++; if (d.t === 'sw') DG.lastSw = performance.now();
     const q = num(d.q, 0, 1e9), G = NET.got || (NET.got = {}), gt = G[d.t] && G[d.t].q === q ? G[d.t] : (G[d.t] = { q, c: new Set() });
     gt.c.add(d.c); const last = gt.c.size >= num(d.n, 1, 99) && !gt.done; if (last) gt.done = true;      // prune only when every chunk of this snapshot has arrived
     if (d.t === 'sw') {
@@ -6312,7 +6322,9 @@ const MONSTERS = [
       else if (d.t === 'chub') { chubGift(); }
       else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
       else if (d.t === 'hit') { const m = swById.get(d.i); if (!NET.client && m && !m.dead && !m.net) hitCritter(m, num(d.d, 0, 9999), tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.p, 0, 20)); }
-      else if (d.t === 'hurt') { const m = swById.get(d.i); if (NET.client && m && !m.dead) hurtCar(num(d.d, 0, 30), new THREE.Vector3(num(d.x, -1, 1), 0, num(d.z, -1, 1))); }
+      else if (d.t === 'log') { if (typeof d.s === 'string') diagAdd(DG.nick(from), d.s.slice(0, 160)); }
+      else if (d.t === 'st') { if (d.o && typeof d.o === 'object') DG.stats.set(String(from), { o: d.o, at: performance.now() }); }
+      else if (d.t === 'hurt') { const m = swById.get(d.i); if (NET.client && !(m && !m.dead)) DG.ghost++; if (NET.client && m && !m.dead) hurtCar(num(d.d, 0, 30), new THREE.Vector3(num(d.x, -1, 1), 0, num(d.z, -1, 1))); }
       else if (d.t === 'lose') { if (NET.client && cart.riders.length) { eatChub(cart.riders.pop()); cartNEl.textContent = cart.riders.length; cartKick(2); } }
       else if (d.t === 'drop') { if (!NET.client && chubs.length < 500) { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), c = spawnChub(rockStub(x, z), false);
         c.pos.set(num(d.fx, -ARENA, ARENA), 0.8, num(d.fz, -ARENA, ARENA)); chubArc(c, tmp.set(x, 0, z), 0.7, 'dazed', 3); c.dazeT = 0.7; } }
@@ -6333,6 +6345,47 @@ const MONSTERS = [
     } finally { NET.applying = false; }
   }
   const tmp2net = new THREE.Vector3();
+  // ---- shared diagnostics: every player reports what it sees every 2 s, and notable events go to a log everyone in the lobby shares ----
+  const DG = { open: false, log: [], stats: new Map(), rx: 0, rxRate: 0, lastSw: 0, ghost: 0, ghostSent: 0, t0: performance.now(), frames: 0, fps: 0, sendT: 0, gap: false, logBudget: 6,
+    nick: peer => { const p = NET.room && NET.room.peers().find(q => String(q.peer) === String(peer)); return (p && cleanNick((p.presence || {}).nick)) || String(peer).slice(0, 5); } };
+  const diagEl = document.getElementById('diag'), diagT = document.getElementById('diagT'), diagL = document.getElementById('diagL');
+  function diagAdd(who, s) { const d = new Date(); DG.log.push(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')} ${who}: ${s}`); if (DG.log.length > 300) DG.log.shift(); DG.dirty = true; }
+  function netLog(s) { diagAdd(NET.nick || 'me', s); if (DG.logBudget > 0) { DG.logBudget--; netEv({ t: 'log', s }); } }
+  function diagToggle() { DG.open = !DG.open; diagEl.style.display = DG.open ? 'block' : 'none'; DG.dirty = true; }
+  function diagMine() {                                  // what this player's copy of the world looks like right now
+    let m = 0, ms = 0, c = 0, sm = 0;
+    for (const x of swarm) if (!x.dead) { m++; ms = (ms + x.id * 31) % 9973; }
+    for (const x of chubs) if (!x.dead && x.state !== 'cart') c++;
+    for (const o of obstacles) if ((o.pillar || o.rock) && !o.mesh.visible) sm++;
+    return { b: BUILD, r: !NET.game ? 'solo' : NET.client ? 'guest' : 'HOST', n: NET.nick, f: Math.round(DG.fps), m, ms, c, k: cart.riders.length, al: altars.map(A => A.n).join('/'), sm, hp: Math.round(car.hp),
+      x: Math.round(car.pos.x), z: Math.round(car.pos.z), ride, pl: NET.remotes.size + 1, age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0, rx: DG.rxRate, gh: DG.ghost, vis: document.hidden ? 0 : 1 };
+  }
+  function diagRender() {
+    DG.dirty = false; if (!DG.open) return;
+    const rows = [['me', diagMine()]]; for (const [peer, v] of DG.stats) if (performance.now() - v.at < 8000) rows.push([DG.nick(peer), v.o]);
+    const host = rows.map(r => r[1]).find(o => o.r === 'HOST'), bad = (o, key, tol) => host && o !== host && Math.abs((+o[key] || 0) - (+host[key] || 0)) > tol;
+    const cols = [['who', (o, w) => w + (o.n && w === 'me' ? ' (' + o.n + ')' : '')], ['role', o => o.r], ['build', o => o.b, o => host && o.b !== host.b], ['fps', o => o.f, o => o.f < 25], ['players', o => o.pl, o => bad(o, 'pl', 0)],
+      ['monsters', o => o.m, o => bad(o, 'm', 4)], ['chubziks', o => o.c, o => bad(o, 'c', 6)], ['cart', o => o.k], ['altars', o => o.al, o => host && o.al !== host.al], ['smashed', o => o.sm, o => bad(o, 'sm', 0)],
+      ['hp', o => o.hp], ['pos', o => o.x + ',' + o.z], ['ride', o => o.ride], ['snap age ms', o => o.r === 'guest' ? o.age : '-', o => o.r === 'guest' && o.age > 1500], ['snap/s', o => o.r === 'guest' ? o.rx : '-'], ['ghost bites', o => o.gh, o => o.gh > 0], ['tab', o => o.vis ? 'shown' : 'HIDDEN', o => !o.vis]];
+    const esc = v => String(v == null ? '' : v).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    diagT.innerHTML = '<tr>' + cols.map(c => `<th style="text-align:left;padding:1px 6px 1px 0;color:#8fa0b8;font-weight:600">${c[0]}</th>`).join('') + '</tr>' +
+      rows.map(([w, o]) => '<tr>' + cols.map(c => `<td style="padding:1px 6px 1px 0;${c[2] && c[2](o) ? 'color:#ff6a5a;font-weight:700' : ''}">${esc(c[1](o, w))}</td>`).join('') + '</tr>').join('');
+    diagL.textContent = DG.log.slice(-60).join('\n') || 'No events yet. Red cells differ from the host.';
+    DG.text = rows.map(([w, o]) => w + ' ' + JSON.stringify(o)).join('\n') + '\n' + DG.log.join('\n');
+  }
+  function updateDiag() {
+    const now = performance.now(); DG.frames++;
+    if (now - DG.t0 >= 1000) { DG.fps = DG.frames * 1000 / (now - DG.t0); DG.frames = 0; DG.t0 = now; DG.rxRate = DG.rx; DG.rx = 0; DG.logBudget = Math.min(6, DG.logBudget + 2); DG.dirty = true;
+      if (NET.on && NET.client) { const gap = now - DG.lastSw > 2500; if (gap !== DG.gap) { DG.gap = gap; netLog(gap ? 'no monster snapshots from the host for 2.5 s' : 'snapshots are back'); } }
+      if (DG.ghost > DG.ghostSent) { netLog('ignored ' + (DG.ghost - DG.ghostSent) + ' bite(s) from monsters I cannot see'); DG.ghostSent = DG.ghost; }
+      if (NET.on && NET.game && (DG.sendT = (DG.sendT + 1) % 2) === 0) netEv({ t: 'st', o: diagMine() });
+    }
+    if (DG.dirty) diagRender();
+  }
+  document.addEventListener('visibilitychange', () => { if (NET.on && NET.game) netLog(document.hidden ? 'tab went to the background (my game is paused' + (NET.client ? ')' : ' — and so are the monsters for everyone)') : 'tab is back'); });
+  document.getElementById('diagClose').addEventListener('click', diagToggle);
+  document.getElementById('diagCopy').addEventListener('click', () => { diagRender(); const t = DG.text || ''; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); } catch (e) {} a.remove(); }); document.getElementById('diagCopy').textContent = 'copied'; setTimeout(() => { document.getElementById('diagCopy').textContent = 'copy all'; }, 1200); });
+  for (const ev of ['mousedown', 'touchstart', 'pointerdown', 'pointerup', 'click', 'wheel']) diagEl.addEventListener(ev, e => e.stopPropagation(), { passive: true });
   function crateRemote(o) {                              // someone else broke it: same splinters, no score, no drop
     if (o.carried) { releaseIfHeld(o); o.carried = false; }
     o.mesh.visible = false; spawnParticles(o.mesh.position, 0xd2873c, 12, 8); SFX.play('crate_break', o.mesh.position, { vol: 0.6 });
@@ -6408,7 +6461,7 @@ const MONSTERS = [
       scene.add(m.g, cartM, label);
       R = { ride: k, g: m.g, tur: m.tur, cart: cartM, label, pos: new THREE.Vector3(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400)), h: num(pr.h, -99, 99), lastF: pr.f, cpos: new THREE.Vector3(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), vel: new THREE.Vector3(), cn: 0 };
       R.tc = { pos: R.pos, vel: R.vel, alive: false, depth: 0, y: 0, radius: car.radius, burrow: 'up', R };
-      NET.remotes.set(p.peer, R);
+      NET.remotes.set(p.peer, R); netLog('sees ' + (cleanNick(pr.nick) || 'Driver') + ' (' + k + ')');
     }
     return R;
   }
@@ -6450,7 +6503,7 @@ const MONSTERS = [
       }
     }
     netCollide();
-    for (const [peer, R] of NET.remotes) if (!seen.has(peer)) { scene.remove(R.g, R.cart, R.label, ...(R.riders || [])); NET.remotes.delete(peer); }
+    for (const [peer, R] of NET.remotes) if (!seen.has(peer)) { netLog('lost ' + (R.labelText || 'a player')); scene.remove(R.g, R.cart, R.label, ...(R.riders || [])); NET.remotes.delete(peer); }
     for (let i = NET.shots.length - 1; i >= 0; i--) { const s = NET.shots[i]; s.life -= dt; s.m.position.addScaledVector(s.v, dt); if (s.life <= 0 || s.m.position.y < 0.1) { scene.remove(s.m); NET.shots.splice(i, 1); } }
     if (n > 1) NET.had = true;
     const t = `Lobby: ${NET.hostNick}'s · ${n} player${n > 1 ? 's' : ''}` + (n === 1 && NET.had ? ' · others lost, waiting for them to reconnect' : ''); if (netEl.textContent !== t) netEl.textContent = t;
