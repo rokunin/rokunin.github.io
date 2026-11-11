@@ -848,12 +848,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
         return norm(o, 0.4);
       },
       // ---- loops (rendered once, played continuously with live gain / rate) ----
-      hum_loop() {                                     // the halo: a slow-beating glass chord, no engine in it
+      hum_loop() {                                     // the halo: a soft held chord of pure tones, like a far-off choir. No motor in it
         return looped(4, sec => {
-          const b = N(sec); for (const [f, g] of [[220, 1], [220.5, 0.8], [330, 0.55], [329.25, 0.4], [440.5, 0.3], [660, 0.12]]) mix(b, osc(sec, f), g * 0.25);
-          env(b, t => 0.8 + 0.2 * Math.sin(t * 6.283 * 0.5));
-          const n = noise(sec, rng(17), 'pink'); filt(n, 'bp', 1800, 0.7); mix(b, n, 0.1);
-          return b;
+          const b = N(sec);
+          for (const [f, g, v] of [[220, 1, 0.25], [220.5, 0.7, 0.5], [277.25, 0.7, 0.25], [329.75, 0.8, 0.5], [330.25, 0.5, 0.25], [440, 0.45, 0.75], [554.25, 0.2, 0.5], [659.5, 0.14, 0.25]]) {
+            const o = osc(sec, f); env(o, t => 0.65 + 0.35 * Math.sin(t * 6.283 * v + f)); mix(b, o, g * 0.2);
+          }
+          return filt(b, 'lp', 1200);
         });
       },
       servo_loop() {                                   // the spider: thin servo whine
@@ -2677,7 +2678,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 76, buildEl = document.getElementById('build');
+  const BUILD = 77, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2859,6 +2860,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function hurtCar(dmg, dir) {
     if (!car.alive || car.burrow !== 'up') return;
+    if (haloHoly()) { if ((car.holyT || 0) < elapsed) { car.holyT = elapsed + 0.25; SFX.play('pickup', car.pos, { vol: 0.25, rate: 2 }); spawnParticles(tmp.set(car.pos.x, 2, car.pos.z), 0xffe9a8, 4, 6); } return; }   // swords out: untouchable
     car.hp -= dmg; car.lastHurt = elapsed; hurtFlash = 0.18; shake = 0.6;
     if (car.hp > 0) crewSay(car.hp < car.maxHp * 0.35 ? 'lowhp' : 'hurt', 0.7);
     cartKick(5); cartFling(cart.riders.length > 6 ? 2 : 1, 0);
@@ -4089,20 +4091,31 @@ laugh(r) {                                       // a big man's belly laugh: bre
         float edge = smoothstep(0.0, 0.06, x) * smoothstep(1.0, 0.94, x);
         gl_FragColor = vec4(col * 1.15 + tw * 2.5, alpha * edge * smoothstep(0.0, 1.2, d));
       }` });
+  const swordMat = () => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, uniforms: { time: { value: 0 }, alpha: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float time, alpha; varying vec2 vUv;
+      void main(){
+        float d = 1.0 - vUv.y, x = abs(vUv.x - 0.5) * 2.0;                       // d: 0 at the hilt, 1 at the point
+        float blade = 0.34 * min(1.0, (1.0 - d) / 0.2) * step(0.13, d);          // straight blade, tapering to the point
+        float guard = step(0.09, d) * step(d, 0.13) * 0.95;                      // crossguard
+        float grip = step(d, 0.09) * 0.1;
+        float w = max(blade, max(guard, grip));
+        float inside = 1.0 - smoothstep(w * 0.8, w, x);
+        float core = 1.0 - smoothstep(0.0, w * 0.35 + 0.001, x);                 // white fuller down the middle
+        float halo = (1.0 - smoothstep(w, w + 0.45, x)) * 0.16 * step(0.05, d) * (1.0 - smoothstep(0.9, 1.0, d));
+        float glint = pow(max(0.0, sin(d * 9.0 - time * 7.0)), 14.0);            // a gleam runs up the blade
+        vec3 col = mix(vec3(1.0, 0.72, 0.28), vec3(1.0, 0.97, 0.88), core) * (1.5 + 2.0 * core + 1.6 * glint * inside);
+        float a = max(inside, halo);
+        gl_FragColor = vec4(col * a, 1.0) * alpha;
+      }` });
+  const haloHoly = () => ride === 'halo' && beams.some(B => B.kind === 'halo');
   function fireBeams() {
     const L = weapons.nova - 1, dmg = W_STATS.nova.dmg[L];
-    if (ride === 'halo') {
-      const n = Math.max(4, Math.round(W_STATS.nova.n[L] * 0.5)), len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, dirs = [];
-      const core = addMat(0xfff6d8, 5, 1), sheath = addMat(0xffd27a, 1.3, 0.3), ringM = addMat(0xffe9a8, 3, 0.9), nr = Math.max(3, Math.round(len / 2.6));
-      for (let i = 0; i < n; i++) {
-        const g = new THREE.Group(), c = new THREE.Mesh(beamGeo, core), sh = new THREE.Mesh(beamGeo, sheath), rings = [];
-        c.scale.set(0.14, 0.14, len); sh.scale.set(0.75, 0.4, len); g.add(c, sh);
-        for (let j = 0; j < nr; j++) { const r = new THREE.Mesh(railRingGeo, ringM); g.add(r); rings.push(r); }
-        const tip = new THREE.Mesh(railRingGeo, ringM); tip.position.z = len; tip.scale.setScalar(1.6); g.add(tip);
-        scene.add(g); dirs.push({ g, a: ph + i / n * 6.283, rings });
-      }
-      beams.push({ kind: 'halo', dirs, mats: [core, sheath, ringM], len, w: 0.9, t: 0, T: 1.4, tick: 0, every: 0.12, dmg: dmg * 0.7, nr });
-      flash(tmp.set(car.pos.x, 2 + car.y, car.pos.z), 0xfff0c0, 10, 0.3, 3);
+    if (ride === 'halo') {                               // a ring of angelic swords; while they are out nothing can hurt the halo
+      const n = [4, 5, 6, 7, 8][L], len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, dirs = [], mt = swordMat();
+      for (let i = 0; i < n; i++) { const g = new THREE.Group(), m = new THREE.Mesh(rbGeo, mt); m.scale.set(2.3, 1, len); m.renderOrder = 4; g.add(m); scene.add(g); dirs.push({ g, a: ph + i / n * 6.283 }); }
+      beams.push({ kind: 'halo', dirs, mats: [mt], len, w: 1.1, t: 0, T: 1.4, tick: 0, every: 0.12, dmg: dmg * 0.9 });
+      flash(tmp.set(car.pos.x, 2 + car.y, car.pos.z), 0xfff0c0, 8, 0.3, 2.5);
     } else {
       const per = [1, 2, 2, 3, 3][L], offs = per === 1 ? [0] : per === 2 ? [-0.2, 0.2] : [-0.38, 0, 0.38], len = 2 * ARENA + 80, dirs = [], mats = [];   // \|/ at full power, both ends
       for (const base of [0, Math.PI]) for (const o of offs) {
@@ -4126,14 +4139,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
     for (let i = beams.length - 1; i >= 0; i--) {
       const B = beams[i]; B.t += dt;
       const a = Math.max(0, Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25));           // snap on, fade off
-      if (B.kind === 'halo') for (const mt of B.mats) mt.opacity = a * mt.userData.o * (0.8 + 0.2 * Math.sin(elapsed * 45));
-      else for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = elapsed; }
+      for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = elapsed; }
       const fx = Math.sin(car.heading), fz = Math.cos(car.heading), alive = car.alive && car.depth < 0.3, grow = Math.min(1, B.t / 0.1);
       for (const D of B.dirs) {
         let ang, ox = car.pos.x, oz = car.pos.z, oy;
         if (B.kind === 'halo') {
-          D.a += dt * 0.5; ang = D.a; oy = 2.0 + car.y; D.g.scale.set(1, 1, grow);
-          D.rings.forEach((r, j) => { const q = (B.t * 1.5 + j * 0.37) % 1; r.position.z = (j + q) / B.nr * B.len; r.scale.setScalar(0.5 + 1.5 * q); r.rotation.z += dt * 5; });   // rings race out along the rail
+          D.a += dt * 0.9; ang = D.a; oy = 1.6 + car.y; D.g.scale.set(1, 1, grow);
         } else {
           ang = car.heading + D.off; ox += fx * (D.fwd ? 2.3 : -1.7); oz += fz * (D.fwd ? 2.3 : -1.7); oy = (D.fwd ? 2.9 : 2.1) + car.y; D.g.scale.set(1, 1, grow);
           if (alive && Math.random() < 0.5) { const d = 3 + Math.random() * 40; spawnParticles(tmp.set(ox + Math.sin(ang) * d, oy, oz + Math.cos(ang) * d), RAINBOW[Math.floor(Math.random() * 6)], 1, 4); }
@@ -4285,7 +4296,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function updateWeapons(dt) {
     const ready = car.alive && car.depth < 0.3;
-    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
+    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + 1.4; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
     updateSaws(dt);
     updateBeams(dt);
     if (weapons.mortar) {
@@ -6065,15 +6076,15 @@ const MONSTERS = [
       const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0), r = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
       dx = r - f; dz = -r - f; const l = Math.hypot(dx, dz); if (l > 0) { dx /= l; dz /= l; mag = 1; }
     }
-    if (!car.airborne) {
-      if (mag) { const top = TUNE.maxSpeed * 1.05 * mag; car.vel.x += (dx * top - car.vel.x) * (1 - Math.exp(-1.2 * dt)); car.vel.z += (dz * top - car.vel.z) * (1 - Math.exp(-1.2 * dt)); }
-      else car.vel.multiplyScalar(Math.exp(-0.55 * dt));                       // almost no friction up there
+    if (!car.airborne) {                                 // goes where you point almost at once, drifts to a stop in about half a second
+      const top = TUNE.maxSpeed * 1.05 * mag, q = 1 - Math.exp(-(mag ? 6.5 : 3.2) * dt);
+      car.vel.x += (dx * top - car.vel.x) * q; car.vel.z += (dz * top - car.vel.z) * q;
       if (car.burrow !== 'up') car.vel.multiplyScalar(Math.max(0, 1 - 9 * dt));
     }
     const sp = Math.hypot(car.vel.x, car.vel.z);
     if (mag || sp > 3) {                                // the rings lean and swing round to where it is being pushed, lazily
       const want = mag ? Math.atan2(dx, dz) : Math.atan2(car.vel.x, car.vel.z), d = Math.atan2(Math.sin(want - car.heading), Math.cos(want - car.heading));
-      car.heading += d * (1 - Math.exp(-3.5 * dt)); car.steer = THREE.MathUtils.clamp(d, -1, 1);
+      car.heading += d * (1 - Math.exp(-9 * dt)); car.steer = THREE.MathUtils.clamp(d, -1, 1);
     } else car.steer = 0;
     car.speed = sp;
   }
@@ -6328,11 +6339,11 @@ const MONSTERS = [
     {
       const thr = up || down ? 1 : 0, spdK = Math.min(1, Math.abs(car.speed) / TUNE.maxSpeed);
       const live = car.alive && car.depth < 0.6, vK = Math.min(1, Math.hypot(car.vel.x, car.vel.z) / TUNE.maxSpeed);
-      SFX.loop('hum', ride === 'halo' && live ? 0.1 + 0.16 * vK : 0, 0.85 + 0.55 * vK);
+      SFX.loop('hum', ride === 'halo' && live ? 0.05 + 0.04 * vK : 0, 1);
       SFX.loop('servo', ride === 'spider' && live ? 0.11 * vK : 0, 0.8 + 0.5 * vK);
       SFX.loop('engine', ride === 'buggy' && live ? 0.16 + 0.2 * thr + 0.12 * spdK : 0, 0.72 + 1.3 * spdK + 0.12 * thr, 450 + 2300 * Math.min(1, 0.35 * thr + spdK));
       const inBoss = inRoom(car.pos.x, car.pos.z);
-      SFX.loop('wind', (inBoss ? 0.05 : 0.13) + (ride === 'halo' ? 0.2 * vK : 0), ride === 'halo' ? 1 + 0.5 * vK : 1);
+      SFX.loop('wind', (inBoss ? 0.05 : 0.13) + (ride === 'halo' ? 0.05 * vK : 0), 1);
       SFX.loop('drone', inBoss && (boss.state === 'fight' || boss.state === 'emerging') ? 0.32 : 0, 1);
       SFX.setRoom(inBoss ? 0.12 : 0);
     }
