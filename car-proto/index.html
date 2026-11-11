@@ -2695,7 +2695,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 80, buildEl = document.getElementById('build');
+  const BUILD = 81, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4175,6 +4175,48 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
   }
 
+  // ---- web nova: the spider spits four webs; whatever stands in one is tangled for as long as it lasts. Levels only make the webs wider ----
+  const webs = [], WEB_N = 4, WEB_R = [2.3, 2.9, 3.5, 4.2, 5.0], WEB_T = 3.2;
+  const webTex = (() => { const c = mkCanvas(256), x = c.getContext('2d'); x.translate(128, 128); x.strokeStyle = '#fff'; x.lineCap = 'round';
+    x.lineWidth = 3; for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; x.beginPath(); x.moveTo(0, 0); x.lineTo(Math.cos(a) * 124, Math.sin(a) * 124); x.stroke(); }
+    x.lineWidth = 2; for (let r = 1; r <= 6; r++) { x.beginPath(); for (let i = 0; i <= 12; i++) { const a = i / 12 * 6.283, a0 = (i - 0.5) / 12 * 6.283, R = r * 20; if (!i) x.moveTo(R, 0); else x.quadraticCurveTo(Math.cos(a0) * R * 0.86, Math.sin(a0) * R * 0.86, Math.cos(a) * R, Math.sin(a) * R); } x.stroke(); }
+    return srgbTex(c); })();
+  const webGeo = new THREE.CircleGeometry(1, 24); webGeo.rotateX(-Math.PI / 2);
+  const webBallGeo = new THREE.IcosahedronGeometry(0.4, 1), webBallMat = glow(new THREE.MeshBasicMaterial({ color: 0xeaf4ff }), 2);
+  function fireWebs() {
+    const R = WEB_R[weapons.nova - 1], spots = [], near = [];
+    for (const m of swarm) if (!m.dead) { const d = Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z); if (d < 22) near.push([d, m]); }
+    for (const e of enemies) if (!e.dead && e.awake && !e.carried) { const d = Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z); if (d < 22) near.push([d, e]); }
+    near.sort((a, b) => a[0] - b[0]);
+    for (const [, t] of near) { if (spots.length >= WEB_N) break; const qx = t.pos.x + t.vel.x * 0.5, qz = t.pos.z + t.vel.z * 0.5;      // where it will be when the web lands
+      if (!spots.some(sp => Math.hypot(sp.x - qx, sp.z - qz) < R * 1.3)) spots.push(new THREE.Vector3(qx, 0, qz)); }   // onto the nearest packs, not on top of each other
+    const ph = Math.random() * 6.283;
+    for (let i = 0; spots.length < WEB_N; i++) spots.push(new THREE.Vector3(car.pos.x + Math.sin(ph + i * 1.571) * (R + 4.5), 0, car.pos.z + Math.cos(ph + i * 1.571) * (R + 4.5)));
+    const from = new THREE.Vector3(car.pos.x, 2.6 + car.y, car.pos.z);
+    for (const to of spots) { const ball = new THREE.Mesh(webBallGeo, webBallMat); ball.position.copy(from); scene.add(ball);
+      webs.push({ ball, from: from.clone(), to, t: 0, fly: 0.3 + from.distanceTo(to) / 60, R, life: WEB_T, tick: 0, mesh: null }); }
+    SFX.play('spit', car.pos, { rate: 0.7, vol: 0.7 });
+  }
+  function updateWebs(dt) {
+    for (let i = webs.length - 1; i >= 0; i--) {
+      const w = webs[i]; w.t += dt;
+      if (!w.mesh) {                                     // still in the air
+        const k = Math.min(1, w.t / w.fly); w.ball.position.lerpVectors(w.from, w.to, k); w.ball.position.y += Math.sin(Math.PI * k) * 3;
+        if (k < 1) continue;
+        scene.remove(w.ball); w.t = 0;
+        w.mesh = new THREE.Mesh(webGeo, new THREE.MeshBasicMaterial({ map: webTex, transparent: true, opacity: 0, depthWrite: false })); w.mesh.material.color.setScalar(1.3);
+        w.mesh.position.set(w.to.x, 0.08, w.to.z); w.mesh.rotation.y = Math.random() * 6.283; w.mesh.renderOrder = 2; scene.add(w.mesh);
+        spawnParticles(tmp.set(w.to.x, 0.5, w.to.z), 0xeaf4ff, 6, 5); SFX.play('hit_dirt', w.to, { vol: 0.5, rate: 1.5 });
+      }
+      w.mesh.scale.setScalar(w.R * Math.min(1, w.t / 0.15)); w.mesh.material.opacity = Math.min(1, (w.life - w.t) / 0.5) * 0.85;
+      if ((w.tick -= dt) <= 0) { w.tick = 0.4;
+        for (const m of swarm) if (!m.dead && !m.K.fly && Math.hypot(m.pos.x - w.to.x, m.pos.z - w.to.z) < w.R + m.r * 0.5) { stunCritter(m, 0.6); m.vel.set(0, 0, 0); }   // fliers pass over
+        if (!NET.client) for (const e of enemies) if (!e.dead && e.awake && !e.carried && Math.hypot(e.pos.x - w.to.x, e.pos.z - w.to.z) < w.R + e.r * 0.5) e.stun = Math.max(e.stun, 0.6);
+      }
+      if (w.t >= w.life) { scene.remove(w.mesh); w.mesh.material.dispose(); webs.splice(i, 1); }
+    }
+  }
+
   // ---- orbit: spinning saws ----
   const sawMat = new THREE.MeshStandardMaterial({ color: 0xc8ccd4, metalness: 1, roughness: 0.25, emissive: 0x5a0a0a, flatShading: true });
   const sawGeo = (() => {
@@ -4314,9 +4356,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function updateWeapons(dt) {
     const ready = car.alive && car.depth < 0.3;
-    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + SWORD_T[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else fireNova(); } else novaT = 0.15; } }
+    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + SWORD_T[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else if (ride === 'spider') fireWebs(); else fireNova(); } else novaT = 0.15; } }
     updateSaws(dt);
     updateBeams(dt);
+    updateWebs(dt);
     if (weapons.mortar) {
       mortarT -= dt;
       if (mortarT <= 0 && ready) {
