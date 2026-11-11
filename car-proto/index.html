@@ -159,7 +159,7 @@
 <div id="hud">
   <span class="kb"><b>W / S</b> gas / brake-reverse · <b>A / D</b> steer (spider: <b>WASD</b> runs in screen directions)<br>
   Machine gun fires by itself · hold <b>LMB</b> to aim at the cursor<br>
-  <b>Wheel</b> zoom · <b>R</b> respawn · <b>M</b> sound · <b>F</b> mode: <span id="mode">spin in place</span><br></span>
+  <b>Wheel</b> zoom · <b>R</b> respawn · <b>M</b> sound<br></span>
   <span class="tc"><b>Left stick</b> drive · auto-fire · <b>Right stick</b> manual aim<br></span>
   <span id="net" style="color:#9cf59a;display:block"></span>
   Crates: <span id="kills">0</span> · Biters: <span id="ekills">0</span><br>
@@ -2552,11 +2552,6 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (e.code === 'KeyR') respawn();
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
-    if (e.code === 'KeyF' && !e.repeat) {
-      const order = ['human', 'cursor', 'car'], names = { human: 'spin in place', cursor: 'follow cursor', car: 'car' };
-      car.mode = order[(order.indexOf(car.mode) + 1) % order.length];
-      document.getElementById('mode').textContent = names[car.mode];
-    }
     if (e.code === 'KeyE' && !e.repeat) toggleBurrow();
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
@@ -2663,7 +2658,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 69, buildEl = document.getElementById('build');
+  const BUILD = 70, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
