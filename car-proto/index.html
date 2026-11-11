@@ -2652,7 +2652,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 64, buildEl = document.getElementById('build');
+  const BUILD = 65, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2837,7 +2837,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (car.hp > 0) crewSay(car.hp < car.maxHp * 0.35 ? 'lowhp' : 'hurt', 0.7);
     cartKick(5); cartFling(cart.riders.length > 6 ? 2 : 1, 0);
     SFX.play('clang', car.pos);
-    car.vel.addScaledVector(dir, 9); car.speed *= 0.4;
+    car.vel.x += dir.x * 9; car.vel.z += dir.z * 9; car.speed *= 0.4;      // sideways shove only: a shot coming down at an angle must not push the ride into the ground
     if (car.hp <= 0) {
       car.hp = 0; car.alive = false; car.deadTimer = 2.2; crewSay('dead', 1, true);
       carGroup.visible = false;
@@ -3084,7 +3084,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         popEShot(i, col); continue;
       }
       if (car.alive && car.depth < 0.3 && car.y < 1.8 && Math.hypot(p.x - car.pos.x, p.z - car.pos.z) < car.radius * 0.85 + 0.3) {
-        hurtCar(s.dmg, tmp.copy(s.v).normalize().multiplyScalar(0.3).clone());
+        hurtCar(s.dmg, tmp.set(s.v.x, 0, s.v.z).normalize().multiplyScalar(0.3).clone());
         flash(p, col, 3, 0.15, 2.5, false); popEShot(i, col); continue;
       }
       let blocked = false;
@@ -4446,7 +4446,7 @@ const MONSTERS = [
     return { by, pal };
   })();
   function swRng(seed) { let a = seed >>> 0; return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; }; }
-  const hsl = (h, s, l) => `hsl(${(h % 1) * 360},${s * 100}%,${l * 100}%)`;
+  const hsl = (h, s, l) => `hsl(${(((h % 1) + 1) % 1) * 360},${s * 100}%,${l * 100}%)`;
 
   function drawEye(x, ctx, cx, cy, r, look, angry) {
     ctx.fillStyle = '#fffbe8'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.283); ctx.fill(); ctx.stroke();
@@ -5963,6 +5963,7 @@ const MONSTERS = [
     const k = car.airborne || ride === 'spider' || ride === 'halo' ? 0 : Math.min(1, (ride === 'unicorn' ? UNI.grip : car.mode !== 'car' ? TUNE.gripHuman : TUNE.grip) * dt);   // в воздухе летим по инерции
     car.vel.x += (fx * car.speed - car.vel.x) * k;
     car.vel.z += (fz * car.speed - car.vel.z) * k;
+    car.vel.y = 0; car.pos.y = 0;                         // height lives in car.y; the position vector stays on the ground plane
     if (!(ride === 'spider' && !car.airborne)) car.pos.addScaledVector(car.vel, ride === 'unicorn' && !car.airborne ? dt * (1 + 0.16 * Math.sin(ridePhase * 4.8)) : dt);   // a gallop surges with every stride
 
     // collisions
