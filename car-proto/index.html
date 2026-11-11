@@ -2206,7 +2206,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const joint = new THREE.MeshStandardMaterial({ color: 0x8f8a86, metalness: 0.8, roughness: 0.4, flatShading: true });
       const legs = [], RX = [1.75, 2.35, 2.35, 1.85], RZ = [2.0, 0.75, -0.6, -1.85], HZ = [0.9, 0.32, -0.26, -0.84];   // eight legs fanned out like the prototype's, feet well apart
       for (const sd of [-1, 1]) for (let i = 0; i < 4; i++) {
-        const hip = new THREE.Group(); hip.position.set(sd * 1.1, 0, HZ[i]); hip.rotation.order = 'YXZ'; legRoot.add(hip);
+        const hip = new THREE.Group(); hip.position.set(sd * 1.1, 0, HZ[i]); hip.rotation.order = 'YXZ'; hip.userData.leg = (i % 2 === 0) === (sd < 0) ? 1 : 2; legRoot.add(hip);
         P(new THREE.SphereGeometry(0.13, 6, 5), joint, 0, 0, 0, hip);
         const fem = new THREE.Group(); hip.add(fem); P(new THREE.BoxGeometry(0.17, 0.17, SPL.L1), shell, 0, 0, SPL.L1 / 2, fem);
         const knee = new THREE.Group(); knee.position.z = SPL.L1; fem.add(knee); P(new THREE.SphereGeometry(0.12, 6, 5), joint, 0, 0, 0, knee);
@@ -2293,7 +2293,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     } else if (k === 'halo') {
       const gold = new THREE.MeshStandardMaterial({ color: 0xe8d28a, metalness: 0.9, roughness: 0.25, envMapIntensity: 1.6, flatShading: true });
       const core = new THREE.Group(); core.position.y = 2.0; B.add(core);
-      const t1 = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.2, 6, 20), gold), t2 = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.17, 6, 18), gold);
+      const t1 = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.2, 6, 20), gold), t2 = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.17, 6, 18), gold); t1.userData.spin = 1; t2.userData.spin = 2;
       t1.castShadow = t2.castShadow = true; core.add(t1, t2);
       for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283; miniEye(0.15, t1, Math.cos(a) * 1.95, Math.sin(a) * 1.95, 0); if (i % 2) miniEye(0.13, t1, Math.cos(a) * 1.75, Math.sin(a) * 1.75, 0.2).rotation.set(0, 0, 0); }
       for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283 + 0.3; miniEye(0.13, t2, Math.cos(a) * 1.49, Math.sin(a) * 1.49, 0); }
@@ -2328,7 +2328,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       rain.forEach((m, i) => { P(new THREE.BoxGeometry(0.3, 0.34, 0.32), m, 0, 3.1 - i * 0.2, 1.1 - i * 0.3, tor); });   // mane
       const tail = rain.map((m, i) => P(new THREE.BoxGeometry(0.26, 0.26, 0.34), m, 0, 2.15 - i * 0.18, -1.55 - i * 0.24, tor));
       const legs = [[-0.5, 0.95], [0.5, 0.95], [-0.5, -1.15], [0.5, -1.15]].map(([x, z], i) => {
-        const g = new THREE.Group(); g.position.set(x, 1.2, z); B.add(g);
+        const g = new THREE.Group(); g.position.set(x, 1.2, z); g.userData.uleg = (i === 0 || i === 3) ? 1 : 2; B.add(g);
         P(new THREE.BoxGeometry(0.4, 0.95, 0.4), white, 0, -0.45, 0, g); P(new THREE.BoxGeometry(0.44, 0.26, 0.44), gold, 0, -1.07, 0, g);
         return { g, ph: (i === 0 || i === 3) ? 0 : Math.PI };
       });
@@ -2400,7 +2400,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const cartM = new THREE.Group();
     if (k === 'spider' && !bug) { buildBug(); bug.g.visible = ride === 'spider'; }
     for (const c of cartG.children) if ((bug && c === bug.g) === (k === 'spider')) take(c, cartM);
-    return { g, tur, cart: cartM };
+    const anim = [];                                     // moving parts of the copy: spider legs, unicorn legs, halo rings
+    g.traverse(o => { const u = o.userData; if (u.leg) { const fem = o.children.find(c => c.isGroup); anim.push({ t: 'leg', o, fem, grp: u.leg - 1, by: o.rotation.y, bx: fem ? fem.rotation.x : 0 }); }
+      else if (u.uleg) anim.push({ t: 'uleg', o, grp: u.uleg - 1 }); else if (u.spin) anim.push({ t: 'spin', o, k: u.spin }); });
+    return { g, tur, cart: cartM, anim };
   }
   function updateRide(dt) {
     const sp = Math.hypot(car.vel.x, car.vel.z); ridePhase += sp * dt * 0.45;
@@ -2658,7 +2661,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 70, buildEl = document.getElementById('build');
+  const BUILD = 71, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6464,7 +6467,7 @@ const MONSTERS = [
       if (!cartM) cartM = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 2.3), new THREE.MeshStandardMaterial({ color: k === 'spider' ? 0x2a2630 : 0x8a5a30, roughness: 0.85, flatShading: true }));
       cartM.castShadow = true; cartM.userData.y = m.cart ? 0 : 0.75; const label = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false })); label.scale.set(5, 1.25, 1); label.renderOrder = 25; label.material.color.setScalar(0.8);
       scene.add(m.g, cartM, label);
-      R = { ride: k, g: m.g, tur: m.tur, cart: cartM, label, pos: new THREE.Vector3(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400)), h: num(pr.h, -99, 99), lastF: pr.f, cpos: new THREE.Vector3(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), vel: new THREE.Vector3(), cn: 0 };
+      R = { ride: k, g: m.g, tur: m.tur, cart: cartM, label, pos: new THREE.Vector3(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400)), h: num(pr.h, -99, 99), anim: m.anim || [], ph: 0, lastF: pr.f, cpos: new THREE.Vector3(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), vel: new THREE.Vector3(), cn: 0 };
       R.tc = { pos: R.pos, vel: R.vel, alive: false, depth: 0, y: 0, radius: car.radius, burrow: 'up', R };
       NET.remotes.set(p.peer, R); netLog('sees ' + (cleanNick(pr.nick) || 'Driver') + ' (' + k + ')');
     }
@@ -6487,6 +6490,12 @@ const MONSTERS = [
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
       const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
+      if (R.anim.length) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08);
+        for (const a of R.anim) {
+          if (a.t === 'leg') { const q = R.ph + a.grp * Math.PI; a.o.rotation.y = a.by + Math.sin(q) * 0.32 * kk; if (a.fem) a.fem.rotation.x = a.bx - Math.max(0, Math.cos(q)) * 0.3 * kk; }
+          else if (a.t === 'uleg') a.o.rotation.x = Math.sin(R.ph + a.grp * Math.PI) * 0.7 * kk;
+          else if (a.k === 1) a.o.rotation.y += dt * (1.2 + spd * 0.12); else a.o.rotation.x += dt * (1.7 + spd * 0.15);
+        } }
       R.g.visible = up; R.g.position.copy(R.pos); R.g.rotation.y = R.h; R.tur.rotation.y = num(pr.t, -99, 99) - R.h;
       R.cpos.lerp(tmp.set(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), k);
       R.cart.visible = up && pr.cs === 1; R.cart.position.set(R.cpos.x, R.cart.userData.y, R.cpos.z); R.cart.rotation.y = num(pr.ch, -99, 99);
