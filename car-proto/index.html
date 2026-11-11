@@ -135,7 +135,7 @@
             background: #5fd0ff; color: #1b1421; font: 800 16px system-ui, sans-serif; padding: 9px 16px; box-shadow: 0 3px 0 #1b1421, 0 6px 14px rgba(0,0,0,.5);
             animation: unloadPulse .8s ease-in-out infinite alternate; touch-action: none; }
   @keyframes unloadPulse { from { filter: brightness(1); } to { filter: brightness(1.25); } }
-  body.touch #unload { font-size: 18px; padding: 12px 20px; }
+  body.touch #unload { font-size: 18px; padding: 12px 20px; } body.touch #unload small { display: none; }
   #altT { position: fixed; display: none; transform: translate(-50%, -100%); z-index: 5; pointer-events: none; white-space: nowrap;
           background: rgba(20,22,26,.78); color: #ff8fa0; font: 700 13px ui-monospace, Menlo, monospace; padding: 3px 9px; border-radius: 7px; }
   #altT.soon { color: #fff; background: #c2264a; }
@@ -165,7 +165,7 @@
   Crates: <span id="kills">0</span> · Biters: <span id="ekills">0</span><br>
   <span style="color:#7fc0ff">Chubziks alive: <b id="aliveN">0</b> · in cart: <b id="cartN">0</b> · eaten: <span id="eatN">0</span></span><br>
   <span class="kb" style="opacity:.65">Some crates are faking it. Shimmering ones drop abilities<br></span>
-  <span style="color:#ff8fc8">Altars: <b id="altN">0/5 · 0/5 · 0/5</b> <span class="kb">(blue beams)<br>Fill all three to open the boss gate, east wall. Unload: button over the altar or <b>G</b></span><span class="tc">· fill all to open the east gate</span></span>
+  <span style="color:#ff8fc8">Altars: <b id="altN">0/5 · 0/5 · 0/5</b> <span class="kb">(blue beams)<br>Fill all three to open the boss gate, east wall. Inside an altar's ring press <b>E</b> to sacrifice</span><span class="tc">· fill all to open the east gate</span></span>
 </div>
 <div id="abilities"></div>
 <div id="weapons"></div>
@@ -185,7 +185,7 @@
 <div class="stick" id="stickL"><i></i></div>
 <div class="stick" id="stickR"><i></i></div>
 <div id="crew"></div>
-<button id="unload" tabindex="-1">⬇ UNLOAD</button>
+<button id="unload" tabindex="-1">SACRIFICE! <small style="opacity:.7">E</small></button>
 <div id="altT"></div>
 <div id="start">
   <div id="lobbyStep">
@@ -2589,7 +2589,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (e.code === 'KeyR') respawn();
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
-    if (e.code === 'KeyE' && !e.repeat) toggleBurrow();
+    if (e.code === 'KeyE' && !e.repeat) { if (unloadAltar) doUnload(); else toggleBurrow(); }     // E sacrifices inside an altar's ring, digs in anywhere else
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
   let rmb = false;
@@ -2695,7 +2695,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 79, buildEl = document.getElementById('build');
+  const BUILD = 80, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4799,16 +4799,24 @@ const MONSTERS = [
     if (m.hp <= 0) killCritter(m, dir);
   }
   // ---- mini-bosses: the same monsters a fifth bigger with a hellfire on their heads; they shoot like the players do and throw bullet patterns ----
-  const hellTex = (() => { const c = mkCanvas(64), x = c.getContext('2d'), g = x.createRadialGradient(32, 44, 2, 32, 36, 30);
-    g.addColorStop(0, 'rgba(255,255,220,1)'); g.addColorStop(0.3, 'rgba(255,170,40,0.95)'); g.addColorStop(0.65, 'rgba(255,40,60,0.6)'); g.addColorStop(1, 'rgba(120,0,80,0)');
-    x.fillStyle = g; x.beginPath(); x.moveTo(32, 2); x.quadraticCurveTo(58, 34, 46, 54); x.quadraticCurveTo(32, 66, 18, 54); x.quadraticCurveTo(6, 34, 32, 2); x.fill(); return srgbTex(c); })();
+  const hellTex = (() => {                              // a crown of fire: five flame tongues on a glowing band
+    const c = mkCanvas(128, 96), x = c.getContext('2d'), g = x.createLinearGradient(0, 96, 0, 0);
+    g.addColorStop(0, 'rgba(255,60,40,0.95)'); g.addColorStop(0.35, 'rgba(255,150,30,1)'); g.addColorStop(0.7, 'rgba(255,230,120,1)'); g.addColorStop(1, 'rgba(255,255,230,0.9)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(8, 92);
+    const tips = [[14, 30], [38, 44], [64, 4], [90, 44], [114, 30]];
+    x.lineTo(6, 58);
+    tips.forEach(([tx, ty], i) => { const nx = i < 4 ? (tx + tips[i + 1][0]) / 2 : 122, vy = 66; x.quadraticCurveTo(tx - 9, ty + 26, tx, ty); x.quadraticCurveTo(tx + 9, ty + 26, nx, i < 4 ? vy : 58); });
+    x.lineTo(120, 92); x.closePath(); x.shadowColor = 'rgba(255,90,20,0.9)'; x.shadowBlur = 10; x.fill();
+    x.shadowBlur = 0; x.fillStyle = 'rgba(255,255,220,0.9)'; for (const tx of [26, 64, 102]) { x.beginPath(); x.arc(tx, 80, 5, 0, 6.283); x.fill(); }
+    return srgbTex(c); })();
   const hellMat = glow(new THREE.SpriteMaterial({ map: hellTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 2.2);
+  const MINI_SIZE = Math.max(...Object.values(SW_KINDS).map(K => K.size)) * 1.15;        // every mini-boss is the same size: 15% over the biggest monster there is
   const MINI_KINDS = ['brute', 'grubber', 'maw', 'jelly', 'oculon', 'lamprey', 'gloop', 'stilt', 'wingmaw', 'spike'];
   function makeMini(m, gate) {
     if (m.mini) return m;
-    m.mini = true; m.gate = !!gate; m.K = { ...m.K, size: m.K.size * 1.2, r: m.K.r * 1.2, bite: Math.round(m.K.bite * 1.3), spiky: true };   // cannot be run over
+    m.mini = true; m.gate = !!gate; { const k = MINI_SIZE / m.K.size; m.K = { ...m.K, size: MINI_SIZE, r: Math.min(1.9, m.K.r * k), bite: Math.round(m.K.bite * 1.3), spiky: true }; }   // cannot be run over
     m.r = m.K.r; m.hp = (m.K.hp * 4 + 26) * (1 + 0.6 * (NET.on && NET.game ? NET.remotes.size : 0)); m.atkT = 1.5 + Math.random() * 2;
-    const f = new THREE.Sprite(hellMat); f.center.set(0.5, 0.1); f.position.set(0, 0.9, 0); f.scale.set(0.42, 0.5, 1); m.sprite.add(f); m.fire = f;
+    const f = new THREE.Sprite(hellMat); f.center.set(0.5, 0.05); f.position.set(0, 0.86, 0); f.scale.set(0.5, 0.36, 1); m.sprite.add(f); m.fire = f;
     m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
     return m;
   }
@@ -4980,7 +4988,7 @@ const MONSTERS = [
   
       }
       if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
-      if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.42 * (2 - fl), 0.5 * fl, 1); }
+      if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.5 * (2 - fl), 0.36 * fl, 1); }
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
@@ -5215,6 +5223,9 @@ const MONSTERS = [
   seedRandom(SEED + 7);
   const ALTAR_NEED = 5, ALTAR_WAVE = 30, altars = [];
   const altTEl = document.getElementById('altT');
+  const ALTAR_ZONE = 11;
+  const zoneGeo = (() => { const g = new THREE.RingGeometry(ALTAR_ZONE - 0.35, ALTAR_ZONE, 72, 1); g.rotateX(-Math.PI / 2); const p = g.attributes.position, keep = [];      // dashed ring
+    const idx = g.index.array; for (let i = 0; i < idx.length; i += 6) if (Math.floor(i / 6) % 3 !== 2) keep.push(...idx.slice(i, i + 6)); g.setIndex(keep); return g; })();
   let altarsDone = 0, gateOpen = false, gateSpawned = false;
   function openGate() { if (gateOpen) return; gateOpen = true; flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
   function gateTick() {                                 // host: all three altars fed -> nine mini-bosses at the gate; it opens when they are dead
@@ -5247,7 +5258,9 @@ const MONSTERS = [
       const fg = new THREE.PlaneGeometry(3, 0.26); fg.translate(1.5, 0, 0);
       const fill = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0x5fd0ff, depthTest: false, transparent: true })); fill.position.set(-1.5, 0, 0.01); fill.renderOrder = 11; fill.scale.x = 0.001;
       bar.add(bg, fill);
-      altars.push({ x, z, g, runes, crystal, beam, bar, fill, n: 0, pending: 0, done: false, cd: 0, pulse: 0,
+      const zone = new THREE.Mesh(zoneGeo, glow(new THREE.MeshBasicMaterial({ color: 0xff7ad8, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }), 2));
+      zone.position.set(x, 0.07, z); scene.add(zone);                 // stay inside this ring while the chubziks are being fed in
+      altars.push({ zone, x, z, g, runes, crystal, beam, bar, fill, n: 0, pending: 0, done: false, cd: 0, pulse: 0,
                     mesh: { position: new THREE.Vector3(x, 0, z), visible: true }, r: 3, awake: false, spawnT: 0, stopT: 0, approved: false });
     }
   }
@@ -5355,7 +5368,7 @@ const MONSTERS = [
       const lv = A.done ? 3.2 : 0.35 + A.n / ALTAR_NEED * 1.6 + A.pulse * 2;
       A.crystal.material.color.setRGB(A.done ? lv : lv * 0.25, A.done ? lv * 0.72 : lv * 0.7, A.done ? lv * 0.25 : lv);
       A.bar.quaternion.copy(camera.quaternion); A.bar.visible = !A.done || A.pulse > 0;
-      if (A.done) continue;
+      if (A.done) { A.zone.visible = false; continue; }
       const dA = Math.hypot(car.pos.x - A.x, car.pos.z - A.z), up = car.alive && car.depth < 0.3;
       let guards = 0, close = 0;
       for (const m of swarm) if (!m.dead) { if (m.home === A) guards++; if (Math.hypot(m.pos.x - A.x, m.pos.z - A.z) < 15) close++; }
@@ -5376,10 +5389,12 @@ const MONSTERS = [
       if (A.awake && dA < timerD) { timerA = A; timerD = dA; }
       if (A.awake) A.crystal.material.color.setRGB(guards ? 2.2 + A.pulse * 2 : A.crystal.material.color.r, guards ? 0.25 : A.crystal.material.color.g, guards ? 0.4 : A.crystal.material.color.b);
       // close enough with passengers: offer the unload button over the altar
-      if (dA > 16) A.approved = false;
-      else if (!A.approved && up && dA < 11 && cart.riders.length && carBub.t < 0 && A.n + A.pending < ALTAR_NEED && (!offer || dA < offerD)) { offer = A; offerD = dA; }
+      A.zone.visible = true; A.zone.rotation.y += dt * 0.15;
+      { const inZ = up && dA < ALTAR_ZONE, has = cart.riders.length > 0; A.zone.material.opacity += ((inZ ? 0.9 : has ? 0.5 : 0.16) - A.zone.material.opacity) * Math.min(1, 6 * dt); }
+      if (dA > ALTAR_ZONE) A.approved = false;                // drive out of the ring and the sacrifice stops
+      else if (!A.approved && up && dA < ALTAR_ZONE && cart.riders.length && carBub.t < 0 && A.n + A.pending < ALTAR_NEED && (!offer || dA < offerD)) { offer = A; offerD = dA; }
       if (!A.approved || A.cd > 0 || !cart.riders.length || !up) continue;
-      if (A.n + A.pending >= ALTAR_NEED || dA > 12) continue;
+      if (A.n + A.pending >= ALTAR_NEED || dA > ALTAR_ZONE) continue;
       const c = cart.riders.pop(); cartNEl.textContent = cart.riders.length;      // off the cart, up to the crystal
       A.cd = 0.4; A.pending++; c.altar = A;
       tmp.set(A.x, 3.3, A.z); chubArc(c, tmp, 0.55, 'sacrifice', 2.5);
