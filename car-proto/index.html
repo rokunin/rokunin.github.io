@@ -4078,7 +4078,300 @@ laugh(r) {                                       // a big man's belly laugh: bre
     brute:   { hp: 9,   speed: 6,    size: 3.9, r: 1.35, bite: 12, hue: [0.03, 0.08, 0.95], heavy: true },
     flapper: { hp: 1.5, speed: 11,   size: 2.3, r: 0.65, bite: 4,  hue: [0.8, 0.88, 0.7], fly: 2.4 },
     spitter: { hp: 2,   speed: 7.5,  size: 2.1, r: 0.65, bite: 5,  hue: [0.2, 0.16, 0.42], ranged: true },
+    // the tentacled lot from the concept sheet
+    maw:      { hp: 2,   speed: 13.5, size: 3.0, r: 0.6,  bite: 6,  hue: [0.98, 0.3, 0.12] },                    // walking mouth, packs
+    oculon:   { hp: 3,   speed: 7,    size: 3.3, r: 0.7,  bite: 5,  hue: [0.78, 0.02, 0.5], ranged: true },      // hovering eye, spits
+    gloop:    { hp: 12,  speed: 5,    size: 2.7, r: 1.2,  bite: 8,  hue: [0.33, 0.55, 0.15], heavy: true, split: 'gloopling' },   // bursts into two small ones
+    gloopling:{ hp: 2,   speed: 10,   size: 1.5, r: 0.5,  bite: 4,  hue: [0.33, 0.55, 0.15], art: 'gloop' },
+    jelly:    { hp: 3,   speed: 8.5,  size: 4.4, r: 0.6,  bite: 9,  hue: [0.55, 0.85, 0.42] },                   // tall stinger
+    grubber:  { hp: 14,  speed: 5.5,  size: 4.9, r: 1.5,  bite: 14, hue: [0.08, 0.92, 0.6], heavy: true },
+    lamprey:  { hp: 4,   speed: 9.5,  size: 4.2, r: 0.7,  bite: 10, hue: [0.92, 0.12, 0.72], lunge: true },      // ambles, then lunges when close
+    spike:    { hp: 3,   speed: 15.5, size: 2.3, r: 0.75, bite: 9,  hue: [0.12, 0.62, 0.0], spiky: true },       // too prickly to run over
+    wingmaw:  { hp: 2.5, speed: 12,   size: 3.1, r: 0.7,  bite: 6,  hue: [0.7, 0.45, 0.88], fly: 1.0 },
   };
+  const MON = (() => {
+const OUT = '#1b1421', TAU = Math.PI * 2;
+const hsl = (h, s, l, a = 1) => `hsla(${(((h % 1) + 1) % 1) * 360},${Math.min(1, s) * 100}%,${l * 100}%,${a})`;
+const pal = (h, s = 0.62) => ({
+  body: hsl(h, s, 0.5), dark: hsl(h, s, 0.33), deep: hsl(h, s * 0.8, 0.2), light: hsl(h + 0.02, s + 0.1, 0.7),
+  acc: hsl(h + 0.45, 0.9, 0.6), accDark: hsl(h + 0.45, 0.75, 0.38), gum: '#3a0f1f', tooth: '#fff4dc',
+});
+
+// ---------- shared parts ----------
+function tentPts(x, y, len, ang, ph, { seg = 12, amp = 0.5, freq = 1.6, curl = 0 } = {}) {
+  const pts = [[x, y]], st = len / seg; let px = x, py = y;
+  for (let i = 1; i <= seg; i++) {
+    const s = i / seg, a = ang + curl * s * s + amp * Math.sin(ph * TAU - s * freq * Math.PI) * s;
+    px += Math.cos(a) * st; py += Math.sin(a) * st; pts.push([px, py]);
+  }
+  return pts;
+}
+function tentacle(c, pts, w0, w1, fill, suck) {
+  const n = pts.length, L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+    const w = (w0 + (w1 - w0) * i / (n - 1)) / 2;
+    L.push([pts[i][0] - dy * w, pts[i][1] + dx * w]); R.push([pts[i][0] + dy * w, pts[i][1] - dx * w]);
+  }
+  c.beginPath(); c.moveTo(L[0][0], L[0][1]);
+  for (let i = 1; i < n; i++) c.lineTo(L[i][0], L[i][1]);
+  const t = pts[n - 1]; c.arc(t[0], t[1], w1 / 2, Math.atan2(L[n - 1][1] - t[1], L[n - 1][0] - t[0]), Math.atan2(R[n - 1][1] - t[1], R[n - 1][0] - t[0]), true);
+  for (let i = n - 1; i >= 0; i--) c.lineTo(R[i][0], R[i][1]);
+  c.closePath(); c.fillStyle = fill; c.fill(); c.stroke();
+  if (suck) {
+    c.fillStyle = suck;
+    for (let i = 2; i < n - 1; i += 2) {
+      const w = (w0 + (w1 - w0) * i / (n - 1));
+      c.beginPath(); c.arc((pts[i][0] * 2 + L[i][0]) / 3, (pts[i][1] * 2 + L[i][1]) / 3, w * 0.17, 0, TAU); c.fill();
+    }
+  }
+}
+function eye(c, x, y, r, o = {}) {
+  const { look = [0, 0], iris = null, slit = false, lid = 0, lidCol = '#555', vein = false, angry = 0, glow = false } = o;
+  c.save();
+  c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = glow ? iris : '#fff6e0'; c.fill(); c.clip();
+  if (vein) { c.strokeStyle = '#d2475a'; c.lineWidth = Math.max(1, r * 0.06); for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + 0.4; c.beginPath(); c.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); c.quadraticCurveTo(x + Math.cos(a + 0.3) * r * 0.7, y + Math.sin(a + 0.3) * r * 0.7, x + Math.cos(a) * r * 0.5, y + Math.sin(a) * r * 0.5); c.stroke(); } }
+  const ix = x + look[0] * r * 0.35, iy = y + look[1] * r * 0.35;
+  if (glow) { c.fillStyle = '#fffbe6'; c.beginPath(); c.ellipse(ix, iy, r * 0.22, r * 0.55, 0, 0, TAU); c.fill(); }
+  else {
+    if (iris) { c.fillStyle = iris; c.beginPath(); c.arc(ix, iy, r * 0.62, 0, TAU); c.fill(); }
+    c.fillStyle = OUT; c.beginPath();
+    if (slit) c.ellipse(ix, iy, r * 0.16, r * 0.5, 0, 0, TAU); else c.arc(ix, iy, r * (iris ? 0.3 : 0.48), 0, TAU);
+    c.fill();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(ix - r * 0.2, iy - r * 0.22, r * 0.14, 0, TAU); c.fill();
+  }
+  if (lid > 0) { c.fillStyle = lidCol; c.fillRect(x - r - 1, y - r - 1, 2 * r + 2, 2 * r * lid + 1); c.strokeStyle = OUT; c.lineWidth = Math.max(2, r * 0.18); c.beginPath(); c.moveTo(x - r, y - r + 2 * r * lid); c.lineTo(x + r, y - r + 2 * r * lid); c.stroke(); }
+  c.restore();
+  c.lineWidth = Math.max(2.5, r * 0.22); c.strokeStyle = OUT;
+  c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke();
+  if (angry) { c.lineWidth = Math.max(3, r * 0.35); c.beginPath(); c.moveTo(x - r * 1.1, y - r * 1.15 - angry * r * 0.35); c.lineTo(x + r * 1.1, y - r * 1.15 + angry * r * 0.35); c.stroke(); }
+}
+const blink = (t, at = 0.86, len = 0.07) => { const k = ((t - at) % 1 + 1) % 1; return k < len ? Math.sin(k / len * Math.PI) : 0; };
+function teeth(c, x0, x1, y, h, n, down = true, col = '#fff4dc') {
+  c.fillStyle = col; c.lineWidth = 2.2; c.beginPath();
+  const w = (x1 - x0) / n;
+  for (let i = 0; i < n; i++) { c.moveTo(x0 + i * w, y); c.lineTo(x0 + (i + 0.5) * w, y + (down ? h : -h)); c.lineTo(x0 + (i + 1) * w, y); }
+  c.fill(); c.stroke();
+}
+function ringTeeth(c, cx, cy, rx, ry, n, len, rot = 0, col = '#fff4dc') {
+  c.fillStyle = col; c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a0 = rot + i / n * TAU, a1 = rot + (i + 1) / n * TAU, am = (a0 + a1) / 2;
+    c.moveTo(cx + Math.cos(a0) * rx, cy + Math.sin(a0) * ry);
+    c.lineTo(cx + Math.cos(am) * (rx - len), cy + Math.sin(am) * (ry - len));
+    c.lineTo(cx + Math.cos(a1) * rx, cy + Math.sin(a1) * ry);
+  }
+  c.fill(); c.stroke();
+}
+function limb(c, pts, w, col) {                          // thick jointed limb: outline pass then colour pass
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.strokeStyle = OUT; c.lineWidth = w + 5; c.beginPath(); pts.forEach((p, i) => c[i ? 'lineTo' : 'moveTo'](p[0], p[1])); c.stroke();
+  c.strokeStyle = col; c.lineWidth = w; c.stroke(); c.strokeStyle = OUT;
+}
+function blob(c, cx, cy, rx, ry, ph, wob = 0.05, k = 3, floor = 1e9) {
+  c.beginPath();
+  for (let i = 0; i <= 40; i++) {
+    const a = i / 40 * TAU, m = 1 + wob * Math.sin(a * k + ph) + wob * 0.6 * Math.sin(a * (k + 2) - ph * 1.3);
+    c[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * rx * m, Math.min(floor, cy + Math.sin(a) * ry * m));
+  }
+  c.closePath();
+}
+const shadow = (c, x, w) => { c.fillStyle = 'rgba(0,0,0,0.28)'; c.beginPath(); c.ellipse(x, 119, w, w * 0.18, 0, 0, TAU); c.fill(); };
+
+// ---------- the monsters (128 x 128 space, ground at y = 119) ----------
+const MONSTERS = [
+{
+  id: 'oculon', name: 'Oculon', tag: 'floater · ranged', h: 2.7, hues: [0.78, 0.02, 0.5],
+  text: 'A lidded eyeball on a skirt of writhing tentacles. Hovers at range, blinks before it fires a beam.',
+  draw(c, P, t, shadowOn = true) {
+    const bob = Math.sin(t * TAU) * 3, cx = 64, cy = 44 + bob;
+    if (shadowOn) shadow(c, 64, 22 - bob * 0.6);
+    c.lineWidth = 3.5;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 2 + (i - 2.5) * 0.34;
+      tentacle(c, tentPts(cx + Math.cos(a) * 20, cy + Math.sin(a) * 20, 48 - Math.abs(i - 2.5) * 5, a, t + i * 0.19, { amp: 0.9, curl: (i - 2.5) * 0.35 }), 10, 2, i % 2 ? P.dark : P.body, P.light);
+    }
+    c.lineWidth = 4.5; c.fillStyle = P.dark; c.beginPath();
+    for (let i = 0; i <= 20; i++) { const a = i / 20 * TAU - Math.PI / 2, r = i % 2 ? 31 : 39; c[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
+    c.closePath(); c.fill(); c.stroke();
+    eye(c, cx, cy, 28, { look: [Math.sin(t * TAU * 0.5) * 0.7, 0.25], iris: P.acc, slit: true, vein: true, lid: 0.18 + 0.82 * blink(t), lidCol: P.body });
+  },
+},
+{
+  id: 'maw', name: 'Mawstrider', tag: 'runner · biter', h: 2.5, hues: [0.98, 0.3, 0.12],
+  text: 'A walking mouth on five tentacle legs, three eyes on stalks. Fast, swarms in packs.',
+  draw(c, P, t, shadowOn = true) {
+    const step = Math.sin(t * TAU), bob = Math.abs(Math.cos(t * TAU)) * 3, cy = 60 - bob;
+    if (shadowOn) shadow(c, 64, 30);
+    c.lineWidth = 3.5;
+    for (let i = 0; i < 5; i++) {
+      const sx = 64 + (i - 2) * 9, a = Math.PI / 2 + (i - 2) * 0.42 + (i % 2 ? step : -step) * 0.22;
+      tentacle(c, tentPts(sx, cy + 18, 46 - Math.abs(i - 2) * 6 + bob, a, t + i * 0.25, { amp: 0.35, curl: (i - 2) * 0.55 }), 11, 3, i === 2 ? P.body : P.dark, P.light);
+    }
+    for (const [x, len, ph] of [[46, 14, 0], [64, 19, 0.33], [82, 12, 0.66]]) {
+      const sw = Math.sin((t + ph) * TAU) * 5, ex = x + sw, ey = cy - 26 - len;
+      limb(c, [[x, cy - 22], [x + sw * 0.4, cy - 22 - len * 0.6], [ex, ey]], 4, P.dark);
+      eye(c, ex, ey, 6.5, { look: [0.3, 0.4], iris: P.acc, lid: blink(t, 0.3 + ph, 0.06), lidCol: P.dark });
+    }
+    c.lineWidth = 4.5; c.fillStyle = P.body;
+    blob(c, 64, cy, 32, 30, t * TAU, 0.04); c.fill(); c.stroke();
+    const open = 0.75 + 0.25 * Math.sin(t * TAU * 2);
+    c.fillStyle = P.gum; c.beginPath(); c.ellipse(64, cy + 2, 17, 23 * open, 0, 0, TAU); c.fill(); c.stroke();
+    ringTeeth(c, 64, cy + 2, 17, 23 * open, 13, 7);
+    c.lineWidth = 3; tentacle(c, tentPts(64, cy + 14 * open, 22, Math.PI / 2 + 0.2, t, { seg: 8, amp: 0.8 }), 8, 3, '#e5627c');
+  },
+},
+{
+  id: 'gloop', name: 'Gloop', tag: 'tank · splits', h: 2.0, hues: [0.33, 0.55, 0.15],
+  text: 'A slime heap full of mismatched eyes. Slow and soaks damage, bursts into two small gloops.',
+  draw(c, P, t, shadowOn = true) {
+    const s = Math.sin(t * TAU);
+    if (shadowOn) { c.fillStyle = P.dark; c.beginPath(); c.ellipse(64, 117, 50, 7, 0, 0, TAU); c.fill(); c.lineWidth = 3; c.stroke(); }
+    c.lineWidth = 3.5;
+    tentacle(c, tentPts(30, 84, 28, Math.PI + 0.6, t, { seg: 8, amp: 0.9, curl: 1.4 }), 12, 4, P.body);
+    tentacle(c, tentPts(98, 80, 26, -0.6, t + 0.4, { seg: 8, amp: 0.9, curl: -1.2 }), 11, 4, P.body);
+    c.lineWidth = 4.5; c.fillStyle = P.body;
+    blob(c, 64, 84 - s * 1.5, 42 * (1 + s * 0.03), 40 * (1 - s * 0.03), t * TAU, 0.05, 4, 117); c.fill(); c.stroke();
+    c.fillStyle = 'rgba(255,255,255,0.28)'; c.beginPath(); c.ellipse(46, 62, 10, 6, -0.6, 0, TAU); c.fill();
+    for (const [i, x, y] of [[0, 52, 112], [1, 80, 110]]) { const d = ((t * 1.3 + i * 0.5) % 1); c.fillStyle = P.body; c.beginPath(); c.ellipse(x, y + d * 4, 3, 4 + d * 3, 0, 0, TAU); c.fill(); }
+    const eyes = [[50, 70, 10, 0.1], [74, 62, 13, 0.4], [91, 80, 7, 0.7], [58, 94, 6, 0.25], [80, 95, 8, 0.85], [36, 88, 5, 0.55], [64, 48, 6, 0.15]];
+    for (const [x, y, r, ph] of eyes) eye(c, x, y + Math.sin((t + ph) * TAU) * 1.5, r, { look: [Math.sin((t * 0.5 + ph) * TAU) * 0.8, 0.3], iris: r > 8 ? P.acc : null, lid: blink(t, ph, 0.08), lidCol: P.body });
+    c.lineWidth = 3; c.beginPath(); c.moveTo(54, 106); for (let i = 1; i <= 6; i++) c.lineTo(54 + i * 4, 106 + (i % 2 ? -3 : 1)); c.stroke();
+  },
+},
+{
+  id: 'jelly', name: 'Jellystalker', tag: 'tall · stinger', h: 3.6, hues: [0.55, 0.85, 0.42],
+  text: 'A see-through jelly dome on four stilt legs, stingers dangling. Stings everything under it.',
+  draw(c, P, t, shadowOn = true) {
+    const bob = Math.sin(t * TAU * 2) * 1.5, cx = 64, cy = 40 + bob;
+    if (shadowOn) shadow(c, 64, 38);
+    const feet = [[16, 0], [44, 0.5], [84, 0.25], [112, 0.75]];
+    feet.forEach(([fx, ph], i) => {
+      const k = Math.sin((t + ph) * TAU), lift = Math.max(0, k) * 6, x = fx + Math.cos((t + ph) * TAU) * 5;
+      const hx = cx + (fx - 64) * 0.35, hy = cy + 16;
+      limb(c, [[hx, hy], [hx + (fx - 64) * 0.55, hy - 14], [x, 118 - lift]], 5, P.dark);
+    });
+    c.lineWidth = 3;
+    for (let i = 0; i < 5; i++) tentacle(c, tentPts(cx - 16 + i * 8, cy + 18, 40 + (i % 2) * 12, Math.PI / 2, t + i * 0.2, { amp: 0.5, freq: 2.2 }), 4, 1.5, P.acc);
+    c.lineWidth = 4.5;
+    c.fillStyle = hsl(0, 0, 1, 0); c.beginPath(); c.ellipse(cx, cy + 4, 36, 30, 0, Math.PI, TAU);
+    for (let i = 0; i <= 8; i++) { const x = cx + 36 - i * 9; c.quadraticCurveTo(x - 4.5, cy + 4 + (i % 2 ? 10 : 6), x - 9, cy + 4); }
+    c.closePath();
+    c.save(); c.globalAlpha = 0.82; c.fillStyle = P.body; c.fill(); c.restore();
+    c.save(); c.clip();
+    c.fillStyle = P.acc; for (const [x, y, r] of [[52, -8, 8], [72, -14, 6], [66, 0, 5]]) { c.beginPath(); c.arc(cx - 64 + x + Math.sin(t * TAU + x) * 2, cy + y, r, 0, TAU); c.fill(); }
+    c.fillStyle = 'rgba(255,255,255,0.3)'; c.beginPath(); c.ellipse(cx - 14, cy - 14, 12, 6, -0.4, 0, TAU); c.fill();
+    c.restore(); c.stroke();
+    for (let i = 0; i < 4; i++) eye(c, cx - 15 + i * 10, cy + 2 - Math.abs(i - 1.5) * 2, 4.5, { look: [0, 0.5], lid: blink(t, 0.2 + i * 0.05, 0.06), lidCol: P.body });
+  },
+},
+{
+  id: 'grubber', name: 'Grubber', tag: 'heavy · grabber', h: 4.0, hues: [0.08, 0.92, 0.6],
+  text: 'A hunched brute with a beard of face tentacles and claw hands. Slow, grabs and pins the car.',
+  draw(c, P, t, shadowOn = true) {
+    const s = Math.sin(t * TAU), bob = Math.abs(s) * 2;
+    if (shadowOn) shadow(c, 64, 46);
+    limb(c, [[48, 98], [44, 117]], 14, P.dark); limb(c, [[80, 98], [84, 117]], 14, P.dark);
+    c.lineWidth = 4.5; c.fillStyle = P.dark;
+    for (let i = 0; i < 5; i++) { const x = 34 + i * 15, y = 34 + Math.abs(i - 2) * 6 + bob; c.beginPath(); c.moveTo(x - 7, y + 10); c.lineTo(x - 2, y - 14 + Math.abs(i - 2) * 3); c.lineTo(x + 7, y + 10); c.fill(); c.stroke(); }
+    c.fillStyle = P.body; c.beginPath();
+    c.moveTo(26, 102); c.bezierCurveTo(10, 60, 30, 30 + bob, 64, 30 + bob); c.bezierCurveTo(98, 30 + bob, 118, 60, 102, 102); c.quadraticCurveTo(64, 112, 26, 102);
+    c.fill(); c.stroke();
+    c.fillStyle = P.light; c.lineWidth = 3; c.beginPath(); c.ellipse(64, 84, 24, 18, 0, 0, TAU); c.fill(); c.stroke();
+    c.strokeStyle = P.dark; c.lineWidth = 2.5;
+    for (const [x0, y0, x1, y1] of [[52, 76, 60, 90], [57, 74, 65, 88], [72, 80, 80, 92]]) { c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
+    c.strokeStyle = OUT;
+    for (const sd of [-1, 1]) {
+      const sw = sd * s * 6, hx = 64 + sd * 50 + sw * 0.3, hy = 96 + sd * s * 3;
+      limb(c, [[64 + sd * 34, 54 + bob], [64 + sd * 48, 74], [hx, hy]], 13, P.body);
+      c.lineWidth = 3; c.fillStyle = '#efe2c4';
+      for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(hx + k * 5, hy + 3); c.quadraticCurveTo(hx + k * 7 + sd * 2, hy + 12, hx + k * 4 - sd * 3, hy + 16); c.lineTo(hx + k * 5 + 3, hy + 4); c.fill(); c.stroke(); }
+    }
+    const hy = 40 + bob;
+    c.lineWidth = 3;
+    for (let i = 0; i < 6; i++) tentacle(c, tentPts(52 + i * 4.8, hy + 10, 22 + (i % 3) * 6, Math.PI / 2 + (i - 2.5) * 0.12, t + i * 0.15, { seg: 9, amp: 0.7, curl: (i - 2.5) * 0.2 }), 6, 2, i % 2 ? P.dark : P.body, P.light);
+    c.lineWidth = 4.5; c.fillStyle = P.body; c.beginPath(); c.ellipse(64, hy, 18, 16, 0, 0, TAU); c.fill(); c.stroke();
+    eye(c, 56, hy - 2, 5, { iris: P.acc, glow: true, angry: 1 }); eye(c, 72, hy - 2, 5, { iris: P.acc, glow: true, angry: -1 });
+  },
+},
+{
+  id: 'lamprey', name: 'Lamprey', tag: 'burrower · ambush', h: 3.4, hues: [0.92, 0.12, 0.72],
+  text: 'A segmented worm that erupts from a hole, ringed mouth of teeth facing you. Pops up under the car.',
+  draw(c, P, t, shadowOn = true) {
+    const rise = 0.85 + 0.15 * Math.sin(t * TAU);
+    c.lineWidth = 3.5;
+    c.fillStyle = '#2a1e18'; c.beginPath(); c.ellipse(64, 114, 28, 8, 0, 0, TAU); c.fill(); c.stroke();
+    c.fillStyle = '#6b5240'; for (let i = 0; i < 9; i++) { const a = i / 9 * TAU; c.beginPath(); c.arc(64 + Math.cos(a) * 30, 114 + Math.sin(a) * 9, 4, 0, TAU); c.fill(); c.stroke(); }
+    const segs = 8, pts = [];
+    for (let k = 0; k <= segs; k++) pts.push([64 + Math.sin(t * TAU + k * 0.55) * k * 2.2, 112 - k * 9.5 * rise]);
+    c.lineWidth = 4;
+    for (let k = 0; k < segs; k++) {
+      const [x, y] = pts[k], r = 15 + k * 0.5;
+      c.fillStyle = P.dark; c.beginPath(); c.moveTo(x - 4, y - r + 2); c.lineTo(x, y - r - 7); c.lineTo(x + 4, y - r + 2); c.fill(); c.stroke();
+      c.fillStyle = k % 2 ? P.body : P.light; c.beginPath(); c.ellipse(x, y, r, r * 0.8, 0, 0, TAU); c.fill(); c.stroke();
+    }
+    const [hx, hy] = pts[segs];
+    c.fillStyle = P.body; c.beginPath(); c.arc(hx, hy, 25, 0, TAU); c.fill(); c.stroke();
+    for (let i = 0; i < 4; i++) eye(c, hx - 18 + i * 12, hy - 22 + Math.abs(i - 1.5) * 4, 4.5, { look: [0, 0.5], lid: blink(t, 0.1 + i * 0.08, 0.05), lidCol: P.body });
+    c.fillStyle = P.light; c.beginPath(); c.arc(hx, hy + 2, 19, 0, TAU); c.fill(); c.stroke();
+    c.fillStyle = P.gum; c.beginPath(); c.arc(hx, hy + 2, 15, 0, TAU); c.fill();
+    ringTeeth(c, hx, hy + 2, 15, 15, 14, 6, t * 1.5);
+    c.fillStyle = '#12070c'; c.beginPath(); c.arc(hx, hy + 2, 7, 0, TAU); c.fill();
+    ringTeeth(c, hx, hy + 2, 8, 8, 9, 4, -t * 2);
+  },
+},
+{
+  id: 'spike', name: 'Spikeroll', tag: 'charger · roller', h: 1.9, hues: [0.12, 0.62, 0.0],
+  text: 'A spiny ball with a huge grin. Curls up and rolls at you in straight charges.',
+  draw(c, P, t, shadowOn = true) {
+    const b = Math.abs(Math.sin(t * TAU)), y = 86 - b * 10, sq = 1 - (1 - b) * 0.1;
+    if (shadowOn) shadow(c, 64, 30 - b * 6);
+    c.lineWidth = 3.5; c.fillStyle = P.dark;
+    const rot = t * TAU * 0.5;
+    for (let i = 0; i < 14; i++) {
+      const a = rot + i / 14 * TAU, a0 = a - 0.18, a1 = a + 0.18;
+      c.beginPath(); c.moveTo(64 + Math.cos(a0) * 27, y + Math.sin(a0) * 27 * sq); c.lineTo(64 + Math.cos(a) * 44, y + Math.sin(a) * 44 * sq); c.lineTo(64 + Math.cos(a1) * 27, y + Math.sin(a1) * 27 * sq); c.fill(); c.stroke();
+    }
+    c.lineWidth = 4.5; c.fillStyle = P.body; c.beginPath(); c.ellipse(64, y, 31, 31 * sq, 0, 0, TAU); c.fill(); c.stroke();
+    c.fillStyle = P.gum; c.beginPath(); c.moveTo(38, y + 2); c.quadraticCurveTo(64, y + 32 * sq, 90, y + 2); c.quadraticCurveTo(64, y + 12, 38, y + 2); c.fill(); c.stroke();
+    teeth(c, 44, 84, y + 6, 6, 7);
+    eye(c, 52, y - 12, 9, { look: [0.4, 0.3], iris: P.acc, angry: 1 }); eye(c, 76, y - 14, 6, { look: [0.4, 0.3], angry: -1 });
+  },
+},
+{
+  id: 'wingmaw', name: 'Wingmaw', tag: 'flyer · diver', h: 2.5, hues: [0.7, 0.45, 0.88],
+  text: 'A flying mouth with one eye, bat wings and a barbed tentacle tail. Circles, then dives.',
+  draw(c, P, t, shadowOn = true) {
+    const s = Math.sin(t * TAU * 2), bob = Math.sin(t * TAU) * 4, cx = 64, cy = 42 + bob;
+    if (shadowOn) shadow(c, 64, 16);
+    c.lineWidth = 3.5;
+    const tail = tentPts(cx, cy + 18, 54, Math.PI / 2, t, { amp: 0.7, freq: 1.8 });
+    tentacle(c, tail, 9, 3, P.dark);
+    const tp = tail[tail.length - 1]; c.fillStyle = P.acc; c.beginPath(); c.moveTo(tp[0] - 6, tp[1] - 3); c.lineTo(tp[0], tp[1] + 9); c.lineTo(tp[0] + 6, tp[1] - 3); c.closePath(); c.fill(); c.stroke();
+    for (const sd of [-1, 1]) {
+      const wy = s * 18, tipX = cx + sd * 62, tipY = cy - 18 + wy;
+      c.fillStyle = P.dark; c.lineWidth = 4; c.beginPath(); c.moveTo(cx + sd * 14, cy - 8);
+      c.quadraticCurveTo(cx + sd * 40, cy - 34 + wy, tipX, tipY);
+      for (let k = 0; k < 3; k++) { const fx = cx + sd * (54 - k * 13), fy = cy + 4 + wy * (0.7 - k * 0.2); c.quadraticCurveTo(fx + sd * 4, fy - 10, fx, fy); }
+      c.quadraticCurveTo(cx + sd * 20, cy + 6, cx + sd * 14, cy + 8); c.closePath(); c.fill(); c.stroke();
+      c.strokeStyle = P.light; c.lineWidth = 1.6;
+      for (let k = 0; k < 3; k++) { c.beginPath(); c.moveTo(cx + sd * 16, cy - 6); c.lineTo(cx + sd * (54 - k * 13), cy + 4 + wy * (0.7 - k * 0.2)); c.stroke(); }
+      c.strokeStyle = OUT;
+    }
+    c.lineWidth = 4.5; c.fillStyle = P.dark;
+    for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(cx + sd * 8, cy - 18); c.lineTo(cx + sd * 16, cy - 32); c.lineTo(cx + sd * 17, cy - 13); c.fill(); c.stroke(); }
+    c.fillStyle = P.body; c.beginPath(); c.arc(cx, cy, 23, 0, TAU); c.fill(); c.stroke();
+    const open = 0.6 + 0.4 * Math.max(0, Math.sin(t * TAU * 2 + 1));
+    c.fillStyle = P.gum; c.beginPath(); c.ellipse(cx, cy + 9, 17, 9 * open + 2, 0, 0, TAU); c.fill(); c.stroke();
+    teeth(c, cx - 14, cx + 14, cy + 9 - 9 * open, 5, 6); teeth(c, cx - 12, cx + 12, cy + 9 + 9 * open, 5, 5, false);
+    eye(c, cx, cy - 8, 9, { look: [0, 0.6], iris: P.acc, slit: true, lid: 0.15 + 0.85 * blink(t, 0.6), lidCol: P.body });
+  },
+},
+];
+    const by = {}; for (const m of MONSTERS) by[m.id] = m;
+    return { by, pal };
+  })();
   function swRng(seed) { let a = seed >>> 0; return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; }; }
   const hsl = (h, s, l) => `hsl(${(h % 1) * 360},${s * 100}%,${l * 100}%)`;
 
@@ -4106,6 +4399,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   // draws one frame of one critter variant; f = 0..3 walk phase
   function drawCritter(ctx, kind, spec, f) {
+    if (MON.by[kind]) {                                  // concept-sheet monsters bring their own painter (128 px space, ground at y = 119)
+      ctx.save(); ctx.translate(0, 5); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = OUTLINE;
+      MON.by[kind].draw(ctx, MON.pal(spec.h), f / SW_FRAMES, false); ctx.restore(); return;
+    }
     const r = swRng(spec.seed), ph = f / SW_FRAMES * 6.283, s = Math.sin(ph), c = Math.cos(ph);
     const body = hsl(spec.h, 0.62, 0.5), dark = hsl(spec.h, 0.6, 0.32), light = hsl(spec.h + 0.03, 0.7, 0.68);
     ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = OUTLINE; ctx.lineWidth = 5;
@@ -4192,10 +4489,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const SW_ART = {};
   const SW_TINT = 0.36;                                  // sprites are unlit: scale into the HDR range the 3D scene lives in
   for (const kind of Object.keys(SW_KINDS)) {
+    if (SW_KINDS[kind].art) { SW_ART[kind] = SW_ART[SW_KINDS[kind].art]; continue; }
     SW_ART[kind] = [0, 1, 2].map(v => {
       const rr = swRng(kind.length * 977 + v * 131);
       const spec = { seed: 11 + v * 37 + kind.length, h: SW_KINDS[kind].hue[v] + (rr() - 0.5) * 0.03, eyes: rr() < 0.4 ? 1 : 2, ear: rr() < 0.5 };
-      const mk = (white) => Array.from({ length: SW_FRAMES }, (_, f) => {
+      const mk = (white) => Array.from({ length: white ? 1 : SW_FRAMES }, (_, f) => {      // one hit frame is plenty: it shows for a blink
         const cv = mkCanvas(SW_PX), x = cv.getContext('2d');
         drawCritter(x, kind, spec, f);
         if (white) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = '#fff'; x.fillRect(0, 0, SW_PX, SW_PX); }
@@ -4231,6 +4529,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
     if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
     waves.lastKill.copy(m.pos);
+    if (m.K.split) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
@@ -4244,17 +4543,18 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // waves: a new pack arrives off-screen every ~35 s (or sooner once the last one is nearly gone)
   const WAVE_PLANS = [
     [['gremlin', 8]],
-    [['gremlin', 10], ['stilt', 4]],
-    [['flapper', 9], ['gremlin', 8]],
-    [['brute', 2], ['gremlin', 12]],
-    [['spitter', 4], ['stilt', 8]],
-    [['flapper', 10], ['brute', 2], ['spitter', 3]],
+    [['maw', 7], ['gremlin', 5]],
+    [['flapper', 6], ['wingmaw', 5]],
+    [['gloop', 2], ['brute', 1], ['gremlin', 8]],
+    [['oculon', 3], ['spitter', 2], ['stilt', 6]],
+    [['spike', 6], ['jelly', 4]],
+    [['grubber', 2], ['lamprey', 4], ['maw', 6]],
   ];
   const waves = { n: 0, t: 16, since: 0, lastKill: new THREE.Vector3(), pending: false, alive: 0 };
   function spawnWave() {
     const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
-      : [[['gremlin', 'stilt', 'flapper', 'spitter'][Math.floor(Math.random() * 4)], 10 + Math.min(14, n * 2)],
-         [['brute', 'spitter', 'gremlin'][Math.floor(Math.random() * 3)], 3 + Math.min(6, n >> 1)]];
+      : [[['gremlin', 'stilt', 'flapper', 'spitter', 'maw', 'jelly', 'wingmaw', 'spike'][Math.floor(Math.random() * 8)], 10 + Math.min(14, n * 2)],
+         [['brute', 'spitter', 'gremlin', 'gloop', 'grubber', 'oculon', 'lamprey'][Math.floor(Math.random() * 7)], 3 + Math.min(6, n >> 1)]];
     const reach = Math.max(camera.right, camera.top * 1.5) + 5;
     const base = Math.random() * 6.283, wp = netAnyPlayer();      // in a lobby the pack turns up next to a random player
     plan.forEach(([kind, count], gi) => {
@@ -4324,7 +4624,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         else if (m.cartFan && (mine ? cart.riders.length : T.R.cn)) {        // half of them go for the cart instead of the car
           const cp = mine ? cart.pos : T.R.cpos, cx = cp.x - m.pos.x, cz = cp.z - m.pos.z, cd = Math.hypot(cx, cz) || 1; tx = cx / cd * K.speed; tz = cz / cd * K.speed;
         }
-        else { tx = nx * K.speed; tz = nz * K.speed; }
+        else { const q = K.lunge ? (dist < 10 ? 1.75 : 0.7) : 1; tx = nx * K.speed * q; tz = nz * K.speed * q; }
         for (const o of swarm) {                           // separation (local only)
           if (o === m || o.dead) continue;
           const sx = m.pos.x - o.pos.x, sz = m.pos.z - o.pos.z, md = K.r + o.K.r + 0.3;
@@ -4341,7 +4641,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         const reachR = T.radius + K.r;
         if (T.alive && T.depth < 0.3 && dist < reachR) {
           const carSpeed = Math.hypot(T.vel.x, T.vel.z), airOK = K.fly ? T.y < K.fly + 1.5 : T.y < 1.2;
-          if (!K.fly && !K.heavy && carSpeed > 9 && T.y < 0.8) { killCritter(m, swA.set(-nx, 0, -nz)); SFX.play('hit_flesh', m.pos); continue; }
+          if (!K.fly && !K.heavy && !K.spiky && carSpeed > 9 && T.y < 0.8) { killCritter(m, swA.set(-nx, 0, -nz)); SFX.play('hit_flesh', m.pos); continue; }
           const push = reachR - dist;
           m.pos.x -= nx * push; m.pos.z -= nz * push;
           if (K.heavy && mine) { car.pos.x += nx * push * 0.5; car.pos.z += nz * push * 0.5; }
@@ -4366,7 +4666,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
-      m.sprite.material = m.flash > 0 ? m.art.hit[f] : m.art.walk[f];
+      m.sprite.material = m.flash > 0 ? m.art.hit[0] : m.art.walk[f];
       const sx = m.vel.x - m.vel.z;                      // screen-right in this iso view is world (+x, -z)
       if (Math.abs(sx) > 0.4) m.facing = sx > 0 ? -1 : 1;
       const grow = Math.min(1, m.born / 0.35), sz = K.size * grow;
@@ -4627,7 +4927,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
   function altarGuards(A, n) {
     if (NET.client) { netEv({ t: 'guards', k: altars.indexOf(A), n }, NET.hostPeer); return; }
-    const kinds = ['gremlin', 'gremlin', 'stilt', 'gremlin', 'spitter', 'gremlin', 'stilt', 'brute'];
+    const kinds = ['gremlin', 'maw', 'stilt', 'gremlin', 'oculon', 'maw', 'jelly', Math.random() < 0.5 ? 'brute' : 'grubber'];
     for (let i = 0; i < n && swarm.length < SW_CAP; i++) {
       const a = Math.random() * 6.283, d = 5 + Math.random() * 6;
       const m = spawnCritter(n > 2 ? kinds[i % kinds.length] : kinds[Math.floor(Math.random() * 5)], A.x + Math.cos(a) * d, A.z + Math.sin(a) * d); m.home = A;
@@ -4723,14 +5023,16 @@ laugh(r) {                                       // a big man's belly laugh: bre
       for (const e of enemies) if (!e.dead && e.awake && !e.carried && Math.hypot(e.pos.x - A.x, e.pos.z - A.z) < 15) close++;
       // the altar notices the car: it laughs and calls its guard
       if (!A.awake && up && dA < 30) {
-        A.awake = true; A.spawnT = ALTAR_WAVE; A.pulse = 1;
-        SFX.play('laugh', null); SFX.play('laugh', null, { delay: 2.3, rate: 0.9 });
-        flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5);
-        tmp.set(A.x, 3, A.z); flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5);
-        altarGuards(A, 8);
+        A.awake = true; A.pulse = 1;
+        const since = elapsed - (A.waveAt == null ? -999 : A.waveAt);
+        if (since < ALTAR_WAVE) A.spawnT = ALTAR_WAVE - since;                 // came back before its timer ran out: no fresh wave, no laugh
+        else { A.spawnT = ALTAR_WAVE; A.waveAt = elapsed; SFX.play('laugh', null);
+          flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5);
+          tmp.set(A.x, 3, A.z); flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5);
+          altarGuards(A, 8); }
       } else if (A.awake && dA > 52) A.awake = false;
       if (A.awake && (A.spawnT -= dt) <= 0) {            // one wave at a time, the next one is on a visible timer
-        A.spawnT = ALTAR_WAVE; A.pulse = 1; altarGuards(A, 8); SFX.play('laugh', null, { rate: 1.05 });
+        A.spawnT = ALTAR_WAVE; A.waveAt = elapsed; A.pulse = 1; altarGuards(A, 8); SFX.play('laugh', null, { rate: 1.05 });
         tmp.set(A.x, 3, A.z); flash(tmp, 0xff3a5a, 14, 0.4, 3);
       }
       if (A.awake && dA < timerD) { timerA = A; timerD = dA; }
@@ -4865,7 +5167,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function seedResidents() {                           // packs that live around some of the rocks and lay siege to them
     if (!rocks.length || NET.client) return;
     for (const R of rocks.slice().sort(() => Math.random() - 0.5).slice(0, 9)) {
-      const kinds = ['gremlin', 'gremlin', 'stilt', 'spitter'];
+      const kinds = [['gremlin', 'gremlin', 'stilt', 'spitter'], ['maw', 'maw', 'jelly', 'oculon'], ['gremlin', 'spike', 'lamprey', 'spitter']][Math.floor(Math.random() * 3)];
       kinds.forEach((k, i) => { const a = i * 1.6 + Math.random(), m = spawnCritter(k, R.mesh.position.x + Math.cos(a) * (R.r + 6), R.mesh.position.z + Math.sin(a) * (R.r + 6)); m.home = R; });
     }
   }
@@ -5068,7 +5370,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
 
   // ---------- BOSS: Пирамидон ----------
-  const BOSS_HP = 250, TENT_SP = 0.85, TENT_MIN = 10, TENT_MAX = 34;
+  const BOSS_HP = 1000, TENT_SP = 0.85, TENT_MIN = 10, TENT_MAX = 34;
   const bossBarEl = document.getElementById('bossbar'), bossFillEl = document.getElementById('bossfill');
   const boss = { state: 'idle', hp: BOSS_HP, t: 0, throwCd: 2, lashCd: 1.5, lifting: null, flash: 0, dirtT: 0 };
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
@@ -5222,7 +5524,30 @@ laugh(r) {                                       // a big man's belly laugh: bre
     obstacles.push({ mesh: m, hx: sz / 2, hz: sz / 2, h: sz, solid: true, crate: true, hp: 3, flash: 0, room: true });
   }
 
+  function bossFan(n, spread, speed, aim) {             // a fan (or a full ring) of slow glowing shots from the pyramid
+    const from = new THREE.Vector3(BOSS_POS.x, 2.4, BOSS_POS.z);
+    for (let i = 0; i < n; i++) {
+      const a = aim + (n > 1 ? (i / (n - 1) - 0.5) * spread : 0), m = new THREE.Mesh(eshotGeo, eshotMat[1]);
+      m.position.set(from.x + Math.sin(a) * 4.5, from.y, from.z + Math.cos(a) * 4.5); m.scale.setScalar(1.15);
+      const halo = new THREE.Sprite(eshotHaloMat[1]); halo.scale.setScalar(2.2); m.add(halo); scene.add(m);
+      eshots.push({ m, v: new THREE.Vector3(Math.sin(a) * speed, -0.35, Math.cos(a) * speed), life: 4.2, dmg: 6, k: 1 });
+    }
+    SFX.play('eshot', from, { rate: 0.7, vol: 1 });
+  }
+  function bossFanTick(dt) {
+    if (boss.state !== 'fight' || !car.alive) return;
+    const rage = boss.hp < BOSS_HP * 0.5, aim = Math.atan2(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z);
+    if (boss.fanLeft > 0 && (boss.fanGap -= dt) <= 0) {                  // a burst: several fans in a row, each offset half a step so the gaps move
+      boss.fanLeft--; boss.fanGap = 0.42;
+      if (boss.fanRing) bossFan(18, 6.283 * 17 / 18, 9.5, boss.fanLeft * 0.175); else bossFan(rage ? 9 : 7, rage ? 1.5 : 1.15, 11.5, aim + (boss.fanLeft % 2 ? 0.09 : -0.09));
+    }
+    if ((boss.fanCd = (boss.fanCd == null ? 3 : boss.fanCd) - dt) <= 0) {
+      boss.fanRing = rage && Math.random() < 0.45; boss.fanLeft = boss.fanRing ? 3 : rage ? 4 : 3; boss.fanGap = 0;
+      boss.fanCd = rage ? rand(3.2, 4.4) : rand(4.5, 6);
+    }
+  }
   function bossThrowTick(dt) {
+    bossFanTick(dt);
     boss.throwCd -= dt;
     if (!boss.lifting && boss.throwCd <= 0) {
       let best = null, bd = Infinity;
