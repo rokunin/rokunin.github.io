@@ -815,7 +815,34 @@ laugh(r) {                                       // a big man's belly laugh: bre
         const c = noise(len, r); filt(c, 'bp', 420, 1.2); env(c, t => Math.min(1, t / 0.6) * Math.exp(-Math.max(0, t - 1.2) / 0.4) * (0.7 + 0.3 * Math.sin(t * 6.283 * 7))); mix(o, c, 0.5);
         return norm(o, 0.7);
       },
+      hoof(r) {                                        // unicorn hoofbeat: dull thump plus a hard clack
+        const len = 0.16, o = N(len);
+        const b = osc(0.12, exp(150 + 40 * r(), 55, 0.04)); env(b, ad(0.001, 0.035)); mix(o, b, 1);
+        const n = noise(0.05, r); filt(n, 'bp', 900 + 500 * r(), 2.5); env(n, ad(0.0004, 0.012)); mix(o, n, 0.9);
+        return norm(o, 0.55);
+      },
+      tick(r) {                                        // spider foot: small metallic tap
+        const len = 0.07, o = N(len);
+        const n = noise(0.03, r); filt(n, 'bp', 3200 + 1500 * r(), 3); env(n, ad(0.0003, 0.006)); mix(o, n, 1);
+        const s = osc(0.05, 1500 + 900 * r(), 'tri'); env(s, ad(0.0005, 0.012)); mix(o, s, 0.35);
+        return norm(o, 0.4);
+      },
       // ---- loops (rendered once, played continuously with live gain / rate) ----
+      hum_loop() {                                     // the halo: a slow-beating glass chord, no engine in it
+        return looped(4, sec => {
+          const b = N(sec); for (const [f, g] of [[220, 1], [220.5, 0.8], [330, 0.55], [329.25, 0.4], [440.5, 0.3], [660, 0.12]]) mix(b, osc(sec, f), g * 0.25);
+          env(b, t => 0.8 + 0.2 * Math.sin(t * 6.283 * 0.5));
+          const n = noise(sec, rng(17), 'pink'); filt(n, 'bp', 1800, 0.7); mix(b, n, 0.1);
+          return b;
+        });
+      },
+      servo_loop() {                                   // the spider: thin servo whine
+        return looped(1, sec => {
+          const b = osc(sec, 180, 'saw'); mix(b, osc(sec, 362, 'saw'), 0.5); filt(b, 'bp', 1400, 2.5);
+          env(b, t => 0.6 + 0.4 * Math.sin(t * 6.283 * 22));
+          return b;
+        });
+      },
       engine_loop() {                                  // 40 firing pulses per second; rate follows speed
         return looped(1, sec => {
           const b = N(sec), r = rng(7);
@@ -877,6 +904,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
     // name -> recipe, variants, gain, voice limit, min gap between plays (s), reverb send
     const DEFS = {
+      hoof:        { n: 4, g: 0.4,  max: 6,  gap: 0 },
+      tick:        { n: 4, g: 0.2,  max: 8,  gap: 0.02 },
       shot:        { n: 4, g: 0.42, max: 6,  gap: 0.03, verb: 0.18 },
       hit_wood:    { n: 4, g: 0.35, max: 5,  gap: 0.025 },
       hit_stone:   { n: 4, g: 0.3,  max: 5,  gap: 0.025, verb: 0.15 },
@@ -923,7 +952,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       eshot:       { n: 3, g: 0.4,  max: 6,  gap: 0.03 },
       wave:        { n: 1, g: 0.6,  max: 1,  verb: 0.5 },
     };
-    const LOOPS = { engine: 'engine_loop', drill: 'drill_loop', grind: 'grind_loop', skid: 'skid_loop', wind: 'wind_loop', drone: 'drone_loop' };
+    const LOOPS = { engine: 'engine_loop', drill: 'drill_loop', grind: 'grind_loop', skid: 'skid_loop', wind: 'wind_loop', drone: 'drone_loop', hum: 'hum_loop', servo: 'servo_loop' };
 
 
     function makeVerb() {                               // stereo decaying-noise impulse response
@@ -2222,7 +2251,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
             if (L.step) {
               L.t += dt / L.dur; const t = Math.min(1, L.t), e = t * t * (3 - 2 * t);
               L.foot.lerpVectors(L.from, L.to, e).addScaledVector(SPD.n, Math.sin(Math.PI * t) * (0.32 + 0.012 * spdS));
-              if (t >= 1) { L.step = false; L.foot.copy(L.to); if (spdS > 6 && Math.random() < 0.3) puff(L.foot, 0xd8d6d0, 0.5, 0.5, rand(-0.5, 0.5), rand(0.3, 0.8), rand(-0.5, 0.5), 0.3); }
+              if (t >= 1) { L.step = false; L.foot.copy(L.to); if (spdS > 1.5) SFX.play('tick', L.foot, { vol: 0.45 + Math.random() * 0.3, rate: 0.85 + Math.random() * 0.35 }); if (spdS > 6 && Math.random() < 0.3) puff(L.foot, 0xd8d6d0, 0.5, 0.5, rand(-0.5, 0.5), rand(0.3, 0.8), rand(-0.5, 0.5), 0.3); }
             } else {
               const d = L.foot.distanceTo(spT);
               if ((d > thr && !stepping[1 - L.grp]) || d > thr * 2.4) { L.step = true; L.t = 0; L.dur = dur * (0.85 + Math.random() * 0.3); L.from.copy(L.foot); L.to.copy(spT); stepping[L.grp] = true; }
@@ -2282,7 +2311,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
       P(new THREE.BoxGeometry(0.3, 0.3, 0.5), dark, 0, 0, 0.1, T);
       P(new THREE.CylinderGeometry(0.07, 0.09, 1.3, 6), dark, 0, 0.05, 0.95, T).rotation.x = Math.PI / 2;
       R.anim = (dt, sp) => {
-        const k = Math.min(1, sp / 5), a = ridePhase * 2.4;
+        const k = Math.min(1, sp / 5), a = ridePhase * 2.4, beat = Math.floor(a / Math.PI);
+        if (beat !== R.beat) { R.beat = beat;
+          if (sp > 1.5 && car.alive && !car.airborne && car.depth === 0) {       // two hooves land almost together: ta-dam, ta-dam
+            const v = Math.min(1, 0.35 + sp / 30); SFX.play('hoof', car.pos, { vol: v, rate: 0.9 + Math.random() * 0.2 }); SFX.play('hoof', car.pos, { vol: v * 0.8, rate: 1.05 + Math.random() * 0.2, delay: 0.07 });
+            if (sp > 7) puff(tmp.set(car.pos.x - Math.sin(car.heading) * 1.1, 0.25, car.pos.z - Math.cos(car.heading) * 1.1), 0xa8977c, 0.8, 0.7, rand(-0.5, 0.5), rand(0.4, 1), rand(-0.5, 0.5), 0.22, 2.2);
+          } }
         for (const L of legs) L.g.rotation.x = Math.sin(a + L.ph) * 0.7 * k;
         tor.position.y = Math.abs(Math.sin(a)) * 0.14 * k; head.rotation.x = Math.sin(a * 2) * 0.06 * k;
         tail.forEach((m, i) => { m.position.x = Math.sin(elapsed * 5 + i * 0.7) * 0.08 * i; });
@@ -3564,7 +3598,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     SFX.loop('skid', car.alive && car.depth === 0 && !car.airborne && slip > SKID_SLIP ? Math.min(0.35, (slip - SKID_SLIP) / 14) : 0, 0.9 + Math.min(0.3, slip / 40));
     skidT -= dt; dustT -= dt;
     const gspd = Math.hypot(car.vel.x, car.vel.z);
-    if (car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {   // dust trail
+    if (ride === 'buggy' && car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {   // dust trail
       dustT = 0.045;
       wheels[2 + (Math.random() < 0.5 ? 0 : 1)].pivot.getWorldPosition(wpos); wpos.y = 0.3;
       puff(wpos, 0xa8977c, 0.9, 0.8, rand(-0.5, 0.5), rand(0.3, 0.9), rand(-0.5, 0.5), 0.2 * Math.min(1, gspd / 20), 2.4);
@@ -5404,6 +5438,28 @@ laugh(r) {                                       // a big man's belly laugh: bre
     else if (p[ot] > max[ot]) { e = p[ot] - max[ot]; p[ot] = max[ot]; p[ax] = plane - sg * e; n.set(0, 0, 0); n[ot] = 1; v[ax] = -sg * v[ot]; v[ot] = 0; }
     else if (p[ot] < min[ot]) { e = min[ot] - p[ot]; p[ot] = min[ot]; p[ax] = plane - sg * e; n.set(0, 0, 0); n[ot] = -1; v[ax] = sg * v[ot]; v[ot] = 0; }
   }
+  // the unicorn: a horse, not a car — bites into the ground, no drifting, stops short, backs up slowly
+  const UNI = { accel: 40, reverseAccel: 12, brake: 70, maxSpeed: 24, maxReverse: -6, coast: 22, steerRate: 9, turnRate: 3.4, grip: 16, spinRate: 4.4, spinSteerRate: 14, gripHuman: 16 };
+  // the halo: hovers. Goes wherever you point (screen directions), picks up speed slowly and keeps gliding when you let go
+  function haloDrive(dt, ctl, stick) {
+    let dx = 0, dz = 0, mag = 0;
+    if (stick) { stickWorld(touch.move.x, touch.move.y, tmp); const l = Math.hypot(tmp.x, tmp.z) || 1; dx = tmp.x / l; dz = tmp.z / l; mag = Math.min(1, touch.move.mag * 1.15); }
+    else if (ctl) {
+      const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0), r = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+      dx = r - f; dz = -r - f; const l = Math.hypot(dx, dz); if (l > 0) { dx /= l; dz /= l; mag = 1; }
+    }
+    if (!car.airborne) {
+      if (mag) { const top = TUNE.maxSpeed * 1.05 * mag; car.vel.x += (dx * top - car.vel.x) * (1 - Math.exp(-1.2 * dt)); car.vel.z += (dz * top - car.vel.z) * (1 - Math.exp(-1.2 * dt)); }
+      else car.vel.multiplyScalar(Math.exp(-0.55 * dt));                       // almost no friction up there
+      if (car.burrow !== 'up') car.vel.multiplyScalar(Math.max(0, 1 - 9 * dt));
+    }
+    const sp = Math.hypot(car.vel.x, car.vel.z);
+    if (mag || sp > 3) {                                // the rings lean and swing round to where it is being pushed, lazily
+      const want = mag ? Math.atan2(dx, dz) : Math.atan2(car.vel.x, car.vel.z), d = Math.atan2(Math.sin(want - car.heading), Math.cos(want - car.heading));
+      car.heading += d * (1 - Math.exp(-3.5 * dt)); car.steer = THREE.MathUtils.clamp(d, -1, 1);
+    } else car.steer = 0;
+    car.speed = sp;
+  }
   function spiderDrive(dt, ctl, stick) {                // runs straight where you point: screen-relative, no steering, almost no inertia
     let dx = 0, dz = 0, mag = 0;
     if (stick) { stickWorld(touch.move.x, touch.move.y, tmp); const l = Math.hypot(tmp.x, tmp.z) || 1; dx = tmp.x / l; dz = tmp.z / l; mag = Math.min(1, touch.move.mag * 1.15); }
@@ -5461,12 +5517,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (!car.alive) { car.deadTimer -= dt; if (car.deadTimer <= 0) respawn(); }
     else if (elapsed - car.lastHurt > 3 && car.hp < car.maxHp) car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.06 * dt);
 
-    if (ride === 'spider') spiderDrive(dt, ctl, stick); else {
+    if (ride === 'spider') spiderDrive(dt, ctl, stick); else if (ride === 'halo') haloDrive(dt, ctl, stick); else {
+    const RT = ride === 'unicorn' ? UNI : TUNE;
     // throttle / brake
-    if (up) car.speed += (car.speed < 0 ? TUNE.brake : TUNE.accel) * dt;
-    else if (down) car.speed -= (car.speed > 0 ? TUNE.brake : TUNE.reverseAccel) * dt;
-    else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), TUNE.coast * dt);
-    car.speed = THREE.MathUtils.clamp(car.speed, TUNE.maxReverse, TUNE.maxSpeed * (stick ? Math.max(0.45, touch.move.mag) : 1));   // analog throttle
+    if (up) car.speed += (car.speed < 0 ? RT.brake : RT.accel) * dt;
+    else if (down) car.speed -= (car.speed > 0 ? RT.brake : RT.reverseAccel) * dt;
+    else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), RT.coast * dt);
+    car.speed = THREE.MathUtils.clamp(car.speed, RT.maxReverse, RT.maxSpeed * (stick ? Math.max(0.45, touch.move.mag) : 1));   // analog throttle
     if (car.burrow !== 'up') { const f = Math.max(0, 1 - 9 * dt); car.speed *= f; car.vel.multiplyScalar(f); }
 
     // steering — eased, scaled by speed so it doesn't spin in place
@@ -5479,27 +5536,27 @@ laugh(r) {                                       // a big man's belly laugh: bre
       cursorTurn = Math.atan2(Math.sin(want - car.heading), Math.cos(want - car.heading));
       steerTarget = THREE.MathUtils.clamp(cursorTurn * 2, -1, 1);   // для колёс и крена
     }
-    car.steer += (steerTarget - car.steer) * Math.min(1, (turnMode !== 'car' ? TUNE.spinSteerRate : TUNE.steerRate) * dt);
+    car.steer += (steerTarget - car.steer) * Math.min(1, (turnMode !== 'car' ? RT.spinSteerRate : RT.steerRate) * dt);
     if (turnMode === 'cursor') {
       // разворачивается к курсору: быстро издалека, плавно доводит у цели
-      const step = TUNE.spinRate * 1.2 * dt;
+      const step = RT.spinRate * 1.2 * dt;
       car.heading += Math.sign(cursorTurn) * Math.min(Math.abs(cursorTurn), Math.max(step * Math.min(1, Math.abs(cursorTurn) * 3), step * 0.25));
     } else if (turnMode === 'human') {
       // поворот на месте с постоянной скоростью, не зависит ни от скорости, ни от заднего хода
-      car.heading += car.steer * TUNE.spinRate * dt;
+      car.heading += car.steer * RT.spinRate * dt;
     } else {
       const speedFactor = THREE.MathUtils.clamp(car.speed / 7, -1, 1);
-      const highSpeedDamp = 1 - 0.35 * Math.min(1, Math.abs(car.speed) / TUNE.maxSpeed);
-      car.heading += car.steer * TUNE.turnRate * speedFactor * highSpeedDamp * dt;
+      const highSpeedDamp = 1 - 0.35 * Math.min(1, Math.abs(car.speed) / RT.maxSpeed);
+      car.heading += car.steer * RT.turnRate * speedFactor * highSpeedDamp * dt;
     }
 
     }
     // velocity chases the heading → light drift
     const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    const k = car.airborne || ride === 'spider' ? 0 : Math.min(1, (car.mode !== 'car' ? TUNE.gripHuman : TUNE.grip) * dt);   // в воздухе летим по инерции
+    const k = car.airborne || ride === 'spider' || ride === 'halo' ? 0 : Math.min(1, (ride === 'unicorn' ? UNI.grip : car.mode !== 'car' ? TUNE.gripHuman : TUNE.grip) * dt);   // в воздухе летим по инерции
     car.vel.x += (fx * car.speed - car.vel.x) * k;
     car.vel.z += (fz * car.speed - car.vel.z) * k;
-    if (!(ride === 'spider' && !car.airborne)) car.pos.addScaledVector(car.vel, dt);
+    if (!(ride === 'spider' && !car.airborne)) car.pos.addScaledVector(car.vel, ride === 'unicorn' && !car.airborne ? dt * (1 + 0.16 * Math.sin(ridePhase * 4.8)) : dt);   // a gallop surges with every stride
 
     // collisions
     const crawler = ride === 'spider';
@@ -5518,7 +5575,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (crawler) carGroup.quaternion.copy(SPD.quat);
     const accelNow = (car.speed - prevSpeed) / Math.max(dt, 1e-4); prevSpeed = car.speed;
     const lateral = car.vel.x * fz - car.vel.z * fx; // sideways slip
-    updateSkid(dt, crawler ? 0 : lateral);
+    updateSkid(dt, ride === 'buggy' ? lateral : 0);
     roll += (THREE.MathUtils.clamp(-car.steer * Math.abs(car.speed) * 0.006 + lateral * 0.02, -0.12, 0.12) - roll) * Math.min(1, 8 * dt);
     pitch += (THREE.MathUtils.clamp(-accelNow * 0.002, -0.06, 0.06) - pitch) * Math.min(1, 6 * dt);
     body.rotation.z = roll; body.rotation.x = pitch + Math.sin(car.depth * Math.PI) * 0.45 - THREE.MathUtils.clamp(car.vy * 0.025, -0.3, 0.3); // ныряет носом; в прыжке задирает/клюёт
@@ -5646,9 +5703,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
     // engine pitch follows speed, filter opens with throttle; wind outside, drone in the boss room
     {
       const thr = up || down ? 1 : 0, spdK = Math.min(1, Math.abs(car.speed) / TUNE.maxSpeed);
-      SFX.loop('engine', car.alive && car.depth < 0.6 ? 0.16 + 0.2 * thr + 0.12 * spdK : 0, 0.72 + 1.3 * spdK + 0.12 * thr, 450 + 2300 * Math.min(1, 0.35 * thr + spdK));
+      const live = car.alive && car.depth < 0.6, vK = Math.min(1, Math.hypot(car.vel.x, car.vel.z) / TUNE.maxSpeed);
+      SFX.loop('hum', ride === 'halo' && live ? 0.1 + 0.16 * vK : 0, 0.85 + 0.55 * vK);
+      SFX.loop('servo', ride === 'spider' && live ? 0.11 * vK : 0, 0.8 + 0.5 * vK);
+      SFX.loop('engine', ride === 'buggy' && live ? 0.16 + 0.2 * thr + 0.12 * spdK : 0, 0.72 + 1.3 * spdK + 0.12 * thr, 450 + 2300 * Math.min(1, 0.35 * thr + spdK));
       const inBoss = inRoom(car.pos.x, car.pos.z);
-      SFX.loop('wind', inBoss ? 0.05 : 0.13, 1);
+      SFX.loop('wind', (inBoss ? 0.05 : 0.13) + (ride === 'halo' ? 0.2 * vK : 0), ride === 'halo' ? 1 + 0.5 * vK : 1);
       SFX.loop('drone', inBoss && (boss.state === 'fight' || boss.state === 'emerging') ? 0.32 : 0, 1);
       SFX.setRoom(inBoss ? 0.12 : 0);
     }
