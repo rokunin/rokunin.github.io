@@ -43,6 +43,7 @@
   .hint i::before { content: ''; position: absolute; left: 50%; top: -9px; margin-left: -8px; border: 8px solid transparent; border-top: 0; border-bottom: 11px solid var(--c); }
   .hint b { position: absolute; inset: 4px; border-radius: 50%; background: rgba(20,22,26,.8); border: 2px solid var(--c); color: var(--c);
             font: 700 12px/32px system-ui, sans-serif; text-align: center; white-space: nowrap; }
+  .hint u { position: absolute; top: 46px; text-decoration: none; white-space: nowrap; padding: 1px 7px; border-radius: 6px; background: rgba(20,22,26,.8); color: var(--c); font: 700 11px/16px system-ui, sans-serif; letter-spacing: .03em; text-transform: uppercase; }
   #alert { position: fixed; left: 50%; top: 32%; transform: translateX(-50%); pointer-events: none; opacity: 0;
            color: #ffb347; font: 800 34px/1 system-ui, sans-serif; text-shadow: 0 3px 0 #000; transition: opacity .3s; }
   #bossbar { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); width: 420px; display: none; pointer-events: none;
@@ -2656,7 +2657,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 66, buildEl = document.getElementById('build');
+  const BUILD = 67, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6512,7 +6513,7 @@ const MONSTERS = [
   // ---- edge-of-screen pointers: chubzik rocks, unfed altars and the boss gate once you get near them ----
   const hints = [], hintV = new THREE.Vector3(); let hintT = 0, hintList = [];
   function hintEl(i) {
-    while (hints.length <= i) { const d = document.createElement('div'); d.className = 'hint'; d.innerHTML = '<i></i><b></b>'; document.body.appendChild(d); hints.push({ d, arrow: d.firstChild, label: d.lastChild, text: '', col: '' }); }
+    while (hints.length <= i) { const d = document.createElement('div'); d.className = 'hint'; d.innerHTML = '<i></i><b></b><u></u>'; document.body.appendChild(d); hints.push({ d, arrow: d.firstChild, label: d.children[1], cap: d.lastChild, text: '', col: '', capT: '', side: '' }); }
     return hints[i];
   }
   function updateHints(dt) {
@@ -6522,23 +6523,27 @@ const MONSTERS = [
         const rk = [];
         for (const R of rocks) { const d = Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z); if (d > 80) continue;
           let n = 0; for (const c of chubs) if (!c.dead && c.state !== 'cart' && Math.hypot(c.pos.x - R.mesh.position.x, c.pos.z - R.mesh.position.z) < R.r + 9) n++;
-          if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 80, col: '#7fc0ff', text: '☻' + n }); }
+          if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 80, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
-        altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 120) hintList.push({ x: A.x, z: A.z, d, range: 120, col: '#ff7ad8', text: A.n + '/' + ALTAR_NEED }); });
-        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: altarsDone >= 3 ? '#ffd27a' : '#9a8f86', text: altarsDone >= 3 ? 'BOSS' : '🔒' }); }
+        altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 120) hintList.push({ x: A.x, z: A.z, d, range: 120, col: '#ff7ad8', text: A.n + '/' + ALTAR_NEED, cap: 'sacrifice!' }); });
+        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: altarsDone >= 3 ? '#ffd27a' : '#9a8f86', text: altarsDone >= 3 ? 'BOSS' : '🔒', cap: altarsDone >= 3 ? 'kill boss' : 'unlock boss' }); }
       }
     }
     const W = innerWidth, H = innerHeight, x0 = 40, x1 = W - 40, y0 = 84, y1 = H - 100, cx = W / 2, cy = (y0 + y1) / 2;      // clear of the buttons on top and the bars below
-    let i = 0;
+    let i = 0; const placed = [];
     for (const h of hintList) {
       hintV.set(h.x, 1, h.z).project(camera);
       const e = hintEl(i++), on = Math.abs(hintV.x) < 0.95 && Math.abs(hintV.y) < 0.95;
       const dx = hintV.x * W / 2 + W / 2 - cx, dy = -hintV.y * H / 2 + H / 2 - cy;
       const k = Math.max(dx > 0 ? dx / (x1 - cx) : dx / (x0 - cx), dy > 0 ? dy / (y1 - cy) : dy / (y0 - cy), 1), px = cx + dx / k, py = cy + dy / k;
+      let qx = px, qy = py; if (!on) { for (let g = 0; g < 4 && placed.some(q => Math.abs(q[0] - qx) < 120 && Math.abs(q[1] - qy) < 62); g++) { if (qx <= x0 + 1 || qx >= x1 - 1) qy += qy > cy ? -64 : 64; else qx += qx > cx ? -124 : 124; } placed.push([qx, qy]); }      // two pointers in one spot: slide the second along the edge
       e.d.style.opacity = on ? 0 : Math.min(1, (1 - h.d / h.range) * 4 + 0.25);
-      e.d.style.transform = `translate(${px.toFixed(0)}px,${py.toFixed(0)}px)`;
+      e.d.style.transform = `translate(${qx.toFixed(0)}px,${qy.toFixed(0)}px)`;
       e.arrow.style.transform = `rotate(${Math.atan2(dx, -dy).toFixed(2)}rad)`;
       if (e.text !== h.text) e.label.textContent = e.text = h.text;
+      if (e.capT !== h.cap) e.cap.textContent = e.capT = h.cap;
+      const side = (qx < 90 ? 'l' : qx > W - 90 ? 'r' : 'c') + (qy > H - 150 ? 'u' : 'd');           // keep the caption on screen and off the arrow
+      if (e.side !== side) { e.side = side; const c = e.cap.style; c.left = side[0] === 'l' ? '0' : side[0] === 'c' ? '50%' : 'auto'; c.right = side[0] === 'r' ? '0' : 'auto'; c.transform = side[0] === 'c' ? 'translateX(-50%)' : 'none'; c.top = side[1] === 'u' ? '-20px' : '46px'; }
       if (e.col !== h.col) e.d.style.setProperty('--c', e.col = h.col);
     }
     for (; i < hints.length; i++) hints[i].d.style.opacity = 0;
