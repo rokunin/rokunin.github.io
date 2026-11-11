@@ -2695,7 +2695,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 81, buildEl = document.getElementById('build');
+  const BUILD = 82, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4020,7 +4020,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
       p.sprite.position.y = 2.4 + Math.sin(p.t * 3) * 0.3 + Math.max(0, 1 - p.t * 2) * 2;   // выпрыгивает и покачивается
       p.ring.rotation.y += dt * 2;
       p.ring.scale.setScalar(1 + Math.sin(p.t * 4) * 0.08);
-      if (car.alive && car.depth < 0.3 && p.t > 0.4 && Math.hypot(car.pos.x - p.x, car.pos.z - p.z) < 2.6) {
+      if (p.t > 75 && (p.type.startsWith('w_') || p.type === 'heal')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
+      const full = NET.on && NET.game && p.type.startsWith('w_') && weapons[p.type.slice(2)] >= W_MAX;           // maxed out: leave it for the others
+      if (!full && car.alive && car.depth < 0.3 && p.t > 0.4 && Math.hypot(car.pos.x - p.x, car.pos.z - p.z) < 2.6) {
         let extra = '';
         netEv({ t: 'pkx', id: p.id });
         if (!p.type.startsWith('w_') && p.type !== 'heal' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
@@ -4055,16 +4057,17 @@ laugh(r) {                                       // a big man's belly laugh: bre
       `<div class="wslot"><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + weapons[k]}</b></div>`).join('');
   }
   function dropWeapon(at) {
-    const onGround = pickups.filter(p => p.type.startsWith('w_')).length;
+    const onGround = pickups.filter(p => p.type.startsWith('w_') && Math.hypot(p.x - at.x, p.z - at.z) < 45).length;      // only chips lying around here count, not the whole map's
     if (onGround >= 3) return;
+    const lobby = NET.on && NET.game;
     const pool = [];
-    for (const k of W_ORDER) if (weapons[k] < W_MAX) pool.push(...Array(weapons[k] ? 2 : 3).fill(k));   // new weapons a bit more likely
+    for (const k of W_ORDER) if (weapons[k] < W_MAX || lobby) pool.push(...Array(weapons[k] ? 2 : 3).fill(k));      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
     if (!pool.length) { if (Math.random() < 0.3) spawnPickup('heal', at); return; }
     spawnPickup('w_' + pool[Math.floor(Math.random() * pool.length)], at);
   }
   function crateDrop(o) {
     if (o.room) return;                                    // the boss's ammo doesn't pay out
-    if (firstCrateDrop || Math.random() < WEAPON_DROP) { firstCrateDrop = false; dropWeapon(o.mesh.position); }
+    if (firstCrateDrop || Math.random() < Math.min(0.8, WEAPON_DROP * (1 + 0.5 * (NET.on && NET.game ? NET.remotes.size : 0)))) { firstCrateDrop = false; dropWeapon(o.mesh.position); }
   }
   function gainWeapon(type) {
     const k = type.slice(2); weapons[k] = Math.min(W_MAX, weapons[k] + 1);
@@ -4084,7 +4087,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       m.lookAt(m.position.x + dir.x, m.position.y, m.position.z + dir.z); scene.add(m);
       bullets.push({ m, v: dir.multiplyScalar(42), life: 0.55, dmg: W_STATS.nova.dmg[L] });
     }
-    flash(o, 0x5ff5e6, 7, 0.25, 3); SFX.play('nova', car.pos);
+    flash(o, 0x5ff5e6, 7, 0.25, 3); SFX.play('nova', car.pos); netEv({ t: 'wf', k: 'nova', l: L });
   }
 
   // ---- beam nova: the halo fires a star of holy rail beams that hold for a while; the unicorn blasts rainbows out of both ends, right across the map ----
@@ -4126,24 +4129,26 @@ laugh(r) {                                       // a big man's belly laugh: bre
         gl_FragColor = vec4(col * a, 1.0) * alpha;
       }` });
   const SWORD_T = [1.2, 1.5, 1.9, 2.3, 2.8];             // the swords stay out longer with every nova level
-  const haloHoly = () => ride === 'halo' && beams.some(B => B.kind === 'halo');
-  function fireBeams() {
-    const L = weapons.nova - 1, dmg = W_STATS.nova.dmg[L];
-    if (ride === 'halo') {                               // a ring of angelic swords; while they are out nothing can hurt the halo
+  const haloHoly = () => ride === 'halo' && beams.some(B => B.kind === 'halo' && !B.fx);
+  const carSrc = { get pos() { return car.pos; }, h: () => car.heading, y: () => car.y, alive: () => car.alive && car.depth < 0.3 };
+  function fireBeams(src = carSrc, kind = ride, L = weapons.nova - 1, fx = false) {      // fx: somebody else's beams, shown but harmless
+    const dmg = W_STATS.nova.dmg[L];
+    if (kind === 'halo') {                               // a ring of angelic swords; while they are out nothing can hurt the halo
       const n = [4, 5, 6, 7, 8][L], len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, dirs = [], mt = swordMat();
       for (let i = 0; i < n; i++) { const g = new THREE.Group(), m = new THREE.Mesh(rbGeo, mt); m.scale.set(2.3, 1, len); m.renderOrder = 4; g.add(m); scene.add(g); dirs.push({ g, a: ph + i / n * 6.283 }); }
-      beams.push({ kind: 'halo', dirs, mats: [mt], len, w: 1.1, t: 0, T: SWORD_T[L], tick: 0, every: 0.12, dmg: dmg * 0.9 });
-      flash(tmp.set(car.pos.x, 2 + car.y, car.pos.z), 0xfff0c0, 8, 0.3, 2.5);
+      beams.push({ src, fx, kind: 'halo', dirs, mats: [mt], len, w: 1.1, t: 0, T: SWORD_T[L], tick: 0, every: 0.12, dmg: dmg * 0.9 });
+      flash(tmp.set(src.pos.x, 2 + src.y(), src.pos.z), 0xfff0c0, 8, 0.3, 2.5);
     } else {
       const per = [1, 2, 2, 3, 3][L], offs = per === 1 ? [0] : per === 2 ? [-0.2, 0.2] : [-0.38, 0, 0.38], len = 2 * ARENA + 80, dirs = [], mats = [];   // \|/ at full power, both ends
       for (const base of [0, Math.PI]) for (const o of offs) {
         const mt = rainbowMat(len), m = new THREE.Mesh(rbGeo, mt), g = new THREE.Group(); m.scale.set(2.4, 1, len); m.position.y = dirs.length * 0.015; m.renderOrder = 4; g.add(m);
         scene.add(g); dirs.push({ g, off: base + o, fwd: base === 0 }); mats.push(mt);
       }
-      beams.push({ kind: 'rainbow', dirs, mats, len, w: 2.0, t: 0, T: 1.0, tick: 0, every: 0.2, dmg: dmg * 1.4 });
-      for (const sd of [1, -1]) flash(tmp.set(car.pos.x + Math.sin(car.heading) * 2.3 * sd, 2.6 + car.y, car.pos.z + Math.cos(car.heading) * 2.3 * sd), 0xff9ad8, 6, 0.25, 2.5, sd > 0);
+      beams.push({ src, fx, kind: 'rainbow', dirs, mats, len, w: 2.0, t: 0, T: 1.0, tick: 0, every: 0.2, dmg: dmg * 1.4 });
+      for (const sd of [1, -1]) flash(tmp.set(src.pos.x + Math.sin(src.h()) * 2.3 * sd, 2.6 + src.y(), src.pos.z + Math.cos(src.h()) * 2.3 * sd), 0xff9ad8, 6, 0.25, 2.5, sd > 0);
     }
-    SFX.play('nova', car.pos, { rate: ride === 'halo' ? 0.75 : 1.3 });
+    if (!fx) netEv({ t: 'wf', k: 'beam', l: L });
+    SFX.play('nova', src.pos, { rate: kind === 'halo' ? 0.75 : 1.3 });
   }
   function beamHits(ox, oz, dx, dz, len, w, dmg) {       // everything lying across the beam takes a tick of damage
     const on = (px, pz, r) => { const rx = px - ox, rz = pz - oz, t = rx * dx + rz * dz; return t > -r && t < len + r && Math.abs(rx * dz - rz * dx) < r + w * 0.5; };
@@ -4158,19 +4163,19 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const B = beams[i]; B.t += dt;
       const a = Math.max(0, Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25));           // snap on, fade off
       for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = elapsed; }
-      const fx = Math.sin(car.heading), fz = Math.cos(car.heading), alive = car.alive && car.depth < 0.3, grow = Math.min(1, B.t / 0.1);
+      const S = B.src, fx = Math.sin(S.h()), fz = Math.cos(S.h()), alive = S.alive(), grow = Math.min(1, B.t / 0.1);
       for (const D of B.dirs) {
-        let ang, ox = car.pos.x, oz = car.pos.z, oy;
+        let ang, ox = S.pos.x, oz = S.pos.z, oy;
         if (B.kind === 'halo') {
-          D.a += dt * 0.28; ang = D.a; oy = 1.6 + car.y; D.g.scale.set(1, 1, grow);
+          D.a += dt * 0.28; ang = D.a; oy = 1.6 + S.y(); D.g.scale.set(1, 1, grow);
         } else {
-          ang = car.heading + D.off; ox += fx * (D.fwd ? 2.3 : -1.7); oz += fz * (D.fwd ? 2.3 : -1.7); oy = (D.fwd ? 2.9 : 2.1) + car.y; D.g.scale.set(1, 1, grow);
+          ang = S.h() + D.off; ox += fx * (D.fwd ? 2.3 : -1.7); oz += fz * (D.fwd ? 2.3 : -1.7); oy = (D.fwd ? 2.9 : 2.1) + S.y(); D.g.scale.set(1, 1, grow);
           if (alive && Math.random() < 0.5) { const d = 3 + Math.random() * 40; spawnParticles(tmp.set(ox + Math.sin(ang) * d, oy, oz + Math.cos(ang) * d), RAINBOW[Math.floor(Math.random() * 6)], 1, 4); }
         }
         D.g.position.set(ox, oy, oz); D.g.rotation.y = ang; D.g.visible = alive;
         D.dx = Math.sin(ang); D.dz = Math.cos(ang); D.ox = ox; D.oz = oz;
       }
-      if (alive && (B.tick -= dt) <= 0) { B.tick = B.every; for (const D of B.dirs) beamHits(D.ox, D.oz, D.dx, D.dz, B.len, B.w, B.dmg * B.every / 0.12); }
+      if (alive && !B.fx && (B.tick -= dt) <= 0) { B.tick = B.every; for (const D of B.dirs) beamHits(D.ox, D.oz, D.dx, D.dz, B.len, B.w, B.dmg * B.every / 0.12); }
       if (B.t >= B.T) { for (const D of B.dirs) scene.remove(D.g); for (const mt of B.mats) mt.dispose(); beams.splice(i, 1); }
     }
   }
@@ -4192,10 +4197,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (!spots.some(sp => Math.hypot(sp.x - qx, sp.z - qz) < R * 1.3)) spots.push(new THREE.Vector3(qx, 0, qz)); }   // onto the nearest packs, not on top of each other
     const ph = Math.random() * 6.283;
     for (let i = 0; spots.length < WEB_N; i++) spots.push(new THREE.Vector3(car.pos.x + Math.sin(ph + i * 1.571) * (R + 4.5), 0, car.pos.z + Math.cos(ph + i * 1.571) * (R + 4.5)));
-    const from = new THREE.Vector3(car.pos.x, 2.6 + car.y, car.pos.z);
+    netEv({ t: 'wf', k: 'web', l: weapons.nova - 1, s: spots.flatMap(q => [r1(q.x), r1(q.z)]) });
+    launchWebs(new THREE.Vector3(car.pos.x, 2.6 + car.y, car.pos.z), spots, R, false);
+  }
+  function launchWebs(from, spots, R, fx) {
     for (const to of spots) { const ball = new THREE.Mesh(webBallGeo, webBallMat); ball.position.copy(from); scene.add(ball);
-      webs.push({ ball, from: from.clone(), to, t: 0, fly: 0.3 + from.distanceTo(to) / 60, R, life: WEB_T, tick: 0, mesh: null }); }
-    SFX.play('spit', car.pos, { rate: 0.7, vol: 0.7 });
+      webs.push({ ball, from: from.clone(), to, t: 0, fly: 0.3 + from.distanceTo(to) / 60, R, life: WEB_T, tick: 0, mesh: null, fx }); }
+    SFX.play('spit', from, { rate: 0.7, vol: 0.7 });
   }
   function updateWebs(dt) {
     for (let i = webs.length - 1; i >= 0; i--) {
@@ -4209,7 +4217,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         spawnParticles(tmp.set(w.to.x, 0.5, w.to.z), 0xeaf4ff, 6, 5); SFX.play('hit_dirt', w.to, { vol: 0.5, rate: 1.5 });
       }
       w.mesh.scale.setScalar(w.R * Math.min(1, w.t / 0.15)); w.mesh.material.opacity = Math.min(1, (w.life - w.t) / 0.5) * 0.85;
-      if ((w.tick -= dt) <= 0) { w.tick = 0.4;
+      if (!w.fx && (w.tick -= dt) <= 0) { w.tick = 0.4;
         for (const m of swarm) if (!m.dead && !m.K.fly && Math.hypot(m.pos.x - w.to.x, m.pos.z - w.to.z) < w.R + m.r * 0.5) { stunCritter(m, 0.6); m.vel.set(0, 0, 0); }   // fliers pass over
         if (!NET.client) for (const e of enemies) if (!e.dead && e.awake && !e.carried && Math.hypot(e.pos.x - w.to.x, e.pos.z - w.to.z) < w.R + e.r * 0.5) e.stun = Math.max(e.stun, 0.6);
       }
@@ -4317,12 +4325,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (boss.state === 'fight' && Math.hypot(BOSS_POS.x - car.pos.x, BOSS_POS.z - car.pos.z) < 36 && bestScore < 3) best = BOSS_POS.clone();
     return best;
   }
-  function fireMortar(target) {
-    const L = weapons.mortar - 1, from = new THREE.Vector3(); muzzle.getWorldPosition(from);
+  function fireMortar(target, L = weapons.mortar - 1, from, fx = false) {
+    if (!from) { from = new THREE.Vector3(); muzzle.getWorldPosition(from); netEv({ t: 'wf', k: 'mortar', l: L, x: r1(target.x), z: r1(target.z) }); }
     const m = new THREE.Mesh(shellGeo, shellMat); m.position.copy(from); scene.add(m);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 40), glow(new THREE.MeshBasicMaterial({ color: 0xb48cff, transparent: true, opacity: 0.7, depthWrite: false }), 2.5));
     ring.geometry.rotateX(-Math.PI / 2); ring.position.set(target.x, 0.06, target.z); ring.scale.setScalar(W_STATS.mortar.r[L]); scene.add(ring);
-    shells.push({ m, ring, from, to: new THREE.Vector3(target.x, 0, target.z), t: 0, T: 0.85, R: W_STATS.mortar.r[L], dmg: W_STATS.mortar.dmg[L] });
+    shells.push({ m, ring, from, to: new THREE.Vector3(target.x, 0, target.z), t: 0, T: 0.85, R: W_STATS.mortar.r[L], dmg: W_STATS.mortar.dmg[L], fx });
     flash(from, 0xb48cff, 3, 0.15, 3, false); SFX.play('mortar', from);
   }
   function updateShells(dt) {
@@ -4337,7 +4345,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const p = tmp.set(s.to.x, 0.6, s.to.z);
       flash(p, 0xc79bff, s.R * 3.2, 0.4, 4); burst(p, 0x6a5a7a, 10, 2.6, 7, 0.5);
       spawnParticles(p, 0xb48cff, 18, 11); spawnParticles(p, 0x8a8a78, 10, 8);
-      shake = Math.max(shake, 0.5); SFX.play('blast', p);
+      shake = Math.max(shake, s.fx ? 0.2 : 0.5); SFX.play('blast', p);
+      if (s.fx) continue;                                // someone else's shell: the bang without the damage
       for (const e of enemies) {
         if (e.dead || e.carried) continue;
         const dx = e.pos.x - s.to.x, dz = e.pos.z - s.to.z, d = Math.hypot(dx, dz);
@@ -4814,7 +4823,7 @@ const MONSTERS = [
     const v = variant == null ? Math.floor(Math.random() * 3) : variant, K = SW_KINDS[kind], art = SW_ART[kind][v];
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
-    const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp * (1 + 0.6 * (NET.on && NET.game ? NET.remotes.size : 0)), dead: false, awake: true, carried: false,
+    const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp * (1 + 0.6 * (NET.on && NET.game ? Math.min(2, NET.remotes.size) : 0)), dead: false, awake: true, carried: false,
                 flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 0.4 + Math.random() * 2.2, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
     m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
     swarm.push(m);
@@ -4858,7 +4867,7 @@ const MONSTERS = [
   function makeMini(m, gate) {
     if (m.mini) return m;
     m.mini = true; m.gate = !!gate; { const k = MINI_SIZE / m.K.size; m.K = { ...m.K, size: MINI_SIZE, r: Math.min(1.9, m.K.r * k), bite: Math.round(m.K.bite * 1.3), spiky: true }; }   // cannot be run over
-    m.r = m.K.r; m.hp = (m.K.hp * 4 + 26) * (1 + 0.6 * (NET.on && NET.game ? NET.remotes.size : 0)); m.atkT = 1.5 + Math.random() * 2;
+    m.r = m.K.r; m.hp = (m.K.hp * 4 + 26) * (1 + 0.6 * (NET.on && NET.game ? Math.min(2, NET.remotes.size) : 0)); m.atkT = 1.5 + Math.random() * 2;
     const f = new THREE.Sprite(hellMat); f.center.set(0.5, 0.05); f.position.set(0, 0.86, 0); f.scale.set(0.5, 0.36, 1); m.sprite.add(f); m.fire = f;
     m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
     return m;
@@ -5248,6 +5257,7 @@ const MONSTERS = [
   }
 
   // ---- rocks can be flattened: everyone on top tumbles off, and nothing respawns there again ----
+  function rockGrow(o) { if (!o || !o.rock || o.mesh.visible) return; o.mesh.visible = true; if (!rocks.includes(o)) rocks.push(o); burst(tmp.copy(o.mesh.position).setY(0.5), 0x8a7a6a, 8, 3, 6, 0.5); SFX.play('door', o.mesh.position, { vol: 0.5 }); }
   function rockSmashed(o) {
     const i = rocks.indexOf(o); if (i >= 0) rocks.splice(i, 1);
     for (const c of chubs) {
@@ -5578,6 +5588,11 @@ const MONSTERS = [
     chubSpawnT -= dt;
     if (chubSpawnT <= 0 && !NET.client) {                             // the colony slowly refills, a resident pack too
       chubSpawnT = 3; chubTick++;
+      if (rocks.length < 8 && chubTick % 4 === 0) {      // too few rocks left for the colony: one of the flattened ones rises again, away from everybody
+        const far = o => { if (Math.hypot(o.mesh.position.x - car.pos.x, o.mesh.position.z - car.pos.z) < 35) return false; for (const R of NET.remotes.values()) if (Math.hypot(o.mesh.position.x - R.pos.x, o.mesh.position.z - R.pos.z) < 35) return false; return true; };
+        const gone = obstacles.filter(o => o.rock && !o.mesh.visible && far(o));
+        if (gone.length) { const o = gone[Math.floor(Math.random() * gone.length)]; rockGrow(o); netEv({ t: 'rock', i: obstacles.indexOf(o) }); for (let i = 0; i < 4; i++) spawnChub(o, true); }
+      }
       let loose = 0; for (const c of chubs) if (c.state !== 'cart') loose++;
       if (rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);   // only surviving rocks breed
       let res = 0; for (const m of swarm) if (!m.dead && m.home) res++;
@@ -6032,6 +6047,7 @@ const MONSTERS = [
       for (let i = 0; i < tn.n; i += 2) spawnParticles(tn.pts[i], 0x8a3ab0, 2, 7);
       hideTent(tn);
     }
+    clearQuakes();
     spawnParticles(tmp.set(BOSS_POS.x, 3, BOSS_POS.z), 0xd040a0, 40, 14);
     flash(tmp, 0xff50c0, 46, 0.7, 6); burst(tmp, 0x5a3070, 22, 4, 9, 0.55);
     spawnParticles(tmp.set(BOSS_POS.x, 5, BOSS_POS.z), 0xff2255, 20, 12);
@@ -6057,6 +6073,7 @@ const MONSTERS = [
     boss.state = 'idle'; boss.t = 0; boss.throwCd = 2; boss.lashCd = 1.5;
     if (!(NET.on && NET.game)) boss.dealt = 0;           // solo: the fight starts over; in a lobby the damage already done stays
     releaseLift();
+    clearQuakes();
     for (let i = thrown.length - 1; i >= 0; i--) if (thrown[i].hostile) finishThrown(thrown[i], i);
     bossCol.disabled = true; bossGroup.visible = false; bossGroup.position.y = -BOSS_SINK;
     for (const tn of tentacles) {
@@ -6066,7 +6083,33 @@ const MONSTERS = [
     setDoor(!gateOpen);
   }
 
+  const quakes = [], QUAKE_T = 2.4;
+  const quakeRingGeo = new THREE.RingGeometry(0.955, 1, 72); quakeRingGeo.rotateX(-Math.PI / 2);
+  const quakeDiscGeo = new THREE.CircleGeometry(1, 56); quakeDiscGeo.rotateX(-Math.PI / 2);
+  function bossQuake(x, z, r) {
+    const ring = new THREE.Mesh(quakeRingGeo, glow(new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.9, depthWrite: false }), 3));
+    const disc = new THREE.Mesh(quakeDiscGeo, glow(new THREE.MeshBasicMaterial({ color: 0xff4a2a, transparent: true, opacity: 0.22, depthWrite: false }), 1.6));
+    ring.position.set(x, 0.09, z); ring.scale.setScalar(r); disc.position.set(x, 0.08, z); disc.scale.setScalar(0.01); scene.add(ring, disc);
+    quakes.push({ x, z, r, t: 0, ring, disc }); SFX.play('boss_roar', BOSS_POS, { rate: 0.6, vol: 0.7 });
+    if (Math.hypot(car.pos.x - x, car.pos.z - z) < r + 4) flashAlert('GET OUT OF THE RING');
+  }
+  function clearQuakes() { for (const q of quakes) scene.remove(q.ring, q.disc); quakes.length = 0; }
+  function updateQuakes(dt) {
+    for (let i = quakes.length - 1; i >= 0; i--) {
+      const q = quakes[i]; q.t += dt; const k = Math.min(1, q.t / QUAKE_T);
+      q.disc.scale.setScalar(Math.max(0.01, q.r * k)); q.ring.material.opacity = 0.55 + 0.4 * Math.sin(q.t * (6 + 14 * k));      // the fill creeps out to the ring: that is the countdown
+      shake = Math.max(shake, 0.08 + 0.12 * k);
+      if (k < 1) continue;
+      scene.remove(q.ring, q.disc); q.ring.material.dispose(); q.disc.material.dispose(); quakes.splice(i, 1);
+      shake = Math.max(shake, 1); SFX.play('blast', tmp.set(q.x, 0, q.z)); SFX.play('tent_slam', tmp);
+      flash(tmp.set(q.x, 1, q.z), 0xff7a2a, q.r * 2.2, 0.45, 3);
+      for (let j = 0; j < 22; j++) { const a = j / 22 * 6.283, d = q.r * (0.3 + 0.7 * Math.random()); tmp.set(q.x + Math.cos(a) * d, 0.4, q.z + Math.sin(a) * d); spawnParticles(tmp, 0x6a5a4a, 3, 9); if (j % 3 === 0) burst(tmp, 0x8a7a6a, 2, 2.4, 5, 0.4); }
+      if (car.alive && car.depth < 0.3 && car.y < 1.5 && Math.hypot(car.pos.x - q.x, car.pos.z - q.z) < q.r)
+        hurtCar(26, new THREE.Vector3(car.pos.x - q.x, 0, car.pos.z - q.z).normalize());
+    }
+  }
   function updateBoss(dt) {
+    updateQuakes(dt);
     const runeTarget = boss.state === 'fight' ? 1.5 + 0.6 * Math.sin(elapsed * 3) : boss.state === 'emerging' ? 3.2 : boss.state === 'dead' ? 0.25 : 0.8;
     runeLevel += (runeTarget - runeLevel) * Math.min(1, 3 * dt); runeMat.color.setScalar(runeLevel);
     // дверь
@@ -6118,6 +6161,11 @@ const MONSTERS = [
     for (const tn of tentacles) updateTentacle(tn, dt);
 
     // хлёст щупальцем по кд — хост выбирает, кого бить
+    if (!NET.client && (boss.quakeCd = (boss.quakeCd == null ? 8 : boss.quakeCd) - dt) <= 0) {       // the ground itself: a wide ring that gives everyone a moment to get out
+      const tg = bossTgts();
+      if (tg.length) { const T = tg[Math.floor(Math.random() * tg.length)], q = { t: 'bq', x: r1(T.pos.x), z: r1(T.pos.z), r: 13 };
+        boss.quakeCd = boss.dealt > bossMax() * 0.5 ? rand(7, 10) : rand(10, 14); bossQuake(q.x, q.z, q.r); netEv(q); } else boss.quakeCd = 1;
+    }
     if (!NET.client) bossLash(dt);
     bossThrowTick(dt);
   }
@@ -6515,7 +6563,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 11;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 12;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6685,12 +6733,25 @@ const MONSTERS = [
       else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
       else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
       else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'wf') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q;
+        const L = Math.round(num(d.l, 0, 4));
+        if (R && R.up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < 110) {
+          if (d.k === 'beam' && (R.ride === 'halo' || R.ride === 'unicorn')) fireBeams({ pos: R.pos, h: () => R.h, y: () => R.pos.y, alive: () => R.up && NET.remotes.get(R.peer) === R }, R.ride, L, true);
+          else if (d.k === 'web' && Array.isArray(d.s)) { const sp = []; for (let i = 0; i + 1 < d.s.length && sp.length < 6; i += 2) sp.push(new THREE.Vector3(num(d.s[i], -400, 400), 0, num(d.s[i + 1], -400, 400)));
+            launchWebs(new THREE.Vector3(R.pos.x, 2.6 + R.pos.y, R.pos.z), sp, WEB_R[L], true); }
+          else if (d.k === 'mortar') fireMortar(new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), L, new THREE.Vector3(R.pos.x, 2.5 + R.pos.y, R.pos.z), true);
+          else if (d.k === 'nova') { const n = W_STATS.nova.n[L], ph = Math.random() * 6.283;
+            for (let i = 0; i < n; i++) { const a = ph + i / n * 6.283, m = new THREE.Mesh(bulletGeo, novaMat); m.position.set(R.pos.x + Math.sin(a) * 1.6, 1 + R.pos.y, R.pos.z + Math.cos(a) * 1.6); m.rotation.y = a; scene.add(m);
+              NET.shots.push({ m, v: new THREE.Vector3(Math.sin(a) * 42, 0, Math.cos(a) * 42), life: 0.55 }); } }
+        } }
+      else if (d.t === 'rock') { if (NET.client) rockGrow(obAt(d.i)); }
       else if (d.t === 'gate') { if (NET.client) openGate(); }
       else if (d.t === 'pk') { if (typeof d.id === 'string' && d.id.length < 40 && typeof d.ty === 'string' && ICONS[d.ty] && !pickups.some(p => p.id === d.id) && pickups.length < 40)
         spawnPickup(d.ty, new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), d.id, true); }
       else if (d.t === 'pkx') { if (typeof d.id === 'string') pickupGone(d.id); }
       else if (d.t === 'bs') { if (NET.client) { if (d.s === 'e' && boss.state === 'idle') bossEmerge(); else if (d.s === 'i' && boss.state !== 'dead') resetBoss(); } }
       else if (d.t === 'bt') { const tn = tentacles[d.k]; if (NET.client && tn && boss.state === 'fight' && tn.state === 'idle') { tn.state = 'wind'; tn.t = 0; tn.tp = netPeerPos(d.p); SFX.play('tent_wind', tentRoot(tn)); } }
+      else if (d.t === 'bq') { if (NET.client && boss.state === 'fight' && quakes.length < 4) bossQuake(num(d.x, -400, 400), num(d.z, -400, 400), num(d.r, 4, 20)); }
       else if (d.t === 'bf') { if (NET.client && boss.state === 'fight') bossFan(Math.round(num(d.n, 1, 24)), num(d.s, 0, 7), num(d.v, 1, 30), num(d.a, -9, 9)); }
       else if (d.t === 'bl') { const o = obAt(d.i); if (NET.client && o && o.room && boss.state === 'fight') { releaseLift(); bossLift(o); } }
       else if (d.t === 'bh') { const o = obAt(d.i); if (NET.client && o && o.room && Array.isArray(d.f) && Array.isArray(d.v) && Array.isArray(d.l)) {
@@ -6829,7 +6890,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -6869,7 +6930,7 @@ const MONSTERS = [
   }
   function netRemote(p, pr) {
     let R = NET.remotes.get(p.peer); const k = RIDES[pr.ride] ? pr.ride : 'buggy';
-    if (R && R.ride !== k) { scene.remove(R.g, R.cart, R.label, ...(R.riders || [])); NET.remotes.delete(p.peer); R = null; }
+    if (R && R.ride !== k) { scene.remove(R.g, R.cart, R.label, ...(R.riders || []), ...(R.saws || [])); NET.remotes.delete(p.peer); R = null; }
     if (!R) {
       let m, cartM; try { m = rideClone(k); cartM = m.cart; } catch (e) { console.warn('rideClone', e); m = buildProxy(k); }
       if (!cartM) cartM = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 2.3), new THREE.MeshStandardMaterial({ color: k === 'spider' ? 0x2a2630 : 0x8a5a30, roughness: 0.85, flatShading: true }));
@@ -6941,6 +7002,10 @@ const MONSTERS = [
           const lx = (i % 3 - 1) * 0.56, lz = (Math.floor(i / 3) % 3 - 1) * 0.66, ly = 0.2 + Math.floor(i / 9) * 0.5;
           sp.material = chubMats[0][Math.floor(elapsed * 3 + i) % CHUB_FR];
           sp.position.set(R.cpos.x + rx * lx + fx * lz, 0.68 + ly + Math.abs(Math.sin(elapsed * 9 + i)) * 0.06, R.cpos.z + rz * lx + fz * lz); }); }
+      { const L = Math.round(num(pr.wo, 0, 5)) - 1, want = up && L >= 0 ? W_STATS.orbit.n[L] * (R.ride === 'halo' ? 2 : 1) : 0, sw = R.saws || (R.saws = []), uni = R.ride === 'unicorn';      // their saws / dodecahedra
+        while (sw.length < want) { const m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[sw.length % dodecaMats.length] : sawMat); m.scale.setScalar(uni ? 1.1 : 1.4); scene.add(m); sw.push(m); }
+        sw.forEach((m, i) => { m.visible = i < want; if (i >= want) return; const a = elapsed * W_STATS.orbit.spd[L] * (R.ride === 'halo' ? 1.86 : 1) + i / want * 6.283, rr = W_STATS.orbit.r[L];
+          m.position.set(R.pos.x + Math.sin(a) * rr, 1 + R.pos.y, R.pos.z + Math.cos(a) * rr); if (uni) { m.rotation.x += dt * 3; m.rotation.y += dt * 4; } else m.rotation.y += dt * 22; }); }
       const cn = Math.round(num(pr.cn, 0, 999)); if (pr !== R.lastPr) { R.lastPr = pr; R.cn = cn; } netLabel(R, (cleanNick(pr.nick) || 'Driver') + (cn ? ' · ' + cn : ''));
       if (pr.f !== R.lastF) {                            // they fired: a tracer for show, no damage
         R.lastF = pr.f;
@@ -6952,7 +7017,7 @@ const MONSTERS = [
       }
     }
     netCollide();
-    for (const [peer, R] of NET.remotes) if (!seen.has(peer)) { netLog('lost ' + (R.labelText || 'a player')); scene.remove(R.g, R.cart, R.label, ...(R.riders || [])); NET.remotes.delete(peer); }
+    for (const [peer, R] of NET.remotes) if (!seen.has(peer)) { netLog('lost ' + (R.labelText || 'a player')); scene.remove(R.g, R.cart, R.label, ...(R.riders || []), ...(R.saws || [])); NET.remotes.delete(peer); }
     for (let i = NET.shots.length - 1; i >= 0; i--) { const s = NET.shots[i]; s.life -= dt; s.m.position.addScaledVector(s.v, dt); if (s.life <= 0 || s.m.position.y < 0.1) { scene.remove(s.m); NET.shots.splice(i, 1); } }
     if (n > 1) NET.had = true;
     const t = `Lobby: ${NET.hostNick}'s · ${n} player${n > 1 ? 's' : ''}` + (n === 1 && NET.had ? ' · others lost, waiting for them to reconnect' : ''); if (netEl.textContent !== t) netEl.textContent = t;
