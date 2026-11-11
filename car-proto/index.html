@@ -2663,7 +2663,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 68, buildEl = document.getElementById('build');
+  const BUILD = 69, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6365,7 +6365,7 @@ const MONSTERS = [
     for (const x of chubs) if (!x.dead && x.state !== 'cart') c++;
     for (const o of obstacles) if ((o.pillar || o.rock) && !o.mesh.visible) sm++;
     return { b: BUILD, r: !NET.game ? 'solo' : NET.client ? 'guest' : 'HOST', n: NET.nick, f: Math.round(DG.fps), m, ms, c, k: cart.riders.length, al: altars.map(A => A.n).join('/'), sm, hp: Math.round(car.hp),
-      x: Math.round(car.pos.x), z: Math.round(car.pos.z), ride, pl: NET.remotes.size + 1, age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0, rx: DG.rxRate, gh: DG.ghost, vis: document.hidden ? 0 : 1 };
+      x: Math.round(car.pos.x), z: Math.round(car.pos.z), ride, pl: NET.remotes.size + 1, age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0, rx: DG.rxRate, gh: DG.ghost, vis: document.hidden ? 0 : 1, md: car.mode, inp: COARSE ? 'touch' : 'keys', slip: DG.slip | 0 };
   }
   function diagRender() {
     DG.dirty = false; if (!DG.open) return;
@@ -6373,7 +6373,7 @@ const MONSTERS = [
     const host = rows.map(r => r[1]).find(o => o.r === 'HOST'), bad = (o, key, tol) => host && o !== host && Math.abs((+o[key] || 0) - (+host[key] || 0)) > tol;
     const cols = [['who', (o, w) => w + (o.n && w === 'me' ? ' (' + o.n + ')' : '')], ['role', o => o.r], ['build', o => o.b, o => host && o.b !== host.b], ['fps', o => o.f, o => o.f < 25], ['players', o => o.pl, o => bad(o, 'pl', 0)],
       ['monsters', o => o.m, o => bad(o, 'm', 4)], ['chubziks', o => o.c, o => bad(o, 'c', 6)], ['cart', o => o.k], ['altars', o => o.al, o => host && o.al !== host.al], ['smashed', o => o.sm, o => bad(o, 'sm', 0)],
-      ['hp', o => o.hp], ['pos', o => o.x + ',' + o.z], ['ride', o => o.ride], ['snap age ms', o => o.r === 'guest' ? o.age : '-', o => o.r === 'guest' && o.age > 1500], ['snap/s', o => o.r === 'guest' ? o.rx : '-'], ['ghost bites', o => o.gh, o => o.gh > 0], ['tab', o => o.vis ? 'shown' : 'HIDDEN', o => !o.vis]];
+      ['hp', o => o.hp], ['pos', o => o.x + ',' + o.z], ['ride', o => o.ride], ['snap age ms', o => o.r === 'guest' ? o.age : '-', o => o.r === 'guest' && o.age > 1500], ['snap/s', o => o.r === 'guest' ? o.rx : '-'], ['ghost bites', o => o.gh, o => o.gh > 0], ['steer', o => (o.inp || '?') + '/' + (o.md || '?')], ['slip°', o => o.slip == null ? '?' : o.slip, o => o.ride !== 'halo' && o.ride !== 'spider' && o.slip > 50], ['tab', o => o.vis ? 'shown' : 'HIDDEN', o => !o.vis]];
     const esc = v => String(v == null ? '' : v).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
     diagT.innerHTML = '<tr>' + cols.map(c => `<th style="text-align:left;padding:1px 6px 1px 0;color:#8fa0b8;font-weight:600">${c[0]}</th>`).join('') + '</tr>' +
       rows.map(([w, o]) => '<tr>' + cols.map(c => `<td style="padding:1px 6px 1px 0;${c[2] && c[2](o) ? 'color:#ff6a5a;font-weight:700' : ''}">${esc(c[1](o, w))}</td>`).join('') + '</tr>').join('');
@@ -6382,6 +6382,9 @@ const MONSTERS = [
   }
   function updateDiag() {
     const now = performance.now(); DG.frames++;
+    { const sp = Math.hypot(car.vel.x, car.vel.z);        // how far the ride's nose is from where it is actually going (worst over the last seconds)
+      if (sp > 6 && car.alive) { const d = Math.atan2(car.vel.x, car.vel.z) - car.heading, a = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) * 57.3; DG.slip = Math.max(DG.slip || 0, a > 90 && car.speed < 0 ? 180 - a : a); }
+      if ((DG.slipT = (DG.slipT || 0) + 1) > 240) { DG.slipT = 0; DG.slip = 0; } }
     if (now - DG.t0 >= 1000) { DG.fps = DG.frames * 1000 / (now - DG.t0); DG.frames = 0; DG.t0 = now; DG.rxRate = DG.rx; DG.rx = 0; DG.logBudget = Math.min(6, DG.logBudget + 2); DG.dirty = true;
       if (NET.on && NET.client) { const gap = now - DG.lastSw > 2500; if (gap !== DG.gap) { DG.gap = gap; netLog(gap ? 'no monster snapshots from the host for 2.5 s' : 'snapshots are back'); } }
       if (DG.ghost > DG.ghostSent) { netLog('ignored ' + (DG.ghost - DG.ghostSent) + ' bite(s) from monsters I cannot see'); DG.ghostSent = DG.ghost; }
