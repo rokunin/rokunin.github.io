@@ -38,6 +38,11 @@
            font: 700 18px/1.2 system-ui, sans-serif; pointer-events: none; opacity: 0; transition: opacity .25s; }
   #toast img { width: 48px; height: 48px; border-radius: 8px; }
   #toast small { display: block; font-weight: 500; font-size: 13px; opacity: .75; margin-top: 2px; }
+  .hint { position: fixed; left: 0; top: 0; width: 44px; height: 44px; margin: -22px 0 0 -22px; pointer-events: none; z-index: 4; opacity: 0; will-change: transform, opacity; }
+  .hint i { position: absolute; inset: 0; }
+  .hint i::before { content: ''; position: absolute; left: 50%; top: -9px; margin-left: -8px; border: 8px solid transparent; border-top: 0; border-bottom: 11px solid var(--c); }
+  .hint b { position: absolute; inset: 4px; border-radius: 50%; background: rgba(20,22,26,.8); border: 2px solid var(--c); color: var(--c);
+            font: 700 12px/32px system-ui, sans-serif; text-align: center; white-space: nowrap; }
   #alert { position: fixed; left: 50%; top: 32%; transform: translateX(-50%); pointer-events: none; opacity: 0;
            color: #ffb347; font: 800 34px/1 system-ui, sans-serif; text-shadow: 0 3px 0 #000; transition: opacity .3s; }
   #bossbar { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); width: 420px; display: none; pointer-events: none;
@@ -5618,6 +5623,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     updateAngel(dt);
     updateRide(dt);
     updateNet(dt);
+    updateHints(dt);
 
     hurtFlash -= dt;
     paint.emissive.setHex(hurtFlash > 0 ? 0xaa1111 : 0x000000);
@@ -5971,6 +5977,40 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const t = `Lobby: ${NET.hostNick}'s · ${n} player${n > 1 ? 's' : ''}`; if (netEl.textContent !== t) netEl.textContent = t;
   }
 
+  // ---- edge-of-screen pointers: chubzik rocks, unfed altars and the boss gate once you get near them ----
+  const hints = [], hintV = new THREE.Vector3(); let hintT = 0, hintList = [];
+  function hintEl(i) {
+    while (hints.length <= i) { const d = document.createElement('div'); d.className = 'hint'; d.innerHTML = '<i></i><b></b>'; document.body.appendChild(d); hints.push({ d, arrow: d.firstChild, label: d.lastChild, text: '', col: '' }); }
+    return hints[i];
+  }
+  function updateHints(dt) {
+    if ((hintT -= dt) <= 0) {                           // what is worth pointing at: refreshed a few times a second
+      hintT = 0.3; hintList = [];
+      if (!startEl.isConnected && car.alive && !angel.on && !inRoom(car.pos.x, car.pos.z)) {
+        const rk = [];
+        for (const R of rocks) { const d = Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z); if (d > 80) continue;
+          let n = 0; for (const c of chubs) if (!c.dead && c.state !== 'cart' && Math.hypot(c.pos.x - R.mesh.position.x, c.pos.z - R.mesh.position.z) < R.r + 9) n++;
+          if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 80, col: '#7fc0ff', text: '☻' + n }); }
+        rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
+        altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 120) hintList.push({ x: A.x, z: A.z, d, range: 120, col: '#ff7ad8', text: A.n + '/' + ALTAR_NEED }); });
+        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: altarsDone >= 3 ? '#ffd27a' : '#9a8f86', text: altarsDone >= 3 ? 'BOSS' : '🔒' }); }
+      }
+    }
+    const W = innerWidth, H = innerHeight, x0 = 40, x1 = W - 40, y0 = 84, y1 = H - 100, cx = W / 2, cy = (y0 + y1) / 2;      // clear of the buttons on top and the bars below
+    let i = 0;
+    for (const h of hintList) {
+      hintV.set(h.x, 1, h.z).project(camera);
+      const e = hintEl(i++), on = Math.abs(hintV.x) < 0.95 && Math.abs(hintV.y) < 0.95;
+      const dx = hintV.x * W / 2 + W / 2 - cx, dy = -hintV.y * H / 2 + H / 2 - cy;
+      const k = Math.max(dx > 0 ? dx / (x1 - cx) : dx / (x0 - cx), dy > 0 ? dy / (y1 - cy) : dy / (y0 - cy), 1), px = cx + dx / k, py = cy + dy / k;
+      e.d.style.opacity = on ? 0 : Math.min(1, (1 - h.d / h.range) * 4 + 0.25);
+      e.d.style.transform = `translate(${px.toFixed(0)}px,${py.toFixed(0)}px)`;
+      e.arrow.style.transform = `rotate(${Math.atan2(dx, -dy).toFixed(2)}rad)`;
+      if (e.text !== h.text) e.label.textContent = e.text = h.text;
+      if (e.col !== h.col) e.d.style.setProperty('--c', e.col = h.col);
+    }
+    for (; i < hints.length; i++) hints[i].d.style.opacity = 0;
+  }
   (function prewarm() {
     try {
       const g = new THREE.Group(), mats = [];
