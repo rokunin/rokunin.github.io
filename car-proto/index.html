@@ -167,6 +167,7 @@
 <div id="hp"><div id="hpfill"></div></div>
 <div id="dead">DEVOURED</div>
 <div id="alert"></div>
+<div id="build" style="position:fixed;left:50%;top:2px;transform:translateX(-50%);font:600 10px system-ui,sans-serif;color:#e8e6e1;opacity:.45;pointer-events:none;z-index:9">build 62 · monsters shoot</div>
 <div id="bossbar"><div id="bossname">PYRAMIDON</div><div id="bosshp"><div id="bossfill"></div></div></div>
 <div id="speed"><span id="spd">0</span><small>km/h</small></div>
 <button id="mute" title="Volume (M mutes)">🔊</button>
@@ -4559,7 +4560,7 @@ const MONSTERS = [
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
     const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp, dead: false, awake: true, carried: false,
-                flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 1 + Math.random() * 3, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
+                flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 0.4 + Math.random() * 2.2, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
     m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
     swarm.push(m);
     burst(tmp.set(x, 0.3, z), 0x8a7a6a, 2, 1.2, 2, 0.3);
@@ -4697,7 +4698,7 @@ const MONSTERS = [
           m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
         }
         // spitters lob acid
-        if (seen && dist < 24 && (m.throwT -= dt) <= 0) {      // every kind has a shot of its own: straight, fan or ring
+        if (seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
           if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
           else { m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
