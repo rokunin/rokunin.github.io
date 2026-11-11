@@ -3034,6 +3034,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function smashPillar(o, vel) {
     if (!o.mesh.visible) return;
     o.mesh.visible = false; pillarsSmashed++;
+    if (!NET.applying) netEv({ t: 'smash', i: obstacles.indexOf(o), vx: r1(vel.x), vz: r1(vel.z) });
     if (o.rock) rockSmashed(o);
     const chunkMat = o.rock ? rockMat : pillarMat;
     const p = o.mesh.position, sp = Math.hypot(vel.x, vel.z) || 1, dx = vel.x / sp, dz = vel.z / sp;
@@ -3099,6 +3100,15 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // ---------- drill logic ----------
   const DRILL_DPS = 7, DRILL_REACH = 4.6 * 1.5;   // радиус арки урона от центра машины
   let drillRPM = 0, drillSparkT = 0;
+  function crateSpot(o) {                                // where a broken crate comes back: derived from the crate and its respawn count, so every player gets the same spot
+    o.rc = (o.rc || 0) + 1; let s = (SEED + obstacles.indexOf(o) * 9973 + o.rc * 131) >>> 0, x = 0, z = 0;
+    const rnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    for (let k = 0; k < 40; k++) {
+      x = (rnd() * 2 - 1) * (ARENA - 6); z = (rnd() * 2 - 1) * (ARENA - 6);
+      if (!obstacles.some(q => q !== o && q.mesh.visible && Math.abs(q.mesh.position.x - x) < q.hx + o.hx + 1 && Math.abs(q.mesh.position.z - z) < q.hz + o.hx + 1)) break;
+    }
+    return [x, z];
+  }
   function damageCrate(o, dmg) {
     o.hp -= dmg; o.flash = 0.06;
     if (o.hp <= 0 && o.mesh.visible) {
@@ -3108,6 +3118,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       flash(o.mesh.position, 0xffb060, 4.5, 0.18, 1.6, false); burst(o.mesh.position, 0xa08a6a, 5, 1.6, 3.5, 0.35);
       kills++; killsEl.textContent = kills; crateDrop(o);
       respawnQueue.push({ o, t: 4 });
+      if (!o.room) netEv({ t: 'crate', i: obstacles.indexOf(o) });
     }
   }
   // попадает ли круг (x,z,r) в арку 180° перед машиной
@@ -4600,7 +4611,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
     A.pending--; A.n++; A.pulse = 1;
     tmp.set(A.x, 3.3, A.z); spawnParticles(tmp, 0x5fd0ff, 14, 8); flash(tmp, 0x5fd0ff, 6, 0.3, 3);
     SFX.play('heal', tmp, { rate: 0.8 + A.n * 0.12 }); SFX.play('chub', tmp, { rate: 0.7 });
-    A.runes[Math.min(A.n, ALTAR_NEED) - 1].material.color.setHex(0x5fd0ff).multiplyScalar(3);
+    netEv({ t: 'altar', k: altars.indexOf(A), n: A.n });
+    altarApply(A);
+  }
+  function altarApply(A) {                              // show the progress; wake the altar when it is full (also called for progress made by other players)
+    for (let i = 0; i < Math.min(A.n, ALTAR_NEED); i++) A.runes[i].material.color.setHex(0x5fd0ff).multiplyScalar(3);
     A.fill.scale.x = Math.max(0.001, A.n / ALTAR_NEED); altHud();
     if (A.n >= ALTAR_NEED && !A.done) {
       A.done = true; altarsDone++; altHud();
@@ -4783,13 +4798,18 @@ laugh(r) {                                       // a big man's belly laugh: bre
       let res = 0; for (const m of swarm) if (!m.dead && m.home) res++;
       if (chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) { const R = rocks[Math.floor(Math.random() * rocks.length)]; if (Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z) > 45) { const a = Math.random() * 6.283; spawnCritter(Math.random() < 0.3 ? 'spitter' : 'gremlin', R.mesh.position.x + Math.cos(a) * (R.r + 7), R.mesh.position.z + Math.sin(a) * (R.r + 7)).home = R; } }
     }
-    const ok = carOK();
+    const okMe = carOK();
     for (let i = chubs.length - 1; i >= 0; i--) {
       const c = chubs[i];
       if (c.dead) { chubs.splice(i, 1); continue; }
       if (c.state === 'ascend') continue;
       if (c.state === 'cart') { c.phase += dt * 3; c.sprite.material = chubMats[Math.abs(cart.phi) > 0.25 ? 1 : 0][Math.floor(c.phase) % CHUB_FR]; c.sprite.position.copy(c.pos); c.sprite.scale.set(CHUB_SIZE * 0.85, CHUB_SIZE * 0.85, 1); continue; }
-      const dcx = car.pos.x - c.pos.x, dcz = car.pos.z - c.pos.z, dCar = Math.hypot(dcx, dcz);
+      let dcx = car.pos.x - c.pos.x, dcz = car.pos.z - c.pos.z, dCar = Math.hypot(dcx, dcz), ok = okMe, other = null;
+      for (const R of NET.remotes.values()) {            // another player's ride may be closer: go to whichever is nearest
+        if (!R.up || R.pos.y > 1) continue;
+        const rx = R.pos.x - c.pos.x, rz = R.pos.z - c.pos.z, rd = Math.hypot(rx, rz);
+        if (rd < dCar || !ok) { dcx = rx; dcz = rz; dCar = rd; ok = true; other = R; }
+      }
       if ((c.think -= dt) <= 0) { c.think = 0.3; c.threat = monsterDist(c.pos.x, c.pos.z); }
       let speed = 0, gx = 0, gz = 0, scared = false;
       if (c.state === 'arc') {
@@ -4801,7 +4821,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
           if (c.state === 'perch' && !c.rock.mesh.visible) { c.pos.y = 0; c.state = 'dazed'; c.dazeT = 0.8; }
         }
       } else if (c.state === 'perch') {
-        if (ride === 'spider' && car.alive && dCar < car.radius + 0.7 && Math.abs(car.y - c.pos.y) < 1.3) { c.pos.y = 0; cartAdd(c); continue; }
+        if (ride === 'spider' && !other && car.alive && dCar < car.radius + 0.7 && Math.abs(car.y - c.pos.y) < 1.3) { c.pos.y = 0; cartAdd(c); continue; }
         c.calm = c.threat > 12 ? c.calm + dt : 0; scared = c.threat < 9;
         const comeDown = ok && dCar < 11 && c.threat > 8;
         if (c.calm > 2.5 || comeDown) {
@@ -4834,7 +4854,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
         const sx = c.vel.x - c.vel.z; if (Math.abs(sx) > 0.3) c.face = sx > 0 ? -1 : 1;
         c.phase += dt * (3 + speed * 0.9);
       } else c.phase += dt * 2.2;
-      if (chubVulnerable(c) && ok && dCar < car.radius + 0.75) { cartAdd(c); continue; }
+      if (chubVulnerable(c) && ok && dCar < car.radius + 0.75) {
+        if (!other) cartAdd(c);
+        else { netEv({ t: 'chub' }, other.peer); c.dead = true; scene.remove(c.sprite, c.shadow); flash(tmp.copy(c.pos).setY(0.8), 0x9ad0ff, 2, 0.2, 2, false); SFX.play('chub', c.pos, { rate: 1.2, vol: 0.6 }); }   // it hopped into their cart
+        continue;
+      }
       if (angel.on && c.state === 'ascend') continue;
       c.sprite.material = chubMats[scared ? 1 : 0][Math.floor(c.phase) % CHUB_FR];
       const hop = speed ? Math.abs(Math.sin(c.phase * Math.PI * 0.5)) * 0.22 : 0;
@@ -5500,7 +5524,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const r = respawnQueue[i];
       r.t -= dt;
       if (r.t <= 0) {
-        const [x, z] = r.o.room ? roomSpot(r.o.hx) : freeSpot(r.o.hx);
+        const [x, z] = r.o.room ? roomSpot(r.o.hx) : crateSpot(r.o);
         r.o.mesh.position.set(x, r.o.h / 2, z); r.o.mesh.rotation.set(0, 0, 0); r.o.hp = 3; r.o.mesh.visible = true;
         respawnQueue.splice(i, 1);
       }
@@ -5622,7 +5646,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
     pres.onMessage = (data, meta) => { if (data && typeof data === 'object' && meta && meta.peerId) { st.set(meta.peerId, data); fire(); } };
     room.onPeerJoin = id => { st.set(id, {}); send(id); fire(); };
     room.onPeerLeave = id => { st.delete(id); fire(); };
+    const ev = room.makeAction('ev'); let evH = null;
+    ev.onMessage = (data, meta) => { if (evH && data && typeof data === 'object' && meta && meta.peerId) evH(data, meta.peerId); };
     return {
+      sendEv(d, to) { try { const p = ev.send(d, to ? { target: to } : undefined); if (p && p.catch) p.catch(() => {}); } catch (e) {} },
+      onEv(h) { evH = h; },
       peers() { return snap || (snap = [{ peer: T.selfId, isMe: true, sameTab: true, kind: 'viewer', presence: mine }, ...[...st].map(([peer, presence]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence }))]); },
       onPeers(h) { hs.push(h); return () => {}; },
       presence(p) { mine = { ...mine, ...p }; snap = null; send(); return Promise.resolve(); },
@@ -5634,6 +5662,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const r = window.claude ? await window.claude.use('room') : await p2pRoom();      // inside Claude: its room channel; anywhere else: plain WebRTC
       if (!r) { mpState.textContent = 'Multiplayer is off on this device: the page must be open in Claude by a signed-in member of the owner\'s organization or an invited guest (a plain public link does not connect).'; return; }
       NET.room = r;
+      if (r.sendEv) { NET.tx = (d, to) => r.sendEv(d, to); r.onEv(netOnEv); }                   // WebRTC: direct messages
+      else if (typeof r.emit === 'function') {                                                    // Claude room: one shared topic, addressed inside the payload
+        NET.tx = (d, to) => { r.emit('ev', to ? { ...d, to } : d).catch(() => {}); };
+        r.on('ev', m => { if (m && !(m.isMe && m.sameTab) && m.data && typeof m.data === 'object' && (!m.data.to || m.data.to === netMe())) netOnEv(m.data, m.peer); }, () => {});
+      }
       r.onPeers(() => renderLobby(), () => { NET.room = null; NET.on = false; mpState.textContent = 'Multiplayer: the connection was refused for this viewer.'; renderLobby(); });
       renderLobby();
     } catch (e) { mpState.textContent = 'Multiplayer: could not start the network module.'; }
@@ -5644,9 +5677,67 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (!NET.room || mode === 'solo') return;
     const g = mode !== 'host' && netGames(NET.room.peers()).find(x => x.id === mode);
     NET.game = g ? g.id : 'g' + trueRandom().toString(36).slice(2, 8); NET.hostNick = g ? g.host : NET.nick;
-    NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, a: 0 }).catch(() => {});
+    NET.isHost = !g;
+    NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, a: 0, hp: NET.isHost ? 1 : 0 }).catch(() => {});
   }
   if (window.__skipLobby) toComic('solo');
+  // ---- shared world: who broke what, altar progress, chubzik hand-offs. The lobby host answers newcomers with the full state ----
+  const netMe = () => { if (!NET.me && NET.room) { const p = NET.room.peers().find(q => q.isMe && q.sameTab); if (p) NET.me = p.peer; } return NET.me; };
+  function netEv(d, to) { if (NET.on && NET.game && NET.tx) NET.tx({ ...d, g: NET.game }, to); }
+  const obAt = i => (Number.isInteger(i) && i >= 0 && i < obstacles.length ? obstacles[i] : null);
+  function netWorld() {                                  // everything a newcomer needs to match this world
+    const sm = [], cr = [];
+    obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n) };
+  }
+  function netAmHost() {                                 // the host answers; if the host is gone, the lowest peer id stands in
+    const mine = netMe(), ps = NET.room.peers().filter(p => (p.presence || {}).game === NET.game);
+    const host = ps.find(p => (p.presence || {}).hp === 1);
+    if (host) return host.peer === mine;
+    return ps.map(p => p.peer).sort()[0] === mine;
+  }
+  function netOnEv(d, from) {
+    if (!NET.on || d.g !== NET.game) return;
+    NET.applying = true;
+    try {
+      if (d.t === 'smash') { const o = obAt(d.i); if (o && (o.pillar || o.rock) && o.mesh.visible) smashPillar(o, tmp2net.set(num(d.vx, -40, 40), 0, num(d.vz, -40, 40))); }
+      else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
+      else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
+      else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'sync?') { if (netAmHost()) netEv(netWorld(), from); }
+      else if (d.t === 'sync') {
+        for (const i of Array.isArray(d.sm) ? d.sm.slice(0, 400) : []) { const o = obAt(i); if (o && (o.pillar || o.rock) && o.mesh.visible) { o.mesh.visible = false; if (o.rock) rockSmashed(o); } }
+        for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
+          o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
+          if (!c[3] && o.mesh.visible) { o.mesh.visible = false; respawnQueue.push({ o, t: 4 }); } }
+        (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
+      }
+    } finally { NET.applying = false; }
+  }
+  const tmp2net = new THREE.Vector3();
+  function crateRemote(o) {                              // someone else broke it: same splinters, no score, no drop
+    if (o.carried) { releaseIfHeld(o); o.carried = false; }
+    o.mesh.visible = false; spawnParticles(o.mesh.position, 0xd2873c, 12, 8); SFX.play('crate_break', o.mesh.position, { vol: 0.6 });
+    respawnQueue.push({ o, t: 4 });
+  }
+  function chubGift() {                                  // a chubzik ran to our cart in another player's world
+    const stub = nearestRock(car.pos.x, car.pos.z) || { mesh: { position: car.pos.clone(), visible: true }, r: 3, h: 2.5, top: 2 };
+    const c = spawnChub(stub, false); c.pos.set(cart.pos.x, 0, cart.pos.z); cartAdd(c);
+  }
+  function netCollide() {                                // rides are solid to each other: each player pushes their own ride out
+    if (!car.alive || car.depth > 0.3) return;
+    for (const R of NET.remotes.values()) {
+      if (!R.up || Math.abs(R.pos.y - car.y) > 1.6) continue;
+      const dx = car.pos.x - R.pos.x, dz = car.pos.z - R.pos.z, d = Math.hypot(dx, dz), minD = car.radius * 2;
+      if (d >= minD) continue;
+      const side = String(netMe()) < String(R.peer) ? -1 : 1;                  // stacked exactly on top of each other (same spawn point): split by peer id
+      const nx = d > 0.05 ? dx / d : side, nz = d > 0.05 ? dz / d : 0, push = (minD - d) * 0.6;
+      car.pos.x += nx * push; car.pos.z += nz * push;
+      const vn = car.vel.x * nx + car.vel.z * nz;
+      if (vn < 0) { car.vel.x -= nx * vn * 1.3; car.vel.z -= nz * vn * 1.3; car.speed *= 0.8; if (ride === 'spider') { SPD.vel.x -= nx * vn * 1.3; SPD.vel.z -= nz * vn * 1.3; }
+        if (-vn > 8 && (NET.bumpT || 0) < elapsed) { NET.bumpT = elapsed + 0.4; shake = Math.max(shake, 0.3); SFX.play('clang', car.pos, { vol: 0.5 }); spawnParticles(tmp.set(car.pos.x - nx * car.radius, 1, car.pos.z - nz * car.radius), 0xffd27a, 6, 6); } }
+    }
+  }
   const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
@@ -5704,6 +5795,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateNet(dt) {
     if (!NET.on || !NET.room) { netEl.textContent = ''; return; }
     if ((NET.sendT -= dt) <= 0) { NET.sendT = 0.08; netSend(); }
+    if (!NET.synced && netMe()) { NET.synced = true; if (!NET.isHost) netEv({ t: 'sync?' }); }      // ask the host what has already been broken and fed
     const seen = new Set(); let n = 1;
     for (const p of NET.room.peers()) {
       const pr = p.presence || {};
@@ -5713,7 +5805,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       tmp.set(num(pr.x, -400, 400), num(pr.y, 0, 60), num(pr.z, -400, 400));
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else R.pos.lerp(tmp, k);
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
-      const up = pr.a === 1;
+      const up = pr.a === 1; R.up = up; R.peer = p.peer;
       R.g.visible = up; R.g.position.copy(R.pos); R.g.rotation.y = R.h; R.tur.rotation.y = num(pr.t, -99, 99) - R.h;
       R.cpos.lerp(tmp.set(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), k);
       R.cart.visible = up && pr.cs === 1; R.cart.position.set(R.cpos.x, 0.75, R.cpos.z); R.cart.rotation.y = num(pr.ch, -99, 99);
@@ -5728,6 +5820,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         }
       }
     }
+    netCollide();
     for (const [peer, R] of NET.remotes) if (!seen.has(peer)) { scene.remove(R.g, R.cart, R.label); NET.remotes.delete(peer); }
     for (let i = NET.shots.length - 1; i >= 0; i--) { const s = NET.shots[i]; s.life -= dt; s.m.position.addScaledVector(s.v, dt); if (s.life <= 0 || s.m.position.y < 0.1) { scene.remove(s.m); NET.shots.splice(i, 1); } }
     const t = `Lobby: ${NET.hostNick}'s · ${n} player${n > 1 ? 's' : ''}`; if (netEl.textContent !== t) netEl.textContent = t;
