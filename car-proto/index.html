@@ -2677,7 +2677,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 75, buildEl = document.getElementById('build');
+  const BUILD = 76, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4068,23 +4068,49 @@ laugh(r) {                                       // a big man's belly laugh: bre
     flash(o, 0x5ff5e6, 7, 0.25, 3); SFX.play('nova', car.pos);
   }
 
-  // ---- beam nova: the halo throws out a star of light beams that hold for a while; the unicorn shoots a rainbow out of both ends ----
+  // ---- beam nova: the halo fires a star of holy rail beams that hold for a while; the unicorn blasts rainbows out of both ends, right across the map ----
   const beams = [], bmV = new THREE.Vector3();
   const beamGeo = new THREE.BoxGeometry(1, 1, 1); beamGeo.translate(0, 0, 0.5);         // runs along +z from its origin
-  const beamMatOf = (c, k, add = true) => glow(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false }), k);
+  const railRingGeo = new THREE.TorusGeometry(0.5, 0.045, 5, 18);                       // lies across the beam
+  const rbGeo = new THREE.PlaneGeometry(1, 1, 1, 1); rbGeo.rotateX(-Math.PI / 2); rbGeo.translate(0, 0, 0.5);      // flat ribbon along +z, uv.y = 1 at the origin
   const RAINBOW = [0xff4a5a, 0xff9a3a, 0xffe14a, 0x5fd36a, 0x4f9dff, 0xb06cff];
+  const addMat = (c, k, o) => { const m = glow(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), k); m.userData.o = o; return m; };
+  const rainbowMat = len => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { time: { value: 0 }, alpha: { value: 0 }, len: { value: len } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float time, alpha, len; varying vec2 vUv;
+      void main(){
+        float d = (1.0 - vUv.y) * len;
+        float x = (vUv.x - 0.5) * 1.25 + 0.5 + 0.09 * sin(d * 0.5 - time * 13.0) + 0.03 * sin(d * 1.7 + time * 7.0);       // the ribbon wriggles
+        if (x < 0.0 || x > 1.0) discard;
+        float h = floor(x * 6.0) / 6.0 * 0.86;
+        vec3 col = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+        col = mix(col, vec3(1.0), 0.12) * (1.0 + 0.25 * sin(d * 0.9 - time * 20.0));                                      // pulses run down it
+        float tw = pow(max(0.0, sin(d * 2.3 - time * 31.0) * sin(x * 37.0 + d * 1.3)), 10.0);                             // sparkles
+        float edge = smoothstep(0.0, 0.06, x) * smoothstep(1.0, 0.94, x);
+        gl_FragColor = vec4(col * 1.15 + tw * 2.5, alpha * edge * smoothstep(0.0, 1.2, d));
+      }` });
   function fireBeams() {
     const L = weapons.nova - 1, dmg = W_STATS.nova.dmg[L];
     if (ride === 'halo') {
-      const n = Math.max(4, Math.round(W_STATS.nova.n[L] * 0.5)), len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, mat = beamMatOf(0x9af7ff, 2.6), dirs = [];
-      for (let i = 0; i < n; i++) { const g = new THREE.Group(), m = new THREE.Mesh(beamGeo, mat); m.scale.set(0.7, 0.45, len); g.add(m); scene.add(g); dirs.push({ g, a: ph + i / n * 6.283 }); }
-      beams.push({ kind: 'halo', dirs, mats: [mat], len, w: 0.9, t: 0, T: 1.4, tick: 0, dmg: dmg * 0.7 });
-    } else {
-      const len = [14, 17, 20, 23, 27][L], mats = RAINBOW.map(c => beamMatOf(c, 1.15, false)), dirs = [];      // plain blending: the stripes keep their colours instead of adding up to white
-      for (const off of [0, Math.PI]) {                  // out of the mouth, and out of the other end
-        const g = new THREE.Group(); mats.forEach((mt, i) => { const m = new THREE.Mesh(beamGeo, mt); m.scale.set(0.26, 0.3, len); m.position.x = (i - 2.5) * 0.26; g.add(m); }); scene.add(g); dirs.push({ g, off });
+      const n = Math.max(4, Math.round(W_STATS.nova.n[L] * 0.5)), len = [7, 9, 11, 13.5, 16][L], ph = Math.random() * 6.283, dirs = [];
+      const core = addMat(0xfff6d8, 5, 1), sheath = addMat(0xffd27a, 1.3, 0.3), ringM = addMat(0xffe9a8, 3, 0.9), nr = Math.max(3, Math.round(len / 2.6));
+      for (let i = 0; i < n; i++) {
+        const g = new THREE.Group(), c = new THREE.Mesh(beamGeo, core), sh = new THREE.Mesh(beamGeo, sheath), rings = [];
+        c.scale.set(0.14, 0.14, len); sh.scale.set(0.75, 0.4, len); g.add(c, sh);
+        for (let j = 0; j < nr; j++) { const r = new THREE.Mesh(railRingGeo, ringM); g.add(r); rings.push(r); }
+        const tip = new THREE.Mesh(railRingGeo, ringM); tip.position.z = len; tip.scale.setScalar(1.6); g.add(tip);
+        scene.add(g); dirs.push({ g, a: ph + i / n * 6.283, rings });
       }
-      beams.push({ kind: 'rainbow', dirs, mats, len, w: 1.6, t: 0, T: 1.0, tick: 0, dmg: dmg * 0.9 });
+      beams.push({ kind: 'halo', dirs, mats: [core, sheath, ringM], len, w: 0.9, t: 0, T: 1.4, tick: 0, every: 0.12, dmg: dmg * 0.7, nr });
+      flash(tmp.set(car.pos.x, 2 + car.y, car.pos.z), 0xfff0c0, 10, 0.3, 3);
+    } else {
+      const per = [1, 2, 2, 3, 3][L], offs = per === 1 ? [0] : per === 2 ? [-0.2, 0.2] : [-0.38, 0, 0.38], len = 2 * ARENA + 80, dirs = [], mats = [];   // \|/ at full power, both ends
+      for (const base of [0, Math.PI]) for (const o of offs) {
+        const mt = rainbowMat(len), m = new THREE.Mesh(rbGeo, mt), g = new THREE.Group(); m.scale.set(2.4, 1, len); m.position.y = dirs.length * 0.015; m.renderOrder = 4; g.add(m);
+        scene.add(g); dirs.push({ g, off: base + o, fwd: base === 0 }); mats.push(mt);
+      }
+      beams.push({ kind: 'rainbow', dirs, mats, len, w: 2.0, t: 0, T: 1.0, tick: 0, every: 0.2, dmg: dmg * 1.4 });
+      for (const sd of [1, -1]) flash(tmp.set(car.pos.x + Math.sin(car.heading) * 2.3 * sd, 2.6 + car.y, car.pos.z + Math.cos(car.heading) * 2.3 * sd), 0xff9ad8, 6, 0.25, 2.5, sd > 0);
     }
     SFX.play('nova', car.pos, { rate: ride === 'halo' ? 0.75 : 1.3 });
   }
@@ -4099,19 +4125,24 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateBeams(dt) {
     for (let i = beams.length - 1; i >= 0; i--) {
       const B = beams[i]; B.t += dt;
-      const k = B.t / B.T, a = Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25);           // snap on, fade off
-      for (const mt of B.mats) mt.opacity = Math.max(0, a) * (0.75 + 0.25 * Math.sin(elapsed * 40));
-      const fx = Math.sin(car.heading), fz = Math.cos(car.heading), alive = car.alive && car.depth < 0.3;
+      const a = Math.max(0, Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25));           // snap on, fade off
+      if (B.kind === 'halo') for (const mt of B.mats) mt.opacity = a * mt.userData.o * (0.8 + 0.2 * Math.sin(elapsed * 45));
+      else for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = elapsed; }
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading), alive = car.alive && car.depth < 0.3, grow = Math.min(1, B.t / 0.1);
       for (const D of B.dirs) {
         let ang, ox = car.pos.x, oz = car.pos.z, oy;
-        if (B.kind === 'halo') { D.a += dt * 0.5; ang = D.a; oy = 2.0 + car.y; }
-        else { ang = car.heading + D.off; const fwd = D.off === 0; ox += fx * (fwd ? 2.3 : -1.7); oz += fz * (fwd ? 2.3 : -1.7); oy = (fwd ? 2.9 : 2.1) + car.y; }
-        D.g.position.set(ox, oy, oz); D.g.rotation.y = ang; D.g.scale.set(1 + 0.25 * Math.sin(elapsed * 30), 1, Math.min(1, B.t / 0.12));
-        D.g.visible = alive;
+        if (B.kind === 'halo') {
+          D.a += dt * 0.5; ang = D.a; oy = 2.0 + car.y; D.g.scale.set(1, 1, grow);
+          D.rings.forEach((r, j) => { const q = (B.t * 1.5 + j * 0.37) % 1; r.position.z = (j + q) / B.nr * B.len; r.scale.setScalar(0.5 + 1.5 * q); r.rotation.z += dt * 5; });   // rings race out along the rail
+        } else {
+          ang = car.heading + D.off; ox += fx * (D.fwd ? 2.3 : -1.7); oz += fz * (D.fwd ? 2.3 : -1.7); oy = (D.fwd ? 2.9 : 2.1) + car.y; D.g.scale.set(1, 1, grow);
+          if (alive && Math.random() < 0.5) { const d = 3 + Math.random() * 40; spawnParticles(tmp.set(ox + Math.sin(ang) * d, oy, oz + Math.cos(ang) * d), RAINBOW[Math.floor(Math.random() * 6)], 1, 4); }
+        }
+        D.g.position.set(ox, oy, oz); D.g.rotation.y = ang; D.g.visible = alive;
         D.dx = Math.sin(ang); D.dz = Math.cos(ang); D.ox = ox; D.oz = oz;
       }
-      if (alive && (B.tick -= dt) <= 0) { B.tick = 0.12; for (const D of B.dirs) beamHits(D.ox, D.oz, D.dx, D.dz, B.len, B.w, B.dmg); }
-      if (k >= 1) { for (const D of B.dirs) scene.remove(D.g); for (const mt of B.mats) mt.dispose(); beams.splice(i, 1); }
+      if (alive && (B.tick -= dt) <= 0) { B.tick = B.every; for (const D of B.dirs) beamHits(D.ox, D.oz, D.dx, D.dz, B.len, B.w, B.dmg * B.every / 0.12); }
+      if (B.t >= B.T) { for (const D of B.dirs) scene.remove(D.g); for (const mt of B.mats) mt.dispose(); beams.splice(i, 1); }
     }
   }
 
@@ -6794,6 +6825,9 @@ const MONSTERS = [
         { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: altarsDone >= 3 ? '#ffd27a' : '#9a8f86', text: altarsDone >= 3 ? 'BOSS' : '🔒', cap: altarsDone >= 3 ? 'kill boss' : 'unlock boss' }); }
       }
     }
+    if (hintT === 0.3 && !startEl.isConnected && NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up)
+      hintList.push({ x: R.pos.x, z: R.pos.z, d: 0, range: 1, col: '#8dff9a', text: '☺', cap: R.labelText || 'friend', live: R });
+    for (const h of hintList) if (h.live) { h.x = h.live.pos.x; h.z = h.live.pos.z; }
     const W = innerWidth, H = innerHeight, x0 = 40, x1 = W - 40, y0 = 84, y1 = H - 100, cx = W / 2, cy = (y0 + y1) / 2;      // clear of the buttons on top and the bars below
     let i = 0; const placed = [];
     for (const h of hintList) {
