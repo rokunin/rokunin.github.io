@@ -2676,7 +2676,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 72, buildEl = document.getElementById('build');
+  const BUILD = 73, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4610,7 +4610,7 @@ const MONSTERS = [
     const v = variant == null ? Math.floor(Math.random() * 3) : variant, K = SW_KINDS[kind], art = SW_ART[kind][v];
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
-    const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp, dead: false, awake: true, carried: false,
+    const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp * (1 + 0.6 * (NET.on && NET.game ? NET.remotes.size : 0)), dead: false, awake: true, carried: false,
                 flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 0.4 + Math.random() * 2.2, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
     m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
     swarm.push(m);
@@ -5475,7 +5475,7 @@ const MONSTERS = [
   // ---------- BOSS: Пирамидон ----------
   const BOSS_HP = 1000, TENT_SP = 0.85, TENT_MIN = 10, TENT_MAX = 34;
   const bossBarEl = document.getElementById('bossbar'), bossFillEl = document.getElementById('bossfill');
-  const boss = { state: 'idle', hp: BOSS_HP, t: 0, throwCd: 2, lashCd: 1.5, lifting: null, flash: 0, dirtT: 0 };
+  const boss = { state: 'idle', hp: BOSS_HP, dealt: 0, t: 0, throwCd: 2, lashCd: 1.5, lifting: null, flash: 0, dirtT: 0 };
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
   const bossGroup = new THREE.Group();
   bossGroup.position.set(BOSS_POS.x, -BOSS_SINK, BOSS_POS.z); bossGroup.visible = false; scene.add(bossGroup);
@@ -5639,7 +5639,7 @@ const MONSTERS = [
   }
   function bossFanTick(dt) {
     if (boss.state !== 'fight' || !car.alive) return;
-    const rage = boss.hp < BOSS_HP * 0.5, aim = Math.atan2(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z);
+    const rage = boss.dealt > bossMax() * 0.5, aim = Math.atan2(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z);
     if (boss.fanLeft > 0 && (boss.fanGap -= dt) <= 0) {                  // a burst: several fans in a row, each offset half a step so the gaps move
       boss.fanLeft--; boss.fanGap = 0.42;
       if (boss.fanRing) bossFan(18, 6.283 * 17 / 18, 9.5, boss.fanLeft * 0.175); else bossFan(rage ? 9 : 7, rage ? 1.5 : 1.15, 11.5, aim + (boss.fanLeft % 2 ? 0.09 : -0.09));
@@ -5688,10 +5688,12 @@ const MONSTERS = [
 
   function bossDamage(d) {
     if (boss.state !== 'fight') return;
-    boss.hp -= d; boss.flash = 0.06;
-    bossFillEl.style.width = Math.max(0, boss.hp / BOSS_HP * 100) + '%';
-    if (boss.hp <= 0) killBoss();
+    boss.dealt += d; boss.flash = 0.06; NET.bdAcc = (NET.bdAcc || 0) + d;      // everyone in the lobby chips at the same health pool
+    bossBar();
+    if (boss.dealt >= bossMax()) { killBoss(); netEv({ t: 'bk' }); }
   }
+  const bossMax = () => BOSS_HP * (1 + 1.5 * (NET.on && NET.game ? NET.remotes.size : 0));       // every extra player: +150%
+  const bossBar = () => { bossFillEl.style.width = Math.max(0, (1 - boss.dealt / bossMax()) * 100) + '%'; };
   function setDoor(closed) { if (door.targetY !== (closed ? 2.3 : -2.5)) SFX.play('door', doorMesh.position); door.targetY = closed ? 2.3 : -2.5; }
   function releaseLift() {
     if (!boss.lifting) return;
@@ -5717,7 +5719,8 @@ const MONSTERS = [
   }
   function resetBoss() {
     if (boss.state === 'dead' || boss.state === 'idle') return;
-    boss.state = 'idle'; boss.hp = BOSS_HP; boss.t = 0; boss.throwCd = 2; boss.lashCd = 1.5;
+    boss.state = 'idle'; boss.t = 0; boss.throwCd = 2; boss.lashCd = 1.5;
+    if (!(NET.on && NET.game)) boss.dealt = 0;           // solo: the fight starts over; in a lobby the damage already done stays
     releaseLift();
     for (let i = thrown.length - 1; i >= 0; i--) if (thrown[i].hostile) finishThrown(thrown[i], i);
     bossCol.disabled = true; bossGroup.visible = false; bossGroup.position.y = -BOSS_SINK;
@@ -5739,10 +5742,9 @@ const MONSTERS = [
     if (boss.state === 'idle') {
       tentacles.forEach(tn => hideTent(tn));
       if (car.alive && car.pos.x > ROOM_X1 + 5 && inRoom(car.pos.x, car.pos.z)) {   // заехали — запираем
-        boss.state = 'emerging'; boss.t = 0; crewSay('boss', 1, true);
-        setDoor(true);
+        boss.state = 'emerging'; boss.t = 0; crewSay('boss', 1, true);      // the gate stays open: whoever dies can drive back in
         bossGroup.visible = true;
-        bossBarEl.style.display = 'block'; bossFillEl.style.width = '100%';
+        bossBarEl.style.display = 'block'; bossBar();
         flashAlert('PYRAMIDON'); SFX.play('boss_emerge', BOSS_POS); SFX.play('boss_roar', BOSS_POS, { delay: 1.6 });
       }
       return;
@@ -6256,7 +6258,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0 };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6341,6 +6343,8 @@ const MONSTERS = [
       else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
       else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
       else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'bd') { boss.dealt = Math.max(boss.dealt, 0) + num(d.d, 0, 500); bossBar(); if (boss.state === 'fight' && boss.dealt >= bossMax()) killBoss(); }
+      else if (d.t === 'bk') { if (boss.state === 'fight' || boss.state === 'emerging') { boss.state = 'fight'; killBoss(); } else if (boss.state !== 'dead') { boss.state = 'dead'; bossBarEl.style.display = 'none'; setDoor(false); flashAlert('PYRAMIDON IS DEAD'); angelStart(); } }
       else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
       else if (d.t === 'hit') { const m = swById.get(d.i); if (!NET.client && m && !m.dead && !m.net) hitCritter(m, num(d.d, 0, 9999), tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.p, 0, 20)); }
       else if (d.t === 'log') { if (typeof d.s === 'string') diagAdd(DG.nick(from), d.s.slice(0, 160)); }
@@ -6361,6 +6365,7 @@ const MONSTERS = [
         for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
           if (!c[3] && o.mesh.visible) { o.mesh.visible = false; respawnQueue.push({ o, t: 4 }); } }
+        boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); }
         (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
       }
     } finally { NET.applying = false; }
@@ -6494,6 +6499,7 @@ const MONSTERS = [
     if ((NET.sendT -= dt) <= 0) { NET.sendT = 0.08; netSend(); }
     if (netMe() && (NET.roleT = (NET.roleT || 0) - dt) <= 0) { NET.roleT = 0.5; netRole(); }
     if (!NET.client && NET.remotes.size && (NET.snapT = (NET.snapT || 0) - dt) <= 0) { NET.snapT = 0.2; netSnap(); }
+    if (NET.bdAcc > 0 && (NET.bdT = (NET.bdT || 0) - dt) <= 0) { NET.bdT = 0.25; netEv({ t: 'bd', d: r1(NET.bdAcc) }); NET.bdAcc = 0; }
     if (!NET.synced && netMe()) { NET.synced = true; if (!NET.isHost) netEv({ t: 'sync?' }); }      // ask the host what has already been broken and fed
     const seen = new Set(); let n = 1;
     for (const p of NET.room.peers()) {
