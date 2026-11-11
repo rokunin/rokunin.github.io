@@ -2570,7 +2570,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
       m.position.copy(tip);
       m.lookAt(tip.x + dir.x, tip.y + dir.y, tip.z + dir.z);
       scene.add(m);
-      bullets.push({ m, v: dir.multiplyScalar(star ? 52 : 70), life: star ? 1.4 : 1.1, spin: star });
+      const holy = ride === 'halo';                      // the halo's own gun is the weakest of the lot: its strength is the swords
+      bullets.push({ m, v: dir.multiplyScalar(star ? 52 : holy ? 52.5 : 70), life: star ? 1.4 : 1.1, spin: star, dmg: holy ? 0.75 : 1 });
     }
     muzzleTimer = 0.04;
     muzzleLight.position.copy(tip); muzzleLight.intensity = Math.max(muzzleLight.intensity, 0.55);
@@ -2694,7 +2695,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 78, buildEl = document.getElementById('build');
+  const BUILD = 79, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4787,7 +4788,8 @@ const MONSTERS = [
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
     if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
     waves.lastKill.copy(m.pos);
-    if (m.K.split) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
+    if (m.mini && !NET.client) { dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
+    if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
@@ -4795,6 +4797,51 @@ const MONSTERS = [
     m.hp -= dmg; if (m.flash < -0.12) m.flash = 0.08;      // blinks under constant fire instead of staying lit
     if (dir) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
     if (m.hp <= 0) killCritter(m, dir);
+  }
+  // ---- mini-bosses: the same monsters a fifth bigger with a hellfire on their heads; they shoot like the players do and throw bullet patterns ----
+  const hellTex = (() => { const c = mkCanvas(64), x = c.getContext('2d'), g = x.createRadialGradient(32, 44, 2, 32, 36, 30);
+    g.addColorStop(0, 'rgba(255,255,220,1)'); g.addColorStop(0.3, 'rgba(255,170,40,0.95)'); g.addColorStop(0.65, 'rgba(255,40,60,0.6)'); g.addColorStop(1, 'rgba(120,0,80,0)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(32, 2); x.quadraticCurveTo(58, 34, 46, 54); x.quadraticCurveTo(32, 66, 18, 54); x.quadraticCurveTo(6, 34, 32, 2); x.fill(); return srgbTex(c); })();
+  const hellMat = glow(new THREE.SpriteMaterial({ map: hellTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 2.2);
+  const MINI_KINDS = ['brute', 'grubber', 'maw', 'jelly', 'oculon', 'lamprey', 'gloop', 'stilt', 'wingmaw', 'spike'];
+  function makeMini(m, gate) {
+    if (m.mini) return m;
+    m.mini = true; m.gate = !!gate; m.K = { ...m.K, size: m.K.size * 1.2, r: m.K.r * 1.2, bite: Math.round(m.K.bite * 1.3), spiky: true };   // cannot be run over
+    m.r = m.K.r; m.hp = (m.K.hp * 4 + 26) * (1 + 0.6 * (NET.on && NET.game ? NET.remotes.size : 0)); m.atkT = 1.5 + Math.random() * 2;
+    const f = new THREE.Sprite(hellMat); f.center.set(0.5, 0.1); f.position.set(0, 0.9, 0); f.scale.set(0.42, 0.5, 1); m.sprite.add(f); m.fire = f;
+    m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
+    return m;
+  }
+  function spawnMinis(n, x, z, gate) {
+    for (let i = 0; i < n; i++) { const a = i / n * 6.283 + Math.random(), d = 3 + Math.random() * 3 + (n > 3 ? 4 : 0);
+      makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], THREE.MathUtils.clamp(x + Math.cos(a) * d, -ARENA + 3, ARENA - 3), THREE.MathUtils.clamp(z + Math.sin(a) * d, -ARENA + 3, ARENA - 3)), gate); }
+    SFX.play('growl_elite', tmp.set(x, 0, z));
+  }
+  // attack sequences run on every player's machine from one start message, so everybody sees and dodges the same pattern
+  const MINI_SEQ = [{ n: 7, gap: 0.09 },      // 0 gun: a burst of fast tracers, like our machine gun
+                    { n: 3, gap: 0.4 },       // 1 fan: three fans, like the spread gun
+                    { n: 2, gap: 0.5 },       // 2 nova: two rings
+                    { n: 26, gap: 0.085 },    // 3 spiral: two arms winding outward
+                    { n: 5, gap: 0.22 }];     // 4 cross: a turning four-way cross
+  function miniStart(m, pat, a) { m.seq = { pat, a, i: 0, t: 0 }; m.flash = 0.1; SFX.play('growl', m.pos, { vol: 0.5, rate: 0.7 }); }
+  function miniShot(m, ang, speed, geo, life, look) {
+    const L = mobLook(m.art.color, look), from = tmp.set(m.pos.x, (m.K.fly || 0) + m.K.size * 0.5, m.pos.z);
+    const mesh = new THREE.Mesh(mobGeo[geo], L.core); mesh.position.copy(from); if (geo === 0) mesh.rotation.y = ang; mesh.scale.setScalar(1.25);
+    const halo = new THREE.Sprite(L.halo); halo.scale.setScalar(1.7); mesh.add(halo); scene.add(mesh);
+    eshots.push({ m: mesh, v: new THREE.Vector3(Math.sin(ang) * speed, (1.0 - from.y) / life, Math.cos(ang) * speed), life, dmg: 3, k: 0, col: m.art.color, small: true, dart: geo === 0 });
+  }
+  function miniSeq(m, dt) {
+    const q = m.seq, S = MINI_SEQ[q.pat]; if ((q.t -= dt) > 0) return;
+    q.t = S.gap; const i = q.i++;
+    if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 75) {
+      if (q.pat === 0) miniShot(m, q.a + Math.sin(i * 2.4) * 0.07, 21, 0, 1.5, 0);
+      else if (q.pat === 1) for (let j = 0; j < 7; j++) miniShot(m, q.a + (j / 6 - 0.5) * 1.1 + (i % 2) * 0.09, 11.5, 1, 2.2, 1);
+      else if (q.pat === 2) for (let j = 0; j < 16; j++) miniShot(m, q.a + j / 16 * 6.283 + i * 0.196, 9, 2, 2.4, 2);
+      else if (q.pat === 3) for (const o of [0, Math.PI]) miniShot(m, q.a + i * 0.4 + o, 8.5, 2, 2.6, 2);
+      else for (let j = 0; j < 4; j++) for (const sp of [8, 11]) miniShot(m, q.a + j * 1.5708 + i * 0.3, sp, 1, 2.2, 1);
+      if (q.pat !== 3 || i % 4 === 0) SFX.play('spit', m.pos, { vol: 0.45, rate: q.pat === 0 ? 1.9 : 1.0 });
+    }
+    if (q.i >= S.n) m.seq = null;
   }
   function stunCritter(m, t) { if (m.net) { netEv({ t: 'stun', i: m.id, s: t }, NET.hostPeer); return; } m.stun = Math.max(m.stun || 0, t); }
   const critterTop = m => (m.K.fly || 0) + m.K.size * 0.85;
@@ -4829,6 +4876,7 @@ const MONSTERS = [
         spawnCritter(kind, x, z);
       }
     });
+    spawnMinis(1, wp.x + Math.sin(base) * (reach + 3), wp.z + Math.cos(base) * (reach + 3));      // every wave brings one mini-boss
     waves.since = 0; waves.t = 35; waves.pending = true;
     flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: 'WAVE ' + (n + 1) });
   }
@@ -4911,6 +4959,10 @@ const MONSTERS = [
           m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
         }
         // spitters lob acid
+        if (m.mini && !dazed && !m.seq && seen && dist < 34 && (m.atkT -= dt) <= 0) {
+          m.atkT = 2.4 + Math.random() * 1.8; const pat = Math.floor(Math.random() * MINI_SEQ.length), a = r2(Math.atan2(nx, nz));
+          miniStart(m, pat, a); netEv({ t: 'fx', k: 'mb', i: m.id, p: pat, a });
+        }
         if (!dazed && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
           if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
@@ -4927,6 +4979,8 @@ const MONSTERS = [
         }
   
       }
+      if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
+      if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.42 * (2 - fl), 0.5 * fl, 1); }
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
@@ -5161,7 +5215,14 @@ const MONSTERS = [
   seedRandom(SEED + 7);
   const ALTAR_NEED = 5, ALTAR_WAVE = 30, altars = [];
   const altTEl = document.getElementById('altT');
-  let altarsDone = 0;
+  let altarsDone = 0, gateOpen = false, gateSpawned = false;
+  function openGate() { if (gateOpen) return; gateOpen = true; flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
+  function gateTick() {                                 // host: all three altars fed -> nine mini-bosses at the gate; it opens when they are dead
+    if (NET.client || altarsDone < 3 || gateOpen) return;
+    if (!gateSpawned) { gateSpawned = true; spawnMinis(9, ROOM_X1 - 14, 0, true); return; }
+    for (const m of swarm) if (!m.dead && m.gate) return;
+    openGate(); netEv({ t: 'gate' });
+  }
   const altNEl = document.getElementById('altN');
   {
     const stone = new THREE.MeshStandardMaterial({ color: 0x4a4458, roughness: 0.9, flatShading: true });
@@ -5268,8 +5329,8 @@ const MONSTERS = [
       A.beam.material.color.setHex(0xffc24a); A.beam.material.opacity = 0.45; A.fill.material.color.setHex(0xffc24a);
       tmp.set(A.x, 2, A.z); flash(tmp, 0xffd27a, 30, 0.6, 5); burst(tmp, 0xffd27a, 16, 3, 9, 0.5); shake = Math.max(shake, 0.7);
       SFX.play('boss_roar', tmp, { rate: 1.6, vol: 0.6 }); SFX.play('loot', tmp);
-      if (altarsDone >= 3) { flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
-      else { flashAlert('ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true); }
+      if (altarsDone >= 3) flashAlert('THE GATE GUARD AWAKENS'); else { flashAlert('ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true); }
+      if (!NET.client && altarsDone < 3) spawnMinis(3, A.x, A.z);
     }
   }
   function altarNear(A) {                                // distance from the altar to the nearest player who is up
@@ -5348,7 +5409,8 @@ const MONSTERS = [
       if (t > 2.5 && carBub.altar) { carBub.altar.approved = true; carBub.altar = null; }
       if (t > 3.6 || !car.alive) { carBub.t = -1; carBub.said = 0; carBub.vee.visible = carBub.roxy.visible = false; if (carBub.altar) carBub.altar = null; }
     }
-    if (altarsDone < 3 && boss.state === 'idle' && door.targetY < 0) { door.targetY = 2.3; }       // sealed until the altars are fed
+    gateTick();
+    if (!gateOpen && boss.state === 'idle' && door.targetY < 0) { door.targetY = 2.3; }       // sealed until the altars are fed
   }
 
   // ---------- finale: once Pyramidon is down, a huge blue cube-angel descends and every surviving chubzik flies up into it ----------
@@ -5943,7 +6005,7 @@ const MONSTERS = [
       tn.n = TENT_MIN; tn.reach = 0; tn.state = 'idle'; tn.t = 0; hideTent(tn);
     }
     bossBarEl.style.display = 'none';
-    setDoor(altarsDone < 3);
+    setDoor(!gateOpen);
   }
 
   function updateBoss(dt) {
@@ -6395,7 +6457,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 10;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 11;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6473,7 +6535,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6516,7 +6578,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), m.flash > 0 ? 1 : 0]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -6534,8 +6596,8 @@ const MONSTERS = [
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA, ARENA), z = num(e[3], -ARENA, ARENA);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; }
-        m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if (e[4] === 1 && m.flash <= 0) m.flash = 0.1;
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 4) gateSpawned = true; }
+        m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1;
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
         m.dead = true; scene.remove(m.sprite, m.shadow);
@@ -6565,6 +6627,7 @@ const MONSTERS = [
       else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
       else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
       else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'gate') { if (NET.client) openGate(); }
       else if (d.t === 'pk') { if (typeof d.id === 'string' && d.id.length < 40 && typeof d.ty === 'string' && ICONS[d.ty] && !pickups.some(p => p.id === d.id) && pickups.length < 40)
         spawnPickup(d.ty, new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), d.id, true); }
       else if (d.t === 'pkx') { if (typeof d.id === 'string') pickupGone(d.id); }
@@ -6610,7 +6673,8 @@ const MONSTERS = [
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
       else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
       else if (d.t === 'fx') { const m = swById.get(d.i); if (NET.client && m && !m.dead && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 70) {
-        if (d.k === 'th') mobThrow(m, num(d.x, -1, 1), num(d.z, -1, 1), num(d.d, 1, 40), Math.round(num(d.p, 0, 2)));
+        if (d.k === 'mb') miniStart(m, Math.min(MINI_SEQ.length - 1, Math.round(num(d.p, 0, 9))), num(d.a, -9, 9));
+        else if (d.k === 'th') mobThrow(m, num(d.x, -1, 1), num(d.z, -1, 1), num(d.d, 1, 40), Math.round(num(d.p, 0, 2)));
         else if (d.k === 'sp') spit(m, null, null, new THREE.Vector3(num(d.x, -ARENA, ARENA), num(d.y, 0, 20), num(d.z, -ARENA, ARENA))); } }
       else if (d.t === 'sync?') { if (netAmHost()) netEv(netWorld(), from); }
       else if (d.t === 'sync') {
@@ -6619,9 +6683,11 @@ const MONSTERS = [
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
           if (!c[3] && o.mesh.visible) { o.mesh.visible = false; respawnQueue.push({ o, t: 4 }); } }
         boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); } else if (d.bst === 1 && boss.state === 'idle') bossFightNow(d.bn);
+        if (d.go === 1) NET.goPending = true;
         (Array.isArray(d.pk) ? d.pk : []).forEach(q => { if (Array.isArray(q) && typeof q[0] === 'string' && typeof q[1] === 'string' && ICONS[q[1]] && !pickups.some(p => p.id === q[0])) spawnPickup(q[1], new THREE.Vector3(num(q[2], -400, 400), 0, num(q[3], -400, 400)), q[0], true); });
         (Array.isArray(d.aw) ? d.aw : []).forEach((t, k) => { const A = altars[k]; if (A && typeof t === 'number' && t >= 0) { A.awake = true; A.spawnT = num(t, 0, 99); } });
         (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
+        if (NET.goPending) { NET.goPending = false; openGate(); }
       }
     } finally { NET.applying = false; }
   }
@@ -6850,7 +6916,7 @@ const MONSTERS = [
           if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 80, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
         altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 120) hintList.push({ x: A.x, z: A.z, d, range: 120, col: '#ff7ad8', text: A.n + '/' + ALTAR_NEED, cap: 'sacrifice!' }); });
-        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: altarsDone >= 3 ? '#ffd27a' : '#9a8f86', text: altarsDone >= 3 ? 'BOSS' : '🔒', cap: altarsDone >= 3 ? 'kill boss' : 'unlock boss' }); }
+        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: gateOpen ? '#ffd27a' : altarsDone >= 3 ? '#ff7a4a' : '#9a8f86', text: gateOpen ? 'BOSS' : altarsDone >= 3 ? '☠' : '🔒', cap: gateOpen ? 'kill boss' : altarsDone >= 3 ? 'kill the gate guard' : 'unlock boss' }); }
       }
     }
     if (hintT === 0.3 && !startEl.isConnected && NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up)
