@@ -2405,6 +2405,21 @@ laugh(r) {                                       // a big man's belly laugh: bre
       else if (u.uleg) anim.push({ t: 'uleg', o, grp: u.uleg - 1 }); else if (u.spin) anim.push({ t: 'spin', o, k: u.spin }); });
     return { g, tur, cart: cartM, anim };
   }
+  // the unicorn's horn: gallop into something head-on and it gets gored and thrown
+  const hornV = new THREE.Vector3();
+  function updateHorn() {
+    const sp = Math.hypot(car.vel.x, car.vel.z); if (!car.alive || car.depth > 0.3 || sp < 7) return;
+    const fx = Math.sin(car.heading), fz = Math.cos(car.heading), dmg = sp > 18 ? 6 : 4;
+    const gore = (t, r, y) => {
+      const dx = t.pos.x - car.pos.x, dz = t.pos.z - car.pos.z, d = Math.hypot(dx, dz) || 1e-3;
+      if (d > car.radius + r + 1.3 || (dx * fx + dz * fz) / d < 0.55 || Math.abs(y - car.y) > 3.2 || (t.hornT || 0) > elapsed) return false;
+      t.hornT = elapsed + 0.45; hornV.set(fx, 0, fz);
+      tmp.set(car.pos.x + fx * 2.4, 2.6, car.pos.z + fz * 2.4); spawnParticles(tmp, 0xf0b428, 5, 7); flash(tmp, 0xffd95a, 2.2, 0.14, 2, false); SFX.play('hit_flesh', tmp, { rate: 0.8 }); shake = Math.max(shake, 0.2);
+      return true;
+    };
+    for (const m of swarm) if (!m.dead && gore(m, m.r, m.K.fly || 0)) hitCritter(m, dmg, hornV, 12);
+    for (const e of enemies) if (!e.dead && !e.carried && e.awake && gore(e, e.r, 0)) hitEnemy(e, hornV, dmg, 8);
+  }
   function updateRide(dt) {
     const sp = Math.hypot(car.vel.x, car.vel.z); ridePhase += sp * dt * 0.45;
     if (rideG[ride]) rideG[ride].anim(dt, sp);
@@ -2661,7 +2676,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 71, buildEl = document.getElementById('build');
+  const BUILD = 72, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6097,6 +6112,7 @@ const MONSTERS = [
     updateAltars(dt);
     updateAngel(dt);
     updateRide(dt);
+    if (ride === 'unicorn') updateHorn();
     updateNet(dt);
     updateHints(dt);
     updateDiag();
