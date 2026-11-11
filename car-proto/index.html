@@ -2235,6 +2235,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         const inner = Math.acos(THREE.MathUtils.clamp((l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2), -1, 1));
         L.fem.rotation.x = -(a + alpha); L.knee.rotation.x = Math.PI - inner;
       };
+      R.feet = legs;
       R.pose = () => { carGroup.updateMatrixWorld(true); for (const L of legs) { spA.copy(L.rest); legRoot.localToWorld(spA); L.foot.copy(spA); legIK(L); } };   // standing pose for copies
       const pyr = new THREE.Group(); pyr.position.y = 1.95; B.add(pyr);
       const pg = new THREE.CylinderGeometry(0.5, 1.15, 1.35, 4, 1).toNonIndexed(); pg.rotateY(Math.PI / 4);
@@ -2676,7 +2677,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 73, buildEl = document.getElementById('build');
+  const BUILD = 74, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2715,7 +2716,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     car.pos.set(0, 0, 0); car.vel.set(0, 0, 0); car.speed = 0; car.heading = 0;
     car.hp = car.maxHp; car.alive = true; carGroup.visible = true;
     car.burrow = 'up'; car.depth = 0; car.y = 0; car.vy = 0; car.airborne = false;
-    resetBoss(); if (NET.on && NET.game) { cartFling(cart.riders.length, 0); cartReset(); } else clearSwarm(); clearEShots(); crewSay('respawn', 1, true);
+    if (!(NET.on && NET.game)) resetBoss(); if (NET.on && NET.game) { cartFling(cart.riders.length, 0); cartReset(); } else clearSwarm(); clearEShots(); crewSay('respawn', 1, true);
     document.getElementById('dead').style.display = 'none';
     // разогнать злюк от точки спавна
     for (const e of enemies) if (!e.dead && Math.hypot(e.pos.x, e.pos.z) < 25) placeEnemy(e);
@@ -2890,45 +2891,73 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   const enemyQueue = [];
   let diggers = 0;
+  function enemyBump(e) {                               // the car pushes against a cube, asleep or awake; ramming a sleeping one hurts it
+    const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist, minD = car.radius + e.r;
+    if (!(car.alive && car.depth < 0.3 && car.y < e.s * 0.8 && dist < minD)) return;
+    const push = minD - dist, own = !NET.client, share = e.awake && own ? 0.5 : 1;
+    car.pos.x += nx * push * share; car.pos.z += nz * push * share;
+    if (e.awake && own) { e.pos.x -= nx * push * 0.5; e.pos.z -= nz * push * 0.5; }
+    const vn = car.vel.x * -nx + car.vel.z * -nz;
+    if (!e.awake && vn > RAM_SPEED && (e.ramT || 0) < elapsed) {          // протаранили «ящик» — а он живой
+      e.ramT = elapsed + 0.5;
+      hitEnemy(e, tmp.set(-nx, 0, -nz), 1, 14); SFX.play('hit_flesh', e.pos);
+      e.stun = 0.6; shake = Math.max(shake, 0.3);
+      car.speed *= 0.7;
+    } else if (vn > 0) { car.vel.x += nx * vn; car.vel.z += nz * vn; car.speed *= 0.6; }
+  }
+  function enemyMirror(e, dt) {                         // a guest's copy of a host cube: glide to where the host says, animate the rest here
+    if (e.tx == null) { e.tx = e.pos.x; e.tz = e.pos.z; e.tyaw = e.yaw; }
+    const k = 1 - Math.exp(-10 * dt);
+    if (Math.abs(e.tx - e.pos.x) + Math.abs(e.tz - e.pos.z) > 20) { e.pos.x = e.tx; e.pos.z = e.tz; } else { e.pos.x += (e.tx - e.pos.x) * k; e.pos.z += (e.tz - e.pos.z) * k; }
+    if (e.elite) flickerElite(e);
+    e.root.position.set(e.pos.x, e.hostCarry ? 1.6 : 0, e.pos.z);
+    if (!e.awake) { e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * 0.025; e.root.rotation.y = e.yaw; return; }
+    e.yaw = angLerp(e.yaw, e.tyaw, Math.min(1, 10 * dt)); e.root.rotation.y = e.yaw;
+    e.phase += dt * 9;
+    const h = Math.abs(Math.sin(e.phase)); e.wakeT = Math.max(0, e.wakeT - dt);
+    const surprise = e.wakeT > 0 ? Math.sin((1 - e.wakeT / 0.45) * Math.PI) * 2.2 : 0;
+    e.hop.position.y = h * 0.55 + surprise;
+    const squash = 1 - (1 - h) * 0.18; e.hop.scale.set(1 + (1 - squash) * 0.6, squash, 1 + (1 - squash) * 0.6);
+    e.open += ((e.topen == null ? 0.25 : e.topen) - e.open) * Math.min(1, 14 * dt); e.pivot.rotation.x = -e.open;
+    e.flash -= dt; setEnemyLook(e, e.flash > 0 ? enemyFlash : e.matAwake);
+  }
+  function enemyDieFx(e) {
+    spawnParticles(tmp.copy(e.pos).setY(1), e.elite ? 0xd040a0 : 0xc8323c, e.elite ? 30 : 18, e.elite ? 12 : 10);
+    flash(tmp, e.elite ? 0xff40c8 : 0xff4a30, e.elite ? 10 : 5.5, e.elite ? 0.32 : 0.22, 2.2); burst(tmp, e.elite ? 0x70305f : 0x5a2a2a, e.elite ? 9 : 5, 1.8, 4);
+    spawnParticles(tmp.copy(e.pos).setY(1), 0xf4f1e8, 6, 8);
+    SFX.play(e.elite ? 'elite_die' : 'biter_die', e.pos);
+  }
   function updateEnemies(dt) {
     diggers = 0;
-    for (const e of enemies) {
+    for (let ei = 0; ei < enemies.length; ei++) {
+      const e = enemies[ei];
+      if (NET.client) { if (!!e.carried !== !!e.gSent) { e.gSent = !!e.carried; e.tx = e.pos.x; e.tz = e.pos.z; netEv({ t: 'eg', i: ei, c: e.carried ? 1 : 0, x: r1(e.pos.x), z: r1(e.pos.z) }, NET.hostPeer); } }
       if (e.dead || e.carried) continue;
+      enemyBump(e);                                     // my ride shoves against it, whoever runs it
+      if (NET.client) { enemyMirror(e, dt); continue; }  // a guest only shows what the host's cubes do
       e.ramCd -= dt;
-      const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z;
+      if ((e.think = (e.think || 0) - dt) <= 0) { e.think = 0.3 + Math.random() * 0.2; e.tgt = netPick(e); }
+      const T = e.tgt && e.tgt.up && NET.remotes.get(e.tgt.peer) === e.tgt ? e.tgt.tc : car, mine = T === car, seen = mine ? carSeen() : T.alive;
+      const dx = T.pos.x - e.pos.x, dz = T.pos.z - e.pos.z;
       const dist = Math.hypot(dx, dz) || 1e-4;
       const nx = dx / dist, nz = dz / dist;
-
-      // машина упирается в злюку в любом состоянии
       const minD = car.radius + e.r;
-      if (car.alive && car.depth < 0.3 && car.y < e.s * 0.8 && dist < minD) {
-        const push = minD - dist;
-        const share = e.awake ? 0.5 : 1;
-        car.pos.x += nx * push * share; car.pos.z += nz * push * share;
-        if (e.awake) { e.pos.x -= nx * push * 0.5; e.pos.z -= nz * push * 0.5; }
-        const vn = car.vel.x * -nx + car.vel.z * -nz;
-        if (!e.awake && vn > RAM_SPEED) {                               // протаранили «ящик» — а он живой
-          hitEnemy(e, tmp.set(-nx, 0, -nz), 1, 14); SFX.play('hit_flesh', e.pos);
-          e.stun = 0.6; shake = Math.max(shake, 0.3);
-          car.speed *= 0.7;
-        } else if (vn > 0) { car.vel.x += nx * vn; car.vel.z += nz * vn; car.speed *= 0.6; }
-      }
 
       if (e.elite) flickerElite(e);
       if (!e.awake) {
         e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * 0.025;   // еле заметно дышит
-        if (carSeen() && dist < WAKE_DIST) wakeEnemy(e);
+        if (seen && dist < WAKE_DIST) wakeEnemy(e);
         continue;
       }
 
       // погоня
       let tx = 0, tz = 0;
-      const hunting = e.elite && car.alive && !carSeen();               // архизлюка лезет к норе откапывать
-      const scared = car.alive && !carSeen() && !e.elite;
+      const hunting = mine && e.elite && car.alive && !carSeen();               // архизлюка лезет к норе откапывать
+      const scared = mine && car.alive && !carSeen() && !e.elite;
       let digging = false;
-      const preyC = !hunting && (dist > 16 || !carSeen()) ? groundChubNear(e.pos, 20) : null;
+      const preyC = !hunting && (dist > 16 || !seen) ? groundChubNear(e.pos, 20) : null;
       if (preyC) { const px = preyC.pos.x - e.pos.x, pz = preyC.pos.z - e.pos.z, pd = Math.hypot(px, pz) || 1; tx = px / pd * e.speed; tz = pz / pd * e.speed; }
-      else if (carSeen()) { tx = nx * e.speed; tz = nz * e.speed; }
+      else if (seen) { tx = nx * e.speed; tz = nz * e.speed; }
       else if (hunting) {
         if (dist > car.radius + e.r + 0.4) { tx = nx * e.speed; tz = nz * e.speed; }
         else if (e.stun <= 0) { digging = true; diggers++; e.vel.multiplyScalar(0.8); }
@@ -2972,7 +3001,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       e.hop.scale.set(1 + (1 - squash) * 0.6, squash, 1 + (1 - squash) * 0.6);
 
       // чавканье
-      const targetOpen = e.charge > 0 ? 0.95 : digging ? 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 22 + e.phase)) : scared ? 0.6 : !carSeen() ? 0.1 : dist < 7 ? 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(elapsed * 18 + e.phase)) : 0.18;
+      const targetOpen = e.charge > 0 ? 0.95 : digging ? 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 22 + e.phase)) : scared ? 0.6 : !seen ? 0.1 : dist < 7 ? 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(elapsed * 18 + e.phase)) : 0.18;
       e.open += (targetOpen - e.open) * Math.min(1, 14 * dt);
       e.pivot.rotation.x = -e.open;
 
@@ -2982,22 +3011,23 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const atShield = shB && Math.hypot(e.pos.x - shB.x, e.pos.z - shB.z) < e.r + shB.r + 0.35;
       if (atShield) {                                                   // упёрлась в щит — грызёт его
         if (e.biteCd <= 0) { e.biteCd = 0.8; chewShield(e); }
-      } else if (car.alive && car.burrow === 'up' && car.y < 1 && dist < minD + 0.35 && e.biteCd <= 0) {
+      } else if (T.alive && T.burrow === 'up' && T.y < 1 && dist < minD + 0.35 && e.biteCd <= 0) {
         e.biteCd = 0.8;
-        SFX.play('chomp', e.pos); hurtCar(e.bite, tmp.set(nx, 0, nz).clone());
+        SFX.play('chomp', e.pos);
+        if (mine) hurtCar(e.bite, tmp.set(nx, 0, nz).clone()); else netEv({ t: 'ehurt', i: ei, d: e.bite, x: r2(nx), z: r2(nz) }, T.R.peer);
         e.vel.set(-nx * 9, 0, -nz * 9);
-        spawnParticles(tmp.copy(car.pos).setY(1.2), 0xc26a30, 4, 5);
+        spawnParticles(tmp.copy(T.pos).setY(1.2), 0xc26a30, 4, 5);
       }
 
       // плевок пульками: короткий замах пастью, потом выстрел (у архизлюк — веер из трёх)
       if (e.charge > 0) {
         e.charge -= dt;
-        if (e.charge <= 0) enemyShoot(e, nx, nz);
+        if (e.charge <= 0) enemyShoot(e, nx, nz, T);
       } else {
         if (e.biteCd <= 0) { const c = groundChubNear(e.pos, e.r + 0.7); if (c) { e.biteCd = 0.6; eatChub(c, e); } }
         e.shotCd -= dt;
         if (e.shotCd <= 0 && e.stun <= 0 && e.wakeT <= 0) {
-          const atCar = carSeen() && dist > 3.5 && dist < 24 && !atShield;
+          const atCar = seen && dist > 3.5 && dist < 24 && !atShield;
           const perch = !atCar || Math.random() < 0.5 ? perchedNear(e.pos, 24) : null;     // sometimes they would rather snipe a chubzik off its rock
           if (atCar || perch) {
             e.shotCd = e.elite ? rand(2.2, 3) : rand(1.8, 2.8);
@@ -3015,7 +3045,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
     updateEShots(dt);
     updateDig(dt);
-    for (let i = enemyQueue.length - 1; i >= 0; i--) {
+    if (!NET.client) for (let i = enemyQueue.length - 1; i >= 0; i--) {
       enemyQueue[i].t -= dt;
       if (enemyQueue[i].t <= 0) { placeEnemy(enemyQueue[i].e); enemyQueue.splice(i, 1); }
     }
@@ -3031,9 +3061,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
     x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
   })();
   const eshotHaloMat = [0xff5a3a, 0xff4ad8].map(c => glow(new THREE.SpriteMaterial({ map: eshotHalo, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 1.6));
-  function enemyShoot(e, nx, nz) {
+  function enemyShoot(e, nx, nz, T = car) {
     const tc = e.shotAt && e.shotAt.state === 'perch' ? e.shotAt : null; e.shotAt = null;
-    if (e.dead || e.carried || (!car.alive && !tc)) return;
+    if (e.dead || e.carried || (!T.alive && !tc)) return;
     const k = e.elite ? 1 : 0, speed = e.elite ? 13 : 15;
     if (tc) {                                          // one aimed shot at the rock
       const from = new THREE.Vector3(e.pos.x, e.hop.position.y + e.s * 0.45, e.pos.z), ax = tc.pos.x - from.x, az = tc.pos.z - from.z, ad = Math.hypot(ax, az) || 1;
@@ -3043,10 +3073,16 @@ laugh(r) {                                       // a big man's belly laugh: bre
       return;
     }
     // aim a little ahead of the car, red ones lead less so strafing works
-    const lead = (e.elite ? 0.45 : 0.25) * Math.hypot(car.pos.x - e.pos.x, car.pos.z - e.pos.z) / speed;
-    const ax = car.pos.x + car.vel.x * lead - e.pos.x, az = car.pos.z + car.vel.z * lead - e.pos.z, ad = Math.hypot(ax, az) || 1;
+    const lead = (e.elite ? 0.45 : 0.25) * Math.hypot(T.pos.x - e.pos.x, T.pos.z - e.pos.z) / speed;
+    const ax = T.pos.x + T.vel.x * lead - e.pos.x, az = T.pos.z + T.vel.z * lead - e.pos.z, ad = Math.hypot(ax, az) || 1;
     const base = Math.atan2(ax / ad, az / ad);
     const from = new THREE.Vector3(e.pos.x + nx * e.s * 0.55, e.hop.position.y + e.s * 0.45, e.pos.z + nz * e.s * 0.55);
+    netEv({ t: 'es', i: enemies.indexOf(e), a: r2(base), f: [r2(from.x), r2(from.y), r2(from.z)] });
+    enemyVolley(e, from, base);
+    e.vel.addScaledVector(tmp.set(-nx, 0, -nz), 3);                    // отдача
+  }
+  function enemyVolley(e, from, base) {
+    const k = e.elite ? 1 : 0, speed = e.elite ? 13 : 15;
     for (const off of e.elite ? [-0.22, 0, 0.22] : [0]) {
       const a = base + off, m = new THREE.Mesh(eshotGeo, eshotMat[k]);
       m.position.copy(from); m.scale.setScalar(e.elite ? 1.15 : 1);
@@ -3054,7 +3090,6 @@ laugh(r) {                                       // a big man's belly laugh: bre
       scene.add(m);
       eshots.push({ m, v: new THREE.Vector3(Math.sin(a) * speed, 0, Math.cos(a) * speed), life: 2.4, dmg: e.elite ? 7 : 5, k });
     }
-    e.vel.addScaledVector(tmp.set(-nx, 0, -nz), 3);                    // отдача
     flash(from, k ? 0xff4ad8 : 0xff6a3a, 2.4, 0.12, 2.5, false);
     SFX.play('eshot', from, { rate: e.elite ? 0.85 : 1 }); crewSay('eshot', 0.5);
   }
@@ -3124,16 +3159,15 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function clearEShots() { for (const s of eshots) scene.remove(s.m); eshots.length = 0; }
 
   function hitEnemy(e, dir, dmg = 1, push = 4) {
+    if (NET.client) { e.flash = 0.07; e.myHit = elapsed; netEv({ t: 'eh', i: enemies.indexOf(e), d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
     wakeEnemy(e);
     e.hp -= dmg; if (e.flash < -0.06) e.flash = 0.07;   // мигает, а не горит белым при постоянном уроне
     e.vel.addScaledVector(dir, push);
     if (e.hp <= 0 && !e.dead) {
       if (e.carried) { releaseIfHeld(e); e.carried = false; }
       e.dead = true; e.root.visible = false;
-      spawnParticles(tmp.copy(e.pos).setY(1), e.elite ? 0xd040a0 : 0xc8323c, e.elite ? 30 : 18, e.elite ? 12 : 10);
-      flash(tmp, e.elite ? 0xff40c8 : 0xff4a30, e.elite ? 10 : 5.5, e.elite ? 0.32 : 0.22, 2.2); burst(tmp, e.elite ? 0x70305f : 0x5a2a2a, e.elite ? 9 : 5, 1.8, 4);
-      spawnParticles(tmp.copy(e.pos).setY(1), 0xf4f1e8, 6, 8);
-      enemyKills++; ekillsEl.textContent = enemyKills; SFX.play(e.elite ? 'elite_die' : 'biter_die', e.pos); crewKill(e.elite);
+      enemyDieFx(e);
+      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); }
       if (e.elite) { dropLoot(e.pos); shake = Math.max(shake, 0.5); }
       enemyQueue.push({ e, t: e.elite ? 8 : 5 });
     }
@@ -3939,7 +3973,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const pool = AB_ORDER.filter(t => !abilities[t] && !pending.has(t) && (t !== 'doubleJump' || abilities.jump));
     spawnPickup(pool.length ? pool[Math.floor(Math.random() * pool.length)] : 'heal', at);
   }
-  function spawnPickup(type, at) {
+  let pkN = 0;
+  function spawnPickup(type, at, id, remote) {
     if (!pickupTex[type]) pickupTex[type] = srgbTex(ICONS[type]);
     const sprite = new THREE.Sprite(glow(new THREE.SpriteMaterial({ map: pickupTex[type], depthTest: true }), 1.1));
     sprite.scale.set(2.4, 2.4, 1);
@@ -3951,9 +3986,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const x = inRoom(at.x, at.z) ? at.x : THREE.MathUtils.clamp(at.x, -ARENA + 3, ARENA - 3), z = inRoom(at.x, at.z) ? at.z : THREE.MathUtils.clamp(at.z, -ARENA + 3, ARENA - 3);
     ring.position.set(x, 0.05, z); beam.position.set(x, 3, z); sprite.position.set(x, 2.4, z);
     scene.add(sprite, ring, beam);
-    pickups.push({ type, sprite, ring, beam, x, z, t: 0 });
+    const pid = id || String(NET.on && NET.game ? netMe() : 'me') + ':' + (++pkN);
+    pickups.push({ type, sprite, ring, beam, x, z, t: 0, id: pid });
     SFX.play('loot', at);
+    if (!remote) netEv({ t: 'pk', id: pid, ty: type, x: r1(x), z: r1(z) });             // everyone in the lobby sees the drop; first to touch it gets it
   }
+  function pickupGone(id) { const i = pickups.findIndex(p => p.id === id); if (i < 0) return; const p = pickups[i]; scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); spawnParticles(tmp.set(p.x, 1.5, p.z), 0xffffff, 6, 5); }
   function updatePickups(dt) {
     toastTimer -= dt;
     if (toastTimer <= 0 && toastEl.style.opacity !== '0') toastEl.style.opacity = 0;
@@ -3965,6 +4003,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
       p.ring.scale.setScalar(1 + Math.sin(p.t * 4) * 0.08);
       if (car.alive && car.depth < 0.3 && p.t > 0.4 && Math.hypot(car.pos.x - p.x, car.pos.z - p.z) < 2.6) {
         let extra = '';
+        netEv({ t: 'pkx', id: p.id });
+        if (!p.type.startsWith('w_') && p.type !== 'heal' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
         if (p.type === 'heal') car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.4);
         else if (p.type.startsWith('w_')) { const lv = gainWeapon(p.type); extra = lv >= W_MAX ? 'MAX' : 'Lv ' + lv; }
         else { abilities[p.type] = true; applyAbilityVisuals(); crewSay('ability'); }
@@ -4675,7 +4715,7 @@ const MONSTERS = [
   const swA = new THREE.Vector3();
   function updateSwarm(dt) {
     // director: no waves during the boss fight, inside the boss room, or while dead
-    const calm = !car.alive || inRoom(car.pos.x, car.pos.z) || boss.state === 'fight' || boss.state === 'emerging' || angel.on;
+    const calm = !waveTargets().length || boss.state === 'fight' || boss.state === 'emerging' || angel.on;      // nobody out in the open: no waves
     let alive = 0, mob = 0;
     for (const m of swarm) if (!m.dead) { if (!m.home) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
@@ -5110,6 +5150,19 @@ const MONSTERS = [
       else { flashAlert('ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true); }
     }
   }
+  function altarNear(A) {                                // distance from the altar to the nearest player who is up
+    let d = car.alive && car.depth < 0.3 ? Math.hypot(car.pos.x - A.x, car.pos.z - A.z) : 1e9;
+    if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) d = Math.min(d, Math.hypot(R.pos.x - A.x, R.pos.z - A.z));
+    return d;
+  }
+  function altarWave(A, kind) {                          // kind 1: it just woke up; 2: the timer ran out. The host also spawns the guard
+    A.waveAt = elapsed; A.pulse = 1;
+    if (!NET.client) altarGuards(A, 8);
+    const near = Math.hypot(car.pos.x - A.x, car.pos.z - A.z) < 70;      // only the players around it hear it laugh
+    tmp.set(A.x, 3, A.z);
+    if (kind === 1) { if (near) { SFX.play('laugh', null); flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5); } flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5); }
+    else { if (near) SFX.play('laugh', null, { rate: 1.05 }); flash(tmp, 0xff3a5a, 14, 0.4, 3); }
+  }
   function updateAltars(dt) {
     let offer = null, offerD = 99, timerA = null, timerD = 60;
     for (const A of altars) {
@@ -5124,20 +5177,19 @@ const MONSTERS = [
       let guards = 0, close = 0;
       for (const m of swarm) if (!m.dead) { if (m.home === A) guards++; if (Math.hypot(m.pos.x - A.x, m.pos.z - A.z) < 15) close++; }
       for (const e of enemies) if (!e.dead && e.awake && !e.carried && Math.hypot(e.pos.x - A.x, e.pos.z - A.z) < 15) close++;
-      // the altar notices the car: it laughs and calls its guard
-      if (!A.awake && up && dA < 30) {
-        A.awake = true; A.pulse = 1;
-        const since = elapsed - (A.waveAt == null ? -999 : A.waveAt);
-        if (since < ALTAR_WAVE) A.spawnT = ALTAR_WAVE - since;                 // came back before its timer ran out: no fresh wave, no laugh
-        else { A.spawnT = ALTAR_WAVE; A.waveAt = elapsed; SFX.play('laugh', null);
-          flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5);
-          tmp.set(A.x, 3, A.z); flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5);
-          altarGuards(A, 8); }
-      } else if (A.awake && dA > 52) A.awake = false;
-      if (A.awake && (A.spawnT -= dt) <= 0) {            // one wave at a time, the next one is on a visible timer
-        A.spawnT = ALTAR_WAVE; A.waveAt = elapsed; A.pulse = 1; altarGuards(A, 8); SFX.play('laugh', null, { rate: 1.05 });
-        tmp.set(A.x, 3, A.z); flash(tmp, 0xff3a5a, 14, 0.4, 3);
-      }
+      // the altar notices a player: it laughs and calls its guard. In a lobby the host keeps every altar's clock for everyone
+      if (!NET.client) {
+        const dP = altarNear(A), k = altars.indexOf(A);
+        if (!A.awake && dP < 30) {
+          A.awake = true; A.pulse = 1;
+          const since = elapsed - (A.waveAt == null ? -999 : A.waveAt);
+          if (since < ALTAR_WAVE) { A.spawnT = ALTAR_WAVE - since; netEv({ t: 'aw', k, s: 1, n: r1(A.spawnT), w: 0 }); }   // came back before its timer ran out: no fresh wave, no laugh
+          else { A.spawnT = ALTAR_WAVE; altarWave(A, 1); netEv({ t: 'aw', k, s: 1, n: ALTAR_WAVE, w: 1 }); }
+        } else if (A.awake && dP > 52) { A.awake = false; netEv({ t: 'aw', k, s: 0 }); }
+        if (A.awake && (A.spawnT -= dt) <= 0) {          // one wave at a time, the next one is on a visible timer
+          A.spawnT = ALTAR_WAVE; altarWave(A, 2); netEv({ t: 'aw', k, s: 1, n: ALTAR_WAVE, w: 2 });
+        }
+      } else if (A.awake) A.spawnT = Math.max(0, A.spawnT - dt);
       if (A.awake && dA < timerD) { timerA = A; timerD = dA; }
       if (A.awake) A.crystal.material.color.setRGB(guards ? 2.2 + A.pulse * 2 : A.crystal.material.color.r, guards ? 0.25 : A.crystal.material.color.g, guards ? 0.4 : A.crystal.material.color.b);
       // close enough with passengers: offer the unload button over the altar
@@ -5183,8 +5235,9 @@ const MONSTERS = [
   function angelStart() {
     if (angel.on) return;
     angel.on = true; angel.t = 0; angel.phase = 'wait';
-    const d = Math.hypot(BOSS_POS.x - car.pos.x, BOSS_POS.z - car.pos.z) || 1, k = Math.min(1, 13 / d);
-    angel.pos.set(car.pos.x + (BOSS_POS.x - car.pos.x) * k, 0, car.pos.z + (BOSS_POS.z - car.pos.z) * k);
+    if (NET.on && NET.game) angel.pos.set(ROOM_X1 + 14, 0, 0);          // in a lobby everyone watches the same angel over the boss room
+    else { const d = Math.hypot(BOSS_POS.x - car.pos.x, BOSS_POS.z - car.pos.z) || 1, k = Math.min(1, 13 / d);
+      angel.pos.set(car.pos.x + (BOSS_POS.x - car.pos.x) * k, 0, car.pos.z + (BOSS_POS.z - car.pos.z) * k); }
     const S = 8, g = angel.g = new THREE.Group(); g.position.set(angel.pos.x, 80, angel.pos.z); scene.add(g);
     const cube = new THREE.Mesh(new THREE.BoxGeometry(S, S, S), new THREE.MeshStandardMaterial({ color: 0x3f8cff, emissive: 0x0a2a7a, roughness: 0.35, metalness: 0.2, flatShading: true }));
     cube.rotation.y = Math.PI / 4; cube.castShadow = true; g.add(cube);
@@ -5233,8 +5286,12 @@ const MONSTERS = [
       angel.phase = 'gather';
       cart.riders.length = 0; cartNEl.textContent = 0;
       const all = chubs.filter(c => !c.dead && c.state !== 'sacrifice');
+      if (NET.on && NET.game) for (const R of NET.remotes.values()) {            // whoever rides with passengers sends them up as well
+        for (const sp of (R.riders || []).filter(q => q.visible)) all.push({ sprite: sp, shadow: new THREE.Object3D(), pos: sp.position.clone(), from: new THREE.Vector3(), t: 0, T: 1, state: 'ascend', ghost: true });
+        R.riders = [];
+      }
       all.sort((a, b) => Math.hypot(a.pos.x - angel.pos.x, a.pos.z - angel.pos.z) - Math.hypot(b.pos.x - angel.pos.x, b.pos.z - angel.pos.z));
-      all.forEach((c, i) => { c.state = 'ascend'; c.shadow.visible = false; c.sprite.visible = true; c.from.copy(c.pos); c.t = -i * 0.09; c.T = 1.5; });
+      all.forEach((c, i) => { c.state = 'ascend'; c.shadow.visible = false; if (c.ghost) { c.from.copy(c.pos); c.t = -i * 0.09; c.T = 1.5; return; } c.sprite.visible = true; c.from.copy(c.pos); c.t = -i * 0.09; c.T = 1.5; });
       angel.list = all; angel.total = all.length; angel.saved = 0;
       ascEl.style.display = 'block'; ascEl.textContent = '0';
       flashAlert(all.length ? 'COME HOME, LITTLE ONES' : 'NO ONE LEFT TO SAVE');
@@ -5247,7 +5304,7 @@ const MONSTERS = [
         c.sprite.position.copy(c.pos); c.sprite.material = chubMats[0][Math.floor(elapsed * 8 + i) % CHUB_FR];
         const sc = CHUB_SIZE * (1 + 0.6 * Math.sin(Math.PI * u)) * (u > 0.85 ? (1 - u) / 0.15 : 1); c.sprite.scale.set(sc, sc, 1);
         if (u >= 1) {
-          c.dead = true; scene.remove(c.sprite, c.shadow); angel.list.splice(i, 1);
+          c.dead = true; scene.remove(c.sprite); if (c.shadow) scene.remove(c.shadow); angel.list.splice(i, 1);
           angel.saved++; ascEl.textContent = angel.saved;
           SFX.play('chub', null, { rate: 0.9 + Math.min(1.1, angel.saved * 0.02), vol: 0.6 }); flash(tmp.copy(c.pos), 0x9ad0ff, 2.5, 0.2, 2, false);
         }
@@ -5557,7 +5614,7 @@ const MONSTERS = [
     const r = tentRoot(tn);
     let tTheta = tn.a0 + 0.3 * Math.sin(elapsed * 0.7 + tn.k * 1.7), tReach = 1, tLift = 0.45, tWave = 0.45, tGlow = 0, rate = 2.5;
     if (tn.state === 'wind') {
-      tn.aim = Math.atan2(car.pos.z - r.z, car.pos.x - r.x);            // следит за машиной, пока замахивается
+      const tp = tn.tp || car.pos; tn.aim = Math.atan2(tp.z - r.z, tp.x - r.x);   // tracks whoever it is swinging at
       tTheta = tn.aim; tReach = 0.5; tLift = 3.4; tWave = 0.12; tGlow = 1; rate = 7;
       if (tn.t > 0.65) { tn.state = 'strike'; tn.t = 0; tn.hitDone = false; SFX.play('whoosh', tn.pts[tn.n >> 1], { rate: 0.8 }); }
     } else if (tn.state === 'strike') {
@@ -5637,19 +5694,45 @@ const MONSTERS = [
     }
     SFX.play('eshot', from, { rate: 0.7, vol: 1 });
   }
+  function bossFanNet(n, spread, speed, aim) { bossFan(n, spread, speed, aim); netEv({ t: 'bf', n, s: r2(spread), v: r1(speed), a: r2(aim) }); }
+  // everyone the pyramid can reach: players alive and above ground inside its room
+  function bossTgts() {
+    const a = [];
+    if (car.alive && car.depth < 0.3 && inRoom(car.pos.x, car.pos.z)) a.push({ pos: car.pos, vel: car.vel, peer: String(NET.on && NET.game ? netMe() : 'me') });
+    if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up && inRoom(R.pos.x, R.pos.z)) a.push({ pos: R.pos, vel: R.vel, peer: String(R.peer) });
+    return a;
+  }
+  function netPeerPos(p) {
+    if (!(NET.on && NET.game) || String(p) === String(netMe())) return car.pos;
+    for (const R of NET.remotes.values()) if (String(R.peer) === String(p)) return R.pos;
+    return car.pos;
+  }
   function bossFanTick(dt) {
-    if (boss.state !== 'fight' || !car.alive) return;
-    const rage = boss.dealt > bossMax() * 0.5, aim = Math.atan2(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z);
+    const tg = bossTgts(); if (boss.state !== 'fight' || !tg.length) return;
+    let T = boss.fanT && tg.find(t => t.peer === boss.fanT.peer); if (!T) T = boss.fanT = tg[Math.floor(Math.random() * tg.length)];
+    const rage = boss.dealt > bossMax() * 0.5, aim = Math.atan2(T.pos.x - BOSS_POS.x, T.pos.z - BOSS_POS.z);
     if (boss.fanLeft > 0 && (boss.fanGap -= dt) <= 0) {                  // a burst: several fans in a row, each offset half a step so the gaps move
       boss.fanLeft--; boss.fanGap = 0.42;
-      if (boss.fanRing) bossFan(18, 6.283 * 17 / 18, 9.5, boss.fanLeft * 0.175); else bossFan(rage ? 9 : 7, rage ? 1.5 : 1.15, 11.5, aim + (boss.fanLeft % 2 ? 0.09 : -0.09));
+      if (boss.fanRing) bossFanNet(18, 6.283 * 17 / 18, 9.5, boss.fanLeft * 0.175); else bossFanNet(rage ? 9 : 7, rage ? 1.5 : 1.15, 11.5, aim + (boss.fanLeft % 2 ? 0.09 : -0.09));
     }
     if ((boss.fanCd = (boss.fanCd == null ? 3 : boss.fanCd) - dt) <= 0) {
-      boss.fanRing = rage && Math.random() < 0.45; boss.fanLeft = boss.fanRing ? 3 : rage ? 4 : 3; boss.fanGap = 0;
+      boss.fanRing = rage && Math.random() < 0.45; boss.fanLeft = boss.fanRing ? 3 : rage ? 4 : 3; boss.fanGap = 0; boss.fanT = tg[Math.floor(Math.random() * tg.length)];
       boss.fanCd = rage ? rand(3.2, 4.4) : rand(4.5, 6);
     }
   }
+  function bossLift(o) { o.carried = true; boss.lifting = { o, t: 0, from: o.mesh.position.clone() }; SFX.play('boss_lift', BOSS_POS); }
+  function bossHurl(o, from, vel, lead) {
+    o.carried = true; o.mesh.position.copy(from);
+    const r = Math.max(o.hx, o.hz) * 1.2;
+    const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 28),
+      glow(new THREE.MeshBasicMaterial({ color: 0xff3d5a, transparent: true, opacity: 0.85, depthWrite: false }), 4));
+    marker.geometry.rotateX(-Math.PI / 2); marker.position.set(lead.x, 0.05, lead.z); scene.add(marker);
+    thrown.push({ kind: 'crate', ref: o, r, s: o.h, pos: from.clone(), vel: vel.clone(), spin: rand(6, 10), rot: 0, hostile: true, marker });
+    SFX.play('whoosh', from);
+    if (boss.lifting && boss.lifting.o === o) boss.lifting = null;
+  }
   function bossThrowTick(dt) {
+    if (NET.client) { bossLiftAnim(dt); return; }        // a guest only animates what the host's pyramid does
     bossFanTick(dt);
     boss.throwCd -= dt;
     if (!boss.lifting && boss.throwCd <= 0) {
@@ -5659,9 +5742,12 @@ const MONSTERS = [
         const d = Math.hypot(o.mesh.position.x - BOSS_POS.x, o.mesh.position.z - BOSS_POS.z);
         if (d < bd) { bd = d; best = o; }
       }
-      if (best) { best.carried = true; boss.lifting = { o: best, t: 0, from: best.mesh.position.clone() }; SFX.play('boss_lift', BOSS_POS); }
+      if (best) { bossLift(best); netEv({ t: 'bl', i: obstacles.indexOf(best) }); }
       boss.throwCd = rand(2.2, 3.2);
     }
+    bossLiftAnim(dt);
+  }
+  function bossLiftAnim(dt) {
     const L = boss.lifting;
     if (!L) return;
     L.t += dt;
@@ -5670,19 +5756,16 @@ const MONSTERS = [
     L.o.mesh.position.lerpVectors(L.from, top, e);
     L.o.mesh.position.y += Math.sin(k * Math.PI) * 3;
     L.o.mesh.rotation.x += dt * 6; L.o.mesh.rotation.z += dt * 4;
-    if (L.t >= 0.95) {                                           // швыряет с упреждением
-      const from = L.o.mesh.position.clone();
-      const lead = new THREE.Vector3(car.pos.x + car.vel.x * 0.55, 0, car.pos.z + car.vel.z * 0.55);
-      if (!inRoom(lead.x, lead.z)) lead.copy(car.pos);
+    if (L.t >= 0.95 && !NET.client) {                            // hurls it at someone in the room, leading them a little
+      const tg = bossTgts(); if (!tg.length) { releaseLift(); return; }
+      const T = tg[Math.floor(Math.random() * tg.length)], from = L.o.mesh.position.clone();
+      const lead = new THREE.Vector3(T.pos.x + T.vel.x * 0.55, 0, T.pos.z + T.vel.z * 0.55);
+      if (!inRoom(lead.x, lead.z)) lead.set(T.pos.x, 0, T.pos.z);
       const dx = lead.x - from.x, dz = lead.z - from.z, dist = Math.hypot(dx, dz);
-      const tt = THREE.MathUtils.clamp(dist / 22, 0.6, 1.5), r = Math.max(L.o.hx, L.o.hz) * 1.2;
+      const tt = THREE.MathUtils.clamp(dist / 22, 0.6, 1.5);
       const vel = new THREE.Vector3(dx / tt, 0.5 * G * tt - (from.y - L.o.h / 2) / tt, dz / tt);
-      const marker = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.7, 28),
-        glow(new THREE.MeshBasicMaterial({ color: 0xff3d5a, transparent: true, opacity: 0.85, depthWrite: false }), 4));
-      marker.geometry.rotateX(-Math.PI / 2); marker.position.set(lead.x, 0.05, lead.z); scene.add(marker);
-      thrown.push({ kind: 'crate', ref: L.o, r, s: L.o.h, pos: from, vel, spin: rand(6, 10), rot: 0, hostile: true, marker });
-      SFX.play('whoosh', from);
-      boss.lifting = null;
+      netEv({ t: 'bh', i: obstacles.indexOf(L.o), f: [r2(from.x), r2(from.y), r2(from.z)], v: [r2(vel.x), r2(vel.y), r2(vel.z)], l: [r1(lead.x), r1(lead.z)] });
+      bossHurl(L.o, from, vel, lead);
     }
   }
 
@@ -5712,10 +5795,20 @@ const MONSTERS = [
     spawnParticles(tmp.set(BOSS_POS.x, 5, BOSS_POS.z), 0xff2255, 20, 12);
     shake = 1.2;
     flashAlert('PYRAMIDON DEFEATED'); SFX.play('boss_die', BOSS_POS);
-    dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z - 3));
-    dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z + 3));
+    if (!NET.client) { dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z - 3)); dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z + 3)); }
     angelStart();
     setDoor(false);
+  }
+  function bossEmerge() {
+    boss.state = 'emerging'; boss.t = 0; crewSay('boss', 1, true);
+    bossGroup.visible = true;
+    bossBarEl.style.display = 'block'; bossBar();
+    flashAlert('PYRAMIDON'); SFX.play('boss_emerge', BOSS_POS); SFX.play('boss_roar', BOSS_POS, { delay: 1.6 });
+  }
+  function bossFightNow(ns) {                            // joined mid-fight: skip the rising
+    boss.state = 'fight'; boss.t = 0; bossGroup.visible = true; bossGroup.position.y = 0; bossCol.disabled = false;
+    bossBarEl.style.display = 'block'; bossBar();
+    if (Array.isArray(ns)) tentacles.forEach((tn, k) => { tn.n = Math.round(num(ns[k], TENT_MIN, TENT_MAX)); syncSegs(tn); });
   }
   function resetBoss() {
     if (boss.state === 'dead' || boss.state === 'idle') return;
@@ -5741,13 +5834,11 @@ const MONSTERS = [
 
     if (boss.state === 'idle') {
       tentacles.forEach(tn => hideTent(tn));
-      if (car.alive && car.pos.x > ROOM_X1 + 5 && inRoom(car.pos.x, car.pos.z)) {   // заехали — запираем
-        boss.state = 'emerging'; boss.t = 0; crewSay('boss', 1, true);      // the gate stays open: whoever dies can drive back in
-        bossGroup.visible = true;
-        bossBarEl.style.display = 'block'; bossBar();
-        flashAlert('PYRAMIDON'); SFX.play('boss_emerge', BOSS_POS); SFX.play('boss_roar', BOSS_POS, { delay: 1.6 });
-      }
+      if (!NET.client && bossTgts().some(t => t.pos.x > ROOM_X1 + 5)) { bossEmerge(); netEv({ t: 'bs', s: 'e' }); }   // someone drove in: it rises (the gate stays open)
       return;
+    }
+    if (NET.on && NET.game && !NET.client && boss.state === 'fight') {              // nobody left in the room for a while: it sinks back and waits
+      if (bossTgts().length) boss.empty = 0; else if ((boss.empty = (boss.empty || 0) + dt) > 6) { boss.empty = 0; resetBoss(); netEv({ t: 'bs', s: 'i' }); return; }
     }
     boss.t += dt;
     if (boss.state === 'emerging') {
@@ -5784,21 +5875,23 @@ const MONSTERS = [
     if (boss.state !== 'fight') return;
     for (const tn of tentacles) updateTentacle(tn, dt);
 
-    // хлёст щупальцем по кд — бьёт то, что ближе к машине
-    boss.lashCd -= dt;
-    if (boss.lashCd <= 0 && car.alive && car.depth < 0.3) {
-      const toCar = Math.atan2(car.pos.z - BOSS_POS.z, car.pos.x - BOSS_POS.x);
-      const dCar = Math.hypot(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z);
-      let best = null, bd = Infinity;
-      for (const tn of tentacles) {
-        if (tn.state !== 'idle') continue;
-        const da = Math.abs(Math.atan2(Math.sin(toCar - tn.a0), Math.cos(toCar - tn.a0)));
-        if (da < bd) { bd = da; best = tn; }
-      }
-      if (best && dCar < 5.1 + best.n * TENT_SP * 1.15 + 3) { best.state = 'wind'; best.t = 0; boss.lashCd = rand(1.3, 2.1); SFX.play('tent_wind', tentRoot(best)); }
-      else boss.lashCd = 0.4;
-    }
+    // хлёст щупальцем по кд — хост выбирает, кого бить
+    if (!NET.client) bossLash(dt);
     bossThrowTick(dt);
+  }
+  function bossLash(dt) {                                // the host picks who gets whipped: the tentacle best placed for someone in reach
+    boss.lashCd -= dt;
+    if (boss.lashCd > 0) return;
+    const tg = bossTgts(); boss.lashCd = 0.4;
+    for (const T of tg.sort(() => Math.random() - 0.5)) {
+      const toT = Math.atan2(T.pos.z - BOSS_POS.z, T.pos.x - BOSS_POS.x), dT = Math.hypot(T.pos.x - BOSS_POS.x, T.pos.z - BOSS_POS.z);
+      let best = null, bd = Infinity;
+      for (const tn of tentacles) { if (tn.state !== 'idle') continue; const da = Math.abs(Math.atan2(Math.sin(toT - tn.a0), Math.cos(toT - tn.a0))); if (da < bd) { bd = da; best = tn; } }
+      if (best && dT < 5.1 + best.n * TENT_SP * 1.15 + 3) {
+        best.state = 'wind'; best.t = 0; best.tp = T.pos; boss.lashCd = rand(1.3, 2.1) / Math.max(1, Math.sqrt(tg.length));
+        SFX.play('tent_wind', tentRoot(best)); netEv({ t: 'bt', k: best.k, p: T.peer }); break;
+      }
+    }
   }
 
   // ---------- loop ----------
@@ -6180,7 +6273,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 9;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 10;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6258,7 +6351,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0 };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6292,12 +6385,19 @@ const MONSTERS = [
     for (const R of NET.remotes.values()) if (R.up && R.tc) { const d = Math.hypot(R.pos.x - m.pos.x, R.pos.z - m.pos.z); if (d < bd) { bd = d; best = R; } }
     return best;
   }
-  function netAnyPlayer() { const a = [car.pos]; if (NET.on && !NET.client) for (const R of NET.remotes.values()) if (R.up) a.push(R.pos); return a[Math.floor(Math.random() * a.length)]; }
+  function waveTargets() {                              // players a wave could be sent at: up and outside the boss room
+    const a = []; if (carSeen() && !inRoom(car.pos.x, car.pos.z)) a.push(car.pos);
+    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) if (R.up && !inRoom(R.pos.x, R.pos.z)) a.push(R.pos);
+    return a;
+  }
+  function netAnyPlayer() { const a = waveTargets(); return a.length ? a[Math.floor(Math.random() * a.length)] : car.pos; }
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
     const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), m.flash > 0 ? 1 : 0]);
     chunks(sw, 60, 'sw');
+    const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
+    netEv({ t: 'en', a: en });
     if (q % 2) return;
     const ch = []; for (const c of chubs) if (!c.dead && c.state !== 'cart') ch.push([c.id, r1(c.pos.x), r1(c.pos.z), r1(c.pos.y), (c.state === 'flee' || c.state === 'dazed' || c.state === 'tocar' || (c.state === 'arc' && c.next === 'dazed') ? 1 : 0) | (c.state === 'perch' ? 2 : 0)]);
     chunks(ch, 70, 'ch');
@@ -6343,9 +6443,38 @@ const MONSTERS = [
       else if (d.t === 'crate') { const o = obAt(d.i); if (o && o.crate && !o.room && o.mesh.visible) crateRemote(o); }
       else if (d.t === 'altar') { const A = altars[d.k]; if (A && Number.isInteger(d.n) && d.n > A.n) { A.n = Math.min(ALTAR_NEED, d.n); A.pulse = 1; altarApply(A); } }
       else if (d.t === 'chub') { chubGift(); }
+      else if (d.t === 'pk') { if (typeof d.id === 'string' && d.id.length < 40 && typeof d.ty === 'string' && ICONS[d.ty] && !pickups.some(p => p.id === d.id) && pickups.length < 40)
+        spawnPickup(d.ty, new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), d.id, true); }
+      else if (d.t === 'pkx') { if (typeof d.id === 'string') pickupGone(d.id); }
+      else if (d.t === 'bs') { if (NET.client) { if (d.s === 'e' && boss.state === 'idle') bossEmerge(); else if (d.s === 'i' && boss.state !== 'dead') resetBoss(); } }
+      else if (d.t === 'bt') { const tn = tentacles[d.k]; if (NET.client && tn && boss.state === 'fight' && tn.state === 'idle') { tn.state = 'wind'; tn.t = 0; tn.tp = netPeerPos(d.p); SFX.play('tent_wind', tentRoot(tn)); } }
+      else if (d.t === 'bf') { if (NET.client && boss.state === 'fight') bossFan(Math.round(num(d.n, 1, 24)), num(d.s, 0, 7), num(d.v, 1, 30), num(d.a, -9, 9)); }
+      else if (d.t === 'bl') { const o = obAt(d.i); if (NET.client && o && o.room && boss.state === 'fight') { releaseLift(); bossLift(o); } }
+      else if (d.t === 'bh') { const o = obAt(d.i); if (NET.client && o && o.room && Array.isArray(d.f) && Array.isArray(d.v) && Array.isArray(d.l)) {
+        if (boss.lifting && boss.lifting.o !== o) releaseLift();
+        bossHurl(o, new THREE.Vector3(num(d.f[0], -400, 400), num(d.f[1], 0, 40), num(d.f[2], -400, 400)), new THREE.Vector3(num(d.v[0], -80, 80), num(d.v[1], -80, 80), num(d.v[2], -80, 80)), new THREE.Vector3(num(d.l[0], -400, 400), 0, num(d.l[1], -400, 400))); } }
       else if (d.t === 'bd') { boss.dealt = Math.max(boss.dealt, 0) + num(d.d, 0, 500); bossBar(); if (boss.state === 'fight' && boss.dealt >= bossMax()) killBoss(); }
       else if (d.t === 'bk') { if (boss.state === 'fight' || boss.state === 'emerging') { boss.state = 'fight'; killBoss(); } else if (boss.state !== 'dead') { boss.state = 'dead'; bossBarEl.style.display = 'none'; setDoor(false); flashAlert('PYRAMIDON IS DEAD'); angelStart(); } }
       else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
+      else if (d.t === 'en') { const quiet = !NET.enSeen; NET.enSeen = true; if (NET.client && Array.isArray(d.a)) for (const r of d.a.slice(0, 64)) {
+        const e = Array.isArray(r) && enemies[r[0]]; if (!e || e.carried) continue;
+        const fl = num(r[4], 0, 31), x = num(r[1], -ARENA, ARENA), z = num(r[2], -ARENA, ARENA);
+        if (fl & 2) { if (!e.dead) { e.dead = true; e.root.visible = false; if (!quiet) enemyDieFx(e); if (elapsed - (e.myHit || -9) < 1.5) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); } } continue; }
+        if (e.dead || (e.awake && !(fl & 1))) {          // came back from the respawn queue: a sleeping crate again
+          e.dead = false; e.root.visible = true; e.awake = false; e.awakeParts.forEach(q => q.visible = false); setEnemyLook(e, e.matDormant);
+          e.pivot.rotation.x = 0; e.hop.position.y = 0; e.hop.scale.set(1, 1, 1); e.open = 0; e.pos.set(x, 0, z); e.yaw = num(r[3], -99, 99);
+        }
+        if ((fl & 1) && !e.awake) wakeEnemy(e);
+        e.tx = x; e.tz = z; e.tyaw = num(r[3], -99, 99); e.hostCarry = !!(fl & 16);
+        if (fl & 4 && e.flash <= 0) e.flash = 0.07; e.topen = fl & 8 ? 0.95 : 0.3;
+      } }
+      else if (d.t === 'eh') { const e = enemies[d.i]; if (!NET.client && e && !e.dead) hitEnemy(e, tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.d, 0, 9999), num(d.p, 0, 20)); }
+      else if (d.t === 'ehurt') { const e = enemies[d.i]; if (NET.client && e && !e.dead) hurtCar(num(d.d, 0, 40), new THREE.Vector3(num(d.x, -1, 1), 0, num(d.z, -1, 1))); }
+      else if (d.t === 'es') { const e = enemies[d.i]; if (NET.client && e && !e.dead && Array.isArray(d.f) && Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z) < 80) {
+        e.charge = 0; enemyVolley(e, new THREE.Vector3(num(d.f[0], -400, 400), num(d.f[1], 0, 20), num(d.f[2], -400, 400)), num(d.a, -9, 9)); } }
+      else if (d.t === 'eg') { const e = enemies[d.i]; if (!NET.client && e && !e.dead) {
+        if (d.c === 1) { if (e.carried) releaseIfHeld(e); e.carried = true; e.root.visible = false; }
+        else { e.carried = false; e.root.visible = true; e.pos.set(num(d.x, -ARENA, ARENA), 0, num(d.z, -ARENA, ARENA)); e.stun = 1.1; e.biteCd = 1.2; e.vel.set(0, 0, 0); e.root.rotation.set(0, e.yaw, 0); } } }
       else if (d.t === 'hit') { const m = swById.get(d.i); if (!NET.client && m && !m.dead && !m.net) hitCritter(m, num(d.d, 0, 9999), tmp2net.set(num(d.x, -1, 1), 0, num(d.z, -1, 1)), num(d.p, 0, 20)); }
       else if (d.t === 'log') { if (typeof d.s === 'string') diagAdd(DG.nick(from), d.s.slice(0, 160)); }
       else if (d.t === 'st') { if (d.o && typeof d.o === 'object') DG.stats.set(String(from), { o: d.o, at: performance.now() }); }
@@ -6353,6 +6482,7 @@ const MONSTERS = [
       else if (d.t === 'lose') { if (NET.client && cart.riders.length) { eatChub(cart.riders.pop()); cartNEl.textContent = cart.riders.length; cartKick(2); } }
       else if (d.t === 'drop') { if (!NET.client && chubs.length < 500) { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), c = spawnChub(rockStub(x, z), false);
         c.pos.set(num(d.fx, -ARENA, ARENA), 0.8, num(d.fz, -ARENA, ARENA)); chubArc(c, tmp.set(x, 0, z), 0.7, 'dazed', 3); c.dazeT = 0.7; } }
+      else if (d.t === 'aw') { const A = altars[d.k]; if (NET.client && A && !A.done) { A.awake = d.s === 1; if (d.n != null) A.spawnT = num(d.n, 0, 99); if (d.w === 1 || d.w === 2) altarWave(A, d.w); } }
       else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
       else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
@@ -6365,7 +6495,9 @@ const MONSTERS = [
         for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
           if (!c[3] && o.mesh.visible) { o.mesh.visible = false; respawnQueue.push({ o, t: 4 }); } }
-        boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); }
+        boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); } else if (d.bst === 1 && boss.state === 'idle') bossFightNow(d.bn);
+        (Array.isArray(d.pk) ? d.pk : []).forEach(q => { if (Array.isArray(q) && typeof q[0] === 'string' && typeof q[1] === 'string' && ICONS[q[1]] && !pickups.some(p => p.id === q[0])) spawnPickup(q[1], new THREE.Vector3(num(q[2], -400, 400), 0, num(q[3], -400, 400)), q[0], true); });
+        (Array.isArray(d.aw) ? d.aw : []).forEach((t, k) => { const A = altars[k]; if (A && typeof t === 'number' && t >= 0) { A.awake = true; A.spawnT = num(t, 0, 99); } });
         (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
       }
     } finally { NET.applying = false; }
@@ -6439,10 +6571,18 @@ const MONSTERS = [
     }
   }
   const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+  function netPose() {                                  // how the ride is posed right now: cart sway, how deep it is dug in, gallop phase, the spider's tilt and feet
+    const o = { cp: r2(cart.phi), dp: r2(car.depth), ph: r2(ridePhase % 1000) };
+    if (ride === 'spider' && rideG.spider && rideG.spider.feet) {
+      const q = carGroup.quaternion; o.q = [r2(q.x), r2(q.y), r2(q.z), r2(q.w)];
+      o.ft = []; for (const L of rideG.spider.feet) o.ft.push(r1(L.foot.x), r1(L.foot.y), r1(L.foot.z));
+    }
+    return o;
+  }
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -6494,6 +6634,17 @@ const MONSTERS = [
     }
     return R;
   }
+  const ikV = new THREE.Vector3();
+  function cloneIK(a, foot) {                           // same two-bone solve as the owner's spider, on the copy's hip/thigh/knee
+    const hip = a.o, fem = a.fem, knee = fem && fem.children.find(c => c.isGroup), root = hip.parent; if (!knee || !root) return;
+    ikV.copy(foot); root.worldToLocal(ikV); ikV.sub(hip.position);
+    hip.rotation.y = Math.atan2(ikV.x, ikV.z);
+    const h = Math.hypot(ikV.x, ikV.z), v = ikV.y, l1 = SPL.L1, l2 = SPL.L2;
+    const d = THREE.MathUtils.clamp(Math.hypot(h, v), 0.3, l1 + l2 - 0.001);
+    const an = Math.atan2(v, h), alpha = Math.acos(THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+    const inner = Math.acos(THREE.MathUtils.clamp((l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2), -1, 1));
+    fem.rotation.x = -(an + alpha); knee.rotation.x = Math.PI - inner;
+  }
   function updateNet(dt) {
     if (!NET.on || !NET.room) { netEl.textContent = ''; return; }
     if ((NET.sendT -= dt) <= 0) { NET.sendT = 0.08; netSend(); }
@@ -6512,13 +6663,28 @@ const MONSTERS = [
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
       const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
-      if (R.anim.length) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08);
+      if (pr !== R.posePr) { R.posePr = pr; if (typeof pr.ph === 'number') { const d = num(pr.ph, -1e4, 1e4) * 2.4 - R.ph; R.ph += Math.abs(d) > 6 ? d : d * 0.3; } }
+      const feet = R.ride === 'spider' && Array.isArray(pr.ft) && pr.ft.length === 24 ? pr.ft : null;
+      if (R.anim.length && !feet) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08) * (R.ride === 'unicorn' ? 2.4 * 0.45 / 1.08 : 1);
         for (const a of R.anim) {
           if (a.t === 'leg') { const q = R.ph + a.grp * Math.PI; a.o.rotation.y = a.by + Math.sin(q) * 0.32 * kk; if (a.fem) a.fem.rotation.x = a.bx - Math.max(0, Math.cos(q)) * 0.3 * kk; }
           else if (a.t === 'uleg') a.o.rotation.x = Math.sin(R.ph + a.grp * Math.PI) * 0.7 * kk;
           else if (a.k === 1) a.o.rotation.y += dt * (1.2 + spd * 0.12); else a.o.rotation.x += dt * (1.7 + spd * 0.15);
         } }
-      R.g.visible = up; R.g.position.copy(R.pos); R.g.rotation.y = R.h; R.tur.rotation.y = num(pr.t, -99, 99) - R.h;
+      R.g.visible = up; R.g.position.copy(R.pos); R.g.position.y -= num(pr.dp, 0, 1) * BURY_DEPTH;
+      if (R.ride === 'spider' && Array.isArray(pr.q) && pr.q.length === 4) {          // stuck to a wall: the real tilt
+        R.qT = R.qT || new THREE.Quaternion(); R.qT.set(num(pr.q[0], -1, 1), num(pr.q[1], -1, 1), num(pr.q[2], -1, 1), num(pr.q[3], -1, 1)).normalize();
+        R.g.quaternion.slerp(R.qT, k);
+      } else R.g.rotation.set(0, R.h, 0);
+      R.tur.rotation.y = num(pr.t, -99, 99) - R.h;
+      if (feet) {                                         // the spider's feet where the owner has them; the legs bend to reach them
+        R.g.updateMatrixWorld(true);
+        const legsA = R.anim.filter(a => a.t === 'leg'); R.ftS = R.ftS || legsA.map(() => new THREE.Vector3());
+        legsA.forEach((a, i) => { const f = R.ftS[i]; tmp.set(num(feet[i * 3], -400, 400), num(feet[i * 3 + 1], -5, 60), num(feet[i * 3 + 2], -400, 400));
+          if (f.distanceTo(tmp) > 8) f.copy(tmp); else f.lerp(tmp, k); cloneIK(a, f); });
+      }
+      { const body = R.cart.children && R.cart.children[0], phi = num(pr.cp, -1, 1); R.cphi = (R.cphi || 0) + (phi - (R.cphi || 0)) * k;
+        if (body) { body.rotation.z = R.cphi; body.position.y = Math.abs(R.cphi) * 0.25; } }
       R.cpos.lerp(tmp.set(num(pr.cx, -400, 400), 0, num(pr.cz, -400, 400)), k);
       R.cart.visible = up && pr.cs === 1; R.cart.position.set(R.cpos.x, R.cart.userData.y, R.cpos.z); R.cart.rotation.y = num(pr.ch, -99, 99);
       R.label.visible = up; R.label.position.set(R.pos.x, R.pos.y + 5.2, R.pos.z);
