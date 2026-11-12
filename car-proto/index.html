@@ -2726,7 +2726,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 84, buildEl = document.getElementById('build');
+  const BUILD = 85, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5245,7 +5245,7 @@ const MONSTERS = [
     crewSay('chub', 0.6);
   }
   function cartReset() { const h = car.heading; cart.pos.set(car.pos.x - Math.sin(h) * (2.45 + CART_L), 0, car.pos.z - Math.cos(h) * (2.45 + CART_L)); cart.heading = cart.prevH = h; cart.phi = cart.phiV = 0; }
-  const safeKeeps = () => ride === 'buggy' && Math.random() < 0.3;      // the steel churn: only 70% of knocks and bites get a chubzik
+  const safeKeeps = () => ride === 'buggy' && Math.random() < 0.5;      // the steel churn: only half of knocks and bites get a chubzik
   function safeClang() { SFX.play('clang', cart.pos, { vol: 0.45, rate: 1.4 }); spawnParticles(tmp.set(cart.pos.x, 1.6, cart.pos.z), 0xffd27a, 5, 5); }
   const safeCount = n => { let k = 0; for (let i = 0; i < n; i++) if (!safeKeeps()) k++; if (k < n) safeClang(); return k; };
   let spillT = 0;
