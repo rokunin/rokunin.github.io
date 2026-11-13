@@ -2745,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 90, buildEl = document.getElementById('build');
+  const BUILD = 91, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5004,19 +5004,30 @@ const MONSTERS = [
   ];
   const waves = { n: 0, t: 16, since: 0, lastKill: new THREE.Vector3(), pending: false, alive: 0, size: 0, gap: 0 };
   // a ground point just past the edge of the visible screen around player p, in screen direction th (0 = right, pi/2 = down)
+  // every screen in the lobby: centre (with the camera's look-ahead) and half-size in ground units
+  function lobbyViews() {
+    const v = [{ x: camFocus.x, z: camFocus.z, R: camera.right / camera.zoom, T: camera.top / camera.zoom }];
+    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) v.push({ x: R.pos.x + R.vel.x * 0.35, z: R.pos.z + R.vel.z * 0.35, R: R.vw || 34, T: R.vh || 22, r: R });
+    return v;
+  }
+  function inView(V, x, z, m) {                       // is ground point x,z inside view V, with margin m
+    const dx = x - V.x, dz = z - V.z, u = (dx - dz) * 0.7071, w = (dx + dz) * 0.7071 * ISO_SQUASH;
+    return Math.abs(u) < V.R + m && Math.abs(w) < V.T + m;
+  }
+  // a ground point just past the edge of player p's screen, in screen direction th (0 = right, pi/2 = down), and off everybody else's screen too
   function offscreenSpot(p, th, pad) {
-    const c = p === car.pos ? camFocus : p, R = camera.right / camera.zoom, T = camera.top / camera.zoom;
+    const views = lobbyViews(), own = p === car.pos ? views[0] : views.find(V => V.r && V.r.pos === p) || views[0];
     let best = null, bestD = -1;
-    for (let k = 0; k < 10; k++) {
-      const a = th + (k ? (k & 1 ? 1 : -1) * Math.ceil(k / 2) * 0.55 : 0), su = Math.cos(a), sv = Math.sin(a);
-      const t = Math.min(R / Math.max(1e-3, Math.abs(su)), T / Math.max(1e-3, Math.abs(sv))) + pad;
+    for (const extra of [0, 10, 22]) for (let k = 0; k < 12; k++) {
+      const a = th + (k ? (k & 1 ? 1 : -1) * Math.ceil(k / 2) * 0.52 : 0), su = Math.cos(a), sv = Math.sin(a);
+      const t = Math.min(own.R / Math.max(1e-3, Math.abs(su)), own.T / Math.max(1e-3, Math.abs(sv))) + pad + extra;
       const u = su * t, w = sv * t / ISO_SQUASH;          // screen right = world (1,0,-1), screen down = world (1,0,1), depth foreshortened
-      const x = c.x + (u + w) * 0.7071, z = c.z + (w - u) * 0.7071;
-      if (Math.abs(x) < ARENA - 3 && Math.abs(z) < ARENA - 3) return [x, z];
-      const cx = THREE.MathUtils.clamp(x, -ARENA + 3, ARENA - 3), cz = THREE.MathUtils.clamp(z, -ARENA + 3, ARENA - 3), d = Math.hypot(cx - p.x, cz - p.z);
-      if (d > bestD) { bestD = d; best = [cx, cz]; }
+      const x = THREE.MathUtils.clamp(own.x + (u + w) * 0.7071, -ARENA + 3, ARENA - 3), z = THREE.MathUtils.clamp(own.z + (w - u) * 0.7071, -ARENA + 3, ARENA - 3);
+      if (!views.some(V => inView(V, x, z, 2))) return [x, z];
+      let d = 1e9; for (const V of views) d = Math.min(d, Math.hypot(x - V.x, z - V.z));
+      if (d > bestD) { bestD = d; best = [x, z]; }
     }
-    return best;                                         // boxed into a corner: the farthest spot the arena allows
+    return best;                                         // nowhere hidden (players spread over the whole arena): as far from everyone as it gets
   }
   function spawnWave() {
     const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
@@ -7013,7 +7024,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -7093,7 +7104,7 @@ const MONSTERS = [
       const ox = R.pos.x, oz = R.pos.z;
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
-      const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
+      const up = pr.a === 1; R.up = up; R.peer = p.peer; R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22;      // their screen size, so waves stay off it too R.tc.alive = up; R.tc.y = R.pos.y;
       if (pr !== R.posePr) { R.posePr = pr; if (typeof pr.ph === 'number') { const d = num(pr.ph, -1e4, 1e4) * 2.4 - R.ph; R.ph += Math.abs(d) > 6 ? d : d * 0.3; } }
       const feet = R.ride === 'spider' && Array.isArray(pr.ft) && pr.ft.length === 24 ? pr.ft : null;
       if (R.anim.length && !feet) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08) * (R.ride === 'unicorn' ? 2.4 * 0.45 / 1.08 : 1);
