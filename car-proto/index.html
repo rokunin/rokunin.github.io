@@ -72,9 +72,19 @@
         background: rgba(20,22,26,.72); border-radius: 8px; padding: 5px 4px 4px; transition: opacity .3s, filter .3s; }
   .ab img { width: 44px; height: 44px; display: block; margin: 0 auto 3px; border-radius: 8px; }
   .ab.locked { opacity: .28; filter: grayscale(1); }
+  .ab { position: relative; }
+  .ab .up { display: none; position: absolute; left: 50%; top: -34px; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; pointer-events: auto; cursor: pointer;
+            background: #e8b417; color: #2a1d05; font: 900 24px/27px 'Londrina', system-ui, sans-serif; border: 2px solid #fff6dc; box-shadow: 0 2px 0 #6a4a04, 0 0 10px rgba(255,210,80,.7); animation: upPulse 1s ease-in-out infinite; }
+  .ab.can .up { display: block; }
+  @keyframes upPulse { 50% { transform: translateY(-3px) scale(1.08); } }
+  .ab .lv { position: absolute; right: 2px; top: 1px; color: #ffd23a; font: 900 11px/1 system-ui, sans-serif; text-shadow: 0 1px 0 #000; font-style: normal; }
+  .ab .cdv { position: absolute; left: 6px; right: 6px; top: 5px; height: calc(var(--cd, 0) * 44px); background: rgba(10,10,14,.65); border-radius: 0 0 8px 8px; pointer-events: none; }
+  #upTag { display: none; align-self: center; padding: 6px 10px; border-radius: 8px; background: #e8b417; color: #2a1d05; font: 900 14px/1 'Londrina', system-ui, sans-serif; letter-spacing: .04em; }
+  body.touch #upTag { position: absolute; right: 250px; bottom: 64px; white-space: nowrap; }
+  body.touch .ab .cdv { left: 0; right: 0; top: 0; height: calc(var(--cd, 0) * 100%); border-radius: 29px 29px 0 0; }
   .ab.fresh { animation: pop .6s ease-out; }
   @keyframes pop { 0% { transform: scale(1.6); } 100% { transform: scale(1); } }
-  #toast { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
+  #toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
            background: rgba(20,22,26,.85); color: #fff; padding: 10px 18px 10px 10px; border-radius: 12px;
            font: 700 18px/1.2 system-ui, sans-serif; pointer-events: none; opacity: 0; transition: opacity .25s; }
   #toast img { width: 48px; height: 48px; border-radius: 8px; }
@@ -106,10 +116,10 @@
   body.touch #speed small { font-size: 10px; }
   body.touch #hp { width: min(240px, 30vw); bottom: 12px; }
   body.touch #bossbar { width: min(420px, 60vw); top: 50px; }
-  body.touch #toast { font-size: 14px; top: 22%; width: max-content; max-width: 84vw; }
+  body.touch #toast { font-size: 14px; bottom: 40px; width: max-content; max-width: 84vw; }
   body.touch #alert { font-size: 24px; white-space: nowrap; top: 45%; }
   body.touch #abilities { left: auto; right: 0; bottom: 0; width: 0; height: 0; display: block; }
-  body.touch .ab { position: absolute; width: 58px; height: 58px; padding: 0; border-radius: 50%; overflow: hidden; box-sizing: border-box;
+  body.touch .ab { position: absolute; width: 58px; height: 58px; padding: 0; border-radius: 50%; overflow: visible; box-sizing: border-box;
                    pointer-events: auto; border: 2px solid rgba(255,255,255,.4); background: rgba(20,22,26,.6); }
   body.touch .ab img { width: 100%; height: 100%; margin: 0; border-radius: 50%; }
   body.touch .ab span { display: none; }
@@ -2455,7 +2465,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     bug = { g, legs };
   }
   function setRide(k) {
-    ride = k; const b = k === 'buggy';
+    ride = k; abDirty = true; const b = k === 'buggy';
     buggyParts.forEach(m => m.visible = b); buggyTurret.forEach(m => m.visible = b);
     wheels.forEach(w => w.pivot.visible = b); bullbar.scale.setScalar(b ? 1 : 0.001);
     if (!b && !rideG[k]) buildRide(k);
@@ -2662,7 +2672,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (e.code === 'KeyR') respawn();
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
-    if (e.code === 'KeyE' && !e.repeat) { if (unloadAltar) doUnload(); else toggleBurrow(); }     // E sacrifices inside an altar's ring, digs in anywhere else
+    if (e.code === 'KeyE' && !e.repeat) { if (unloadAltar) doUnload(); else special(); }     // E sacrifices inside an altar's ring
+    if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) special();      // the ride's special: Mole for the spider, Dome Bomb for the unicorn
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
   let rmb = false;
@@ -2699,14 +2710,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function layoutTouch() {
     if (!touch.enabled) return;
     const small = Math.min(innerWidth, innerHeight) < 420, c = small ? 84 : 95, R = small ? 120 : 138;
-    const arc = { jump: 2, drill: 31, grab: 60, burrow: 89 };    // degrees around the right thumb, from left to top
+    const arc = { jump: 2, grab: 40, burrow: 80, bomb: 80, drill: 80 };    // degrees around the right thumb, from left to top
     for (const t in arc) {
       const el = document.getElementById('ab-' + t), a = arc[t] * Math.PI / 180;
-      if (!el) return;
+      if (!el) continue;
       el.style.right = (c + R * Math.cos(a) - 29) + 'px'; el.style.bottom = (c + R * Math.sin(a) - 29) + 'px';
     }
     const dj = document.getElementById('ab-doubleJump');
-    dj.style.right = (c + R + 26) + 'px'; dj.style.bottom = (c + 18) + 'px';
+    if (dj) { dj.style.right = (c + R + 26) + 'px'; dj.style.bottom = (c + 18) + 'px'; }
     if (touch.move.id === null) stickRest(touch.move, false);
     if (touch.aim.id === null) stickRest(touch.aim, true);
   }
@@ -2768,7 +2779,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 95, buildEl = document.getElementById('build');
+  const BUILD = 96, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2950,6 +2961,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   function hurtCar(dmg, dir) {
     if (!car.alive || car.burrow !== 'up') return;
+    if (domes.length && inDome(car.pos.x, car.pos.z)) return;      // under a dome: untouchable
     if (haloHoly()) { if ((car.holyT || 0) < elapsed) { car.holyT = elapsed + 0.25; SFX.play('pickup', car.pos, { vol: 0.25, rate: 2 }); spawnParticles(tmp.set(car.pos.x, 2, car.pos.z), 0xffe9a8, 4, 6); } return; }   // swords out: untouchable
     car.hp -= dmg; car.lastHurt = elapsed; hurtFlash = 0.18; shake = 0.6;
     if (car.hp > 0) crewSay(car.hp < car.maxHp * 0.35 ? 'lowhp' : 'hurt', 0.7);
@@ -3428,10 +3440,17 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
   // попадает ли круг (x,z,r) в арку 180° перед машиной
   const DRILL_ARC_R = DRILL_REACH;
+  const drillRMul = () => abLv.drill >= 2 ? 1.35 : 1;
   function inDrillArc(x, z, r) {
     const dx = x - car.pos.x, dz = z - car.pos.z;
     const along = dx * Math.sin(car.heading) + dz * Math.cos(car.heading);
-    return Math.hypot(dx, dz) - r < DRILL_ARC_R && along > -r * 0.6;
+    return Math.hypot(dx, dz) - r < DRILL_ARC_R * drillRMul() && along > -r * 0.6;
+  }
+  let drillCyc = 0;
+  function drillAuto(dt) {                                 // on for a moment each cycle, half a cycle away from the nova burst
+    const D = 1.0 + (abLv.drill >= 1 ? 0.5 : 0);
+    if (weapons.nova) { const C = W_STATS.nova.cd[weapons.nova - 1]; return Math.abs(novaT - C / 2) < Math.min(C * 0.4, D / 2) && threatNear(16); }
+    drillCyc = (drillCyc + dt) % 2.4; return drillCyc < D && threatNear(16);
   }
   // подсветка арки на земле
   const arcFillMat = glow(new THREE.MeshBasicMaterial({ color: 0xff8c32, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }), 1.6);
@@ -3451,7 +3470,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   drillArc.visible = false; scene.add(drillArc);
 
   function updateDrill(dt) {
-    const on = abilities.drill && car.alive && car.burrow === 'up' && keys.KeyQ;
+    const on = abilities.drill && ride === 'buggy' && car.alive && car.burrow === 'up' && drillAuto(dt);
     drillRPM += ((on ? 1 : 0) - drillRPM) * Math.min(1, (on ? 5 : 2) * dt);
     drillSpin.rotation.z += drillRPM * 45 * dt;
     SFX.loop('drill', drillRPM > 0.02 ? 0.12 + 0.3 * drillRPM : 0, 0.45 + 0.75 * drillRPM);
@@ -3462,7 +3481,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     drillArc.visible = drillRPM > 0.05 && car.alive;
     if (drillArc.visible) {
       drillArc.position.set(car.pos.x, 0.04, car.pos.z);
-      drillArc.rotation.y = car.heading;
+      drillArc.rotation.y = car.heading; drillArc.scale.setScalar(drillRMul());
       const k = Math.min(1, drillRPM / 0.55);
       arcFillMat.opacity = 0.2 * k + (drillRPM >= 0.55 ? 0.04 * Math.sin(elapsed * 20) : 0);
       arcEdgeMat.opacity = 0.75 * k;
@@ -3475,7 +3494,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
     if (drillRPM < 0.55) { drillMat.emissive.setHex(0); return; }
 
-    const dmg = DRILL_DPS * dt * drillRPM;
+    const dmg = DRILL_DPS * dt * drillRPM * (abLv.drill >= 2 ? 1.5 : 1);
     let grinding = false;
     drillSparkT -= dt;
     const spark = drillSparkT <= 0;
@@ -3750,21 +3769,21 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (!impact) for (const e of enemies) {
         if (e.dead || e.carried || e === th.ref) continue;
         if (Math.hypot(th.pos.x - e.pos.x, th.pos.z - e.pos.z) < th.r + e.r && th.pos.y < e.s + 0.6) {
-          hitEnemy(e, dir, 3, 14); SFX.play('hit_flesh', th.pos);
+          hitEnemy(e, dir, 3 * throwMul(), 14); SFX.play('hit_flesh', th.pos);
           spawnParticles(th.pos, 0xffd27a, 6, 8);
           impact = true; break;
         }
       }
       if (!impact && !th.hostile) for (const m of swarm) {
         if (m.dead || Math.hypot(th.pos.x - m.pos.x, th.pos.z - m.pos.z) > th.r + m.r + 0.3 || th.pos.y > critterTop(m) + 0.6) continue;
-        hitCritter(m, 4, dir, 14); SFX.play('hit_flesh', th.pos); impact = true;
+        hitCritter(m, 4 * throwMul(), dir, 14); SFX.play('hit_flesh', th.pos); impact = true;
       }
       if (!impact) for (const o of obstacles) {
         if (!active(o) || o === th.ref || (o.boss && th.hostile)) continue;
         const p = o.mesh.position;
         if (Math.abs(th.pos.x - p.x) < o.hx + th.r * 0.7 && Math.abs(th.pos.z - p.z) < o.hz + th.r * 0.7 && th.pos.y < o.h + th.r * 0.5) {
-          if (o.crate) damageCrate(o, 3);
-          if (o.boss) { bossDamage(12); spawnParticles(th.pos, 0xd040a0, 8, 8); SFX.play('tent_slam', th.pos, { rate: 1.3 }); }
+          if (o.crate) damageCrate(o, 3 * throwMul());
+          if (o.boss) { bossDamage(12 * throwMul()); spawnParticles(th.pos, 0xd040a0, 8, 8); SFX.play('tent_slam', th.pos, { rate: 1.3 }); }
           else if (!o.crate) SFX.play('hit_stone', th.pos);
           spawnParticles(th.pos, o.crate ? 0xd2873c : 0xbfc3c9, 5, 7);
           th.pos.addScaledVector(dir, -th.r);
@@ -3795,8 +3814,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   const carSeen = () => car.alive && car.depth < 0.5;
 
+  function special() { if (ride === 'spider') toggleBurrow(); else if (ride === 'unicorn') bombDome(); }
   function toggleBurrow() {
-    if (!abilities.burrow || !car.alive || car.burrowCd > 0 || car.airborne) return;
+    if (!abilities.burrow || ride !== 'spider' || !car.alive || car.burrowCd > 0 || car.airborne) return;
     if (car.burrow === 'up' || car.burrow === 'rising') { car.burrow = 'down'; SFX.play('dig_down', car.pos); crewSay('burrow', 0.7); }
     else { car.burrow = 'rising'; SFX.play('dig_up', car.pos); }
     car.burrowCd = 0.25;
@@ -3811,7 +3831,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (car.depth >= 1) car.burrow = 'under';
     } else if (car.burrow === 'rising') {
       car.depth = Math.max(0, car.depth - dt / RISE_TIME);
-      if (car.depth <= 0) car.burrow = 'up';
+      if (car.depth <= 0) { car.burrow = 'up'; if (abLv.burrow >= 2) surfaceBlast(); }
     }
     const moving = car.burrow === 'down' || car.burrow === 'rising';
     if (moving) {
@@ -3881,17 +3901,64 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
   }
 
+  const throwMul = () => abLv.grab >= 2 ? 3 : abLv.grab >= 1 ? 2 : 1;
+  function ringBlast(x, z, r, dmg, push, col, stun) {      // a knock-back ring from the ride (upgrades); critters are the host's, so a client asks it
+    burst(tmp.set(x, 0.4, z), col, 12, r * 0.7, 9, 0.5); flash(tmp, col, r, 0.25, 3, false); shake = Math.max(shake, 0.3);
+    if (NET.client) { netEv({ t: 'blast', x: r1(x), z: r1(z), r, d: dmg, p: push, s: stun ? 1 : 0 }, NET.hostPeer); return; }
+    blastAt(x, z, r, dmg, push, stun);
+  }
+  function blastAt(x, z, r, dmg, push, stun) {
+    for (const m of swarm) { if (m.dead) continue; const dx = m.pos.x - x, dz = m.pos.z - z, d = Math.hypot(dx, dz) || 1e-3; if (d < r + m.r) { hitCritter(m, dmg, tmp.set(dx / d, 0, dz / d).clone(), push); if (stun) m.stun = Math.max(m.stun || 0, 1); } }
+    for (const e of enemies) { if (e.dead || e.carried) continue; const dx = e.pos.x - x, dz = e.pos.z - z, d = Math.hypot(dx, dz) || 1e-3; if (d < r + e.r) { hitEnemy(e, tmp.set(dx / d, 0, dz / d).clone(), Math.max(1, dmg * 0.5), push); if (stun) e.stun = Math.max(e.stun || 0, 1); } }
+  }
+  function surfaceBlast() { ringBlast(car.pos.x, car.pos.z, 6, 3, 18, 0x9a7a54, true); }
+  const BOMB = { r: [7, 9, 11], T: [2, 3, 4], cd: [12, 11, 10] };
+  let bombCd = 0; const domes = [];
+  const domeGeo = new THREE.SphereGeometry(1, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), domeRingGeo = new THREE.RingGeometry(0.95, 1, 64); domeRingGeo.rotateX(-Math.PI / 2);
+  function bombDome() {
+    if (!abilities.bomb || ride !== 'unicorn' || !car.alive || car.burrow !== 'up' || bombCd > 0) return;
+    const L = abLv.bomb; bombCd = BOMB.cd[L];
+    const x = r1(car.pos.x), z = r1(car.pos.z), r = BOMB.r[L], T = BOMB.T[L];
+    addDome(x, z, r, T);
+    if (NET.client) netEv({ t: 'dome', x, z, r, T }); else { netEv({ t: 'dome', x, z, r, T }); blastAt(x, z, r, 1, 26, true); }
+  }
+  function addDome(x, z, r, T) {
+    const mat = glow(new THREE.MeshBasicMaterial({ color: 0xff9ae0, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }), 1.6);
+    const rmat = glow(new THREE.MeshBasicMaterial({ color: 0xffc4ef, transparent: true, opacity: 0, depthWrite: false }), 2.5);
+    const m = new THREE.Mesh(domeGeo, mat), ring = new THREE.Mesh(domeRingGeo, rmat);
+    m.position.set(x, 0, z); ring.position.set(x, 0.06, z); ring.scale.setScalar(r); scene.add(m, ring);
+    domes.push({ x, z, r, T, t: 0, m, ring });
+    burst(tmp.set(x, 0.5, z), 0xff9ae0, 16, r * 0.8, 12, 0.6); flash(tmp, 0xff9ae0, r * 1.2, 0.35, 4, false);
+    SFX.play('explode', tmp, { vol: 0.6, rate: 1.3 }); shake = Math.max(shake, 0.35);
+  }
+  const inDome = (x, z) => domes.some(D => Math.hypot(x - D.x, z - D.z) < D.r);
+  function updateDomes(dt) {
+    bombCd -= dt;
+    for (let i = domes.length - 1; i >= 0; i--) {
+      const D = domes[i]; D.t += dt;
+      const k = Math.min(1, D.t / 0.18), fade = Math.min(1, (D.T - D.t) / 0.4);
+      D.m.scale.setScalar(D.r * (0.4 + 0.6 * k)); D.m.material.opacity = 0.11 * fade * k + 0.03 * Math.sin(elapsed * 14) * fade; D.ring.material.opacity = 0.8 * fade;
+      if (!NET.client) {                                   // nobody gets in while it stands
+        for (const m of swarm) { if (m.dead) continue; const dx = m.pos.x - D.x, dz = m.pos.z - D.z, d = Math.hypot(dx, dz) || 1e-3, R = D.r + m.r;
+          if (d < R) { m.pos.x = D.x + dx / d * R; m.pos.z = D.z + dz / d * R; const vn = m.vel.x * dx / d + m.vel.z * dz / d; if (vn < 0) { m.vel.x -= dx / d * vn; m.vel.z -= dz / d * vn; } } }
+        for (const e of enemies) { if (e.dead || e.carried) continue; const dx = e.pos.x - D.x, dz = e.pos.z - D.z, d = Math.hypot(dx, dz) || 1e-3, R = D.r + e.r;
+          if (d < R) { e.pos.x = D.x + dx / d * R; e.pos.z = D.z + dz / d * R; } }
+      }
+      if (D.t >= D.T) { scene.remove(D.m, D.ring); D.m.material.dispose(); D.ring.material.dispose(); domes.splice(i, 1); }
+    }
+  }
   // ---------- jump ----------
   const JUMP_V = 15, CAR_G = 32;                    // ~0.95 с в воздухе, высота ~3.5 — перелетает ящики и злюк
   function jump() {
     if (!car.alive || car.burrow !== 'up') return;
     if (!car.airborne) {
       if (!abilities.jump) return;
-      car.vy = JUMP_V; car.airborne = true; car.usedDouble = false; SFX.play('jump', car.pos); crewSay('jump', 0.5);
+      car.vy = JUMP_V; car.airborne = true; car.usedDouble = false; car.airJumps = 0; SFX.play('jump', car.pos); crewSay('jump', 0.5);
       if (ride === 'spider' && SPD.n.y < 0.5) { car.vel.addScaledVector(SPD.n, 10); car.vy *= 0.6; }      // kick off the wall
       spawnParticles(tmp.copy(car.pos).setY(0.2), 0x8a8a78, 8, 5);
-    } else if (abilities.doubleJump && !car.usedDouble) {   // второй толчок прямо в воздухе
-      car.vy = JUMP_V * 0.95; car.usedDouble = true; SFX.play('jump2', car.pos);
+    } else if (abilities.doubleJump && !car.usedDouble) {   // второй толчок прямо в воздухе (the angel's; an upgrade adds a third)
+      car.vy = JUMP_V * 0.95; car.airJumps = (car.airJumps || 0) + 1; if (car.airJumps >= 1 + (abLv.doubleJump >= 1 ? 1 : 0)) car.usedDouble = true; SFX.play('jump2', car.pos);
+      if (abLv.doubleJump >= 2) ringBlast(car.pos.x, car.pos.z, 4.5, 3, 12, 0xc9a8ff, false);
       spawnParticles(tmp.copy(car.pos).setY(car.y + 0.3), 0xc9a8ff, 12, 6);
       shake = Math.max(shake, 0.15);
     }
@@ -3921,8 +3988,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (!popped) for (const m of swarm) {            // flat critters get flattened
       if (m.dead || m.K.fly) continue;
       const dx = m.pos.x - car.pos.x, dz = m.pos.z - car.pos.z, d = Math.hypot(dx, dz) || 1e-4;
-      if (d < car.radius + m.r + 0.8) hitCritter(m, m.K.heavy ? 3 : 99, tmp.set(dx / d, 0, dz / d), 10);
+      if (d < car.radius + m.r + 0.8 + (abLv.jump >= 1 ? 1.6 : 0)) hitCritter(m, m.K.heavy ? 3 : 99, tmp.set(dx / d, 0, dz / d), 10);
     }
+    if (!popped && abLv.jump >= 2 && impact > 8) ringBlast(car.pos.x, car.pos.z, 6.5, 2, 16, 0xffe08a, true);      // landing shockwave
     for (const o of obstacles) {                     // и на ящик — в щепки
       if (!o.crate || !active(o)) continue;
       const p = o.mesh.position;
@@ -3933,10 +4001,21 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
 
   // ---------- abilities & loot ----------
-  const abilities = { drill: false, burrow: false, grab: false, jump: false, doubleJump: false };
+  const abilities = { drill: false, burrow: false, grab: false, jump: false, doubleJump: false, bomb: false };
+  // every ride has its own kit; the specials sit on Shift, the drill runs by itself
+  const RIDE_KIT = { buggy: ['drill', 'jump', 'grab'], spider: ['burrow', 'jump', 'grab'], halo: ['jump', 'doubleJump', 'grab'], unicorn: ['bomb', 'jump', 'grab'] };
+  const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
+  const kitDone = () => kit().every(t => abilities[t]);
+  const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0 };      // upgrades spent on each, 0..AB_LV_MAX
+  const AB_LV_MAX = 2, UP_MAX = 5;                         // ~5 upgrades a run: enough for two or three skills, not all
+  let upPts = 0, upGot = 0;
+  const UP_TEXT = { drill: ['spins longer', 'wider and meaner'], burrow: ['harder to dig out', 'surfacing knocks everyone back'], grab: ['throws hit twice as hard', 'throws x3, loot flies to you'],
+                    jump: ['bigger landing crush', 'landing shockwave stuns'], doubleJump: ['a third jump', 'air jumps blast below'], bomb: ['bigger dome, 3 s', 'huge dome, 4 s'] };
   const AB_INFO = {
-    drill:      { title: 'Drill',            key: 'Q',     hint: 'hold Q — grinds everything in a 180° arc ahead', bg: '#ff8c32' },
-    burrow:     { title: 'Mole',             key: 'E',     hint: 'E — dig in / pop out, biters scatter', bg: '#8a6a44' },
+    drill:      { title: 'Drill',            key: 'auto',  hint: 'spins up by itself between nova pulses, grinds a 180° arc ahead', bg: '#ff8c32' },
+    burrow:     { title: 'Mole',             key: 'Shift', hint: 'Shift — dig in / pop out, biters scatter', bg: '#8a6a44' },
+    bomb:       { title: 'Dome Bomb',        key: 'Shift', hint: 'Shift — blasts the biters away, nobody gets into the dome', bg: '#c45cb4' },
+    upgrade:    { title: 'Upgrade',          key: '',      hint: 'click the + over a skill to level it up', bg: '#e8b417' },
     grab:       { title: 'Frog Tongue',      key: 'RMB',   hint: 'RMB at cursor — pulls onto the drill, release to throw', bg: '#2b6f8a' },
     jump:       { title: 'Kangaroo',         key: 'Space', hint: 'Space — jump, landing crushes', bg: '#2fa3b5' },
     doubleJump: { title: 'Two Kangaroos',    key: '2×Spc', hint: 'Space again mid-air — second jump', bg: '#8e5bd6' },
@@ -4000,6 +4079,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
     } else if (type === 'doubleJump') {
       kangaroo(ctx, 42, 78, 0.6, '#fff');
       kangaroo(ctx, 88, 52, 0.6, '#fff');
+    } else if (type === 'bomb') {                         // a dome over a burst
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(64, 92, 42, Math.PI, 0); ctx.stroke(); ctx.beginPath(); ctx.moveTo(14, 92); ctx.lineTo(114, 92); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath();
+      for (let i = 0; i < 14; i++) { const r = i % 2 ? 8 : 19, b = i / 14 * Math.PI * 2; ctx[i ? 'lineTo' : 'moveTo'](64 + Math.cos(b) * r, 70 + Math.sin(b) * r); } ctx.closePath(); ctx.fill();
+    } else if (type === 'upgrade') {                      // two chevrons up
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const y of [58, 92]) { ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(64, y - 30); ctx.lineTo(96, y); ctx.stroke(); }
     } else if (type === 'heal') {
       ctx.fillStyle = '#fff'; rr(ctx, 52, 26, 24, 76, 6); ctx.fill(); rr(ctx, 26, 52, 76, 24, 6); ctx.fill();
     } else if (type === 'w_spread') {                    // fan of tracers from a muzzle
@@ -4026,64 +4113,92 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const ICONS = {}, ICON_URLS = {};
   for (const t of Object.keys(AB_INFO)) { ICONS[t] = makeIcon(t); ICON_URLS[t] = ICONS[t].toDataURL(); }
 
-  // HUD-панель способностей
+  // HUD: the ride's own skills, each with a + over it while there are upgrades to spend
   const abBar = document.getElementById('abilities');
-  for (const t of AB_ORDER) {
-    const d = document.createElement('div'); d.className = 'ab locked'; d.id = 'ab-' + t;
-    d.innerHTML = `<img src="${ICON_URLS[t]}" draggable="false"><span>${AB_INFO[t].key}</span>`;
-    abBar.appendChild(d);
+  var abDirty = true;                                      // setRide() asks for a rebuild (it runs before this line on start-up, hence var)
+  function bindAb(t, down, up, drag) {                     // touch: the icons double as buttons
+    const el = document.getElementById('ab-' + t); if (!el) return; let id = null, ox = 0, oy = 0;
+    el.addEventListener('touchstart', e => {
+      e.preventDefault(); e.stopPropagation();
+      if (id !== null || !abilities[t]) return;
+      const tc = e.changedTouches[0]; id = tc.identifier; ox = tc.clientX; oy = tc.clientY;
+      el.classList.add('down'); down();
+    }, { passive: false });
+    el.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (drag) for (const tc of e.changedTouches) if (tc.identifier === id) drag(tc.clientX - ox, tc.clientY - oy);
+    }, { passive: false });
+    const end = e => { for (const tc of e.changedTouches) if (tc.identifier === id) { id = null; el.classList.remove('down'); if (up) up(); } };
+    el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
   }
-  // touch: the ability icons double as buttons. Drill and tongue are hold buttons; dragging off the tongue button aims it.
-  {
-    const bind = (t, down, up, drag) => {
-      const el = document.getElementById('ab-' + t); let id = null, ox = 0, oy = 0;
-      el.addEventListener('touchstart', e => {
-        e.preventDefault(); e.stopPropagation();
-        if (id !== null || !abilities[t]) return;
-        const tc = e.changedTouches[0]; id = tc.identifier; ox = tc.clientX; oy = tc.clientY;
-        el.classList.add('down'); down();
-      }, { passive: false });
-      el.addEventListener('touchmove', e => {
-        e.preventDefault();
-        if (drag) for (const tc of e.changedTouches) if (tc.identifier === id) drag(tc.clientX - ox, tc.clientY - oy);
-      }, { passive: false });
-      const end = e => {
-        for (const tc of e.changedTouches) if (tc.identifier === id) { id = null; el.classList.remove('down'); if (up) up(); }
-      };
-      el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
-    };
-    bind('jump', () => jump());
-    bind('burrow', () => toggleBurrow());
-    bind('drill', () => { keys.KeyQ = true; }, () => { keys.KeyQ = false; });
-    bind('grab', () => { rmb = true; }, () => { rmb = false; }, (dx, dy) => {
+  let abSig = '';
+  function buildAbBar() {
+    abDirty = false; abSig = ''; abBar.innerHTML = '';
+    for (const t of kit()) {
+      const d = document.createElement('div'); d.className = 'ab locked'; d.id = 'ab-' + t;
+      d.innerHTML = `<b class="up">+</b><img src="${ICON_URLS[t]}" draggable="false"><span>${AB_INFO[t].key}</span><i class="lv"></i><i class="cdv"></i>`;
+      abBar.appendChild(d);
+      const upB = d.querySelector('.up'), spend = e => { e.preventDefault(); e.stopPropagation(); upgradeAb(t); };
+      upB.addEventListener('mousedown', spend); upB.addEventListener('touchstart', spend, { passive: false });
+    }
+    const tag = document.createElement('div'); tag.id = 'upTag'; abBar.appendChild(tag);
+    bindAb('jump', () => jump());
+    bindAb('burrow', () => toggleBurrow());
+    bindAb('bomb', () => bombDome());
+    bindAb('grab', () => { rmb = true; }, () => { rmb = false; }, (dx, dy) => {
       const d = Math.hypot(dx, dy);
       if (d > 14) { stickWorld(dx, dy, touch.aimDir); touch.aimDist = 6 + 12 * Math.min(1, d / 70); }
     });
-    if (COARSE) enableTouch();
+    layoutTouch(); updateAbHud();
+  }
+  function upgradeAb(t) {
+    if (upPts <= 0 || !abilities[t] || abLv[t] >= AB_LV_MAX) return;
+    upPts--; abLv[t]++;
+    toast(t, 'Lv ' + (abLv[t] + 1), UP_TEXT[t][abLv[t] - 1]); SFX.play('pickup', null, { rate: 1.3 });
+    const el = document.getElementById('ab-' + t); if (el) { el.classList.remove('fresh'); void el.offsetWidth; el.classList.add('fresh'); }
+    updateAbHud();
+  }
+  function updateAbHud() {
+    if (abDirty) { buildAbBar(); return; }
+    const L = abLv.bomb, bk = abilities.bomb ? Math.max(0, bombCd) / BOMB.cd[L] : 0;
+    const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + upPts + '|' + bk.toFixed(2);
+    if (sig === abSig) return; abSig = sig;
+    for (const t of kit()) {
+      const el = document.getElementById('ab-' + t); if (!el) continue;
+      if (abilities[t] && el.classList.contains('locked')) { el.classList.remove('locked'); el.classList.add('fresh'); }
+      el.classList.toggle('can', upPts > 0 && abilities[t] && abLv[t] < AB_LV_MAX);
+      el.querySelector('.lv').textContent = abLv[t] ? '★'.repeat(abLv[t]) : '';
+      if (t === 'bomb') el.style.setProperty('--cd', bk.toFixed(2));
+    }
+    const tag = document.getElementById('upTag');
+    if (tag) { tag.style.display = upPts > 0 ? 'block' : 'none'; tag.textContent = 'UPGRADE ×' + upPts; }
   }
   const toastEl = document.getElementById('toast'); let toastTimer = 0;
-  function toast(type, extra) {
+  function toast(type, extra, hint) {
     const i = AB_INFO[type];
-    toastEl.innerHTML = `<img src="${ICON_URLS[type]}"><div>${i.title}${extra ? ' ' + extra : ''}${i.key ? ' — ' + i.key : ''}<small>${i.hint}</small></div>`;
+    toastEl.innerHTML = `<img src="${ICON_URLS[type]}"><div>${i.title}${extra ? ' ' + extra : ''}${i.key ? ' — ' + i.key : ''}<small>${hint || i.hint}</small></div>`;
     toastEl.style.opacity = 1; toastTimer = 3;
   }
   function applyAbilityVisuals() {
     drill.visible = abilities.drill; bullbar.visible = !abilities.drill;
     arm.visible = mast.visible = abilities.grab;
-    for (const t of AB_ORDER) {
-      const d = document.getElementById('ab-' + t);
-      if (abilities[t] && d.classList.contains('locked')) { d.classList.remove('locked'); d.classList.add('fresh'); }
-    }
+    abSig = '';
   }
   applyAbilityVisuals();
 
   // лут
   const pickups = [];
   const pickupTex = {};
-  function dropLoot(at) {
-    const pending = new Set(pickups.map(p => p.type));
-    const pool = AB_ORDER.filter(t => !abilities[t] && !pending.has(t) && (t !== 'doubleJump' || abilities.jump));
-    spawnPickup(pool.length ? pool[Math.floor(Math.random() * pool.length)] : 'heal', at);
+  function dropLoot(at) {                                  // elites, finds, the boss, the loot run: an upgrade or a medkit
+    spawnPickup((NET.on && NET.game) || upGot < UP_MAX ? (Math.random() < 0.6 ? 'upgrade' : 'heal') : 'heal', at);
+  }
+  let kitT = 4;
+  function updateKit(dt) {                                 // your ride's skills arrive one by one, just for you, a little ahead of the ride
+    if (startEl.isConnected || !car.alive || PH.brk > 0 && PH.i === 0) return;
+    const miss = kit().filter(t => !abilities[t]); if (!miss.length || pickups.some(p => p.own)) return;
+    if ((kitT -= dt) > 0) return; kitT = 9;
+    const d = 9, x = THREE.MathUtils.clamp(car.pos.x + Math.sin(car.heading) * d, -ARENA + 4, ARENA - 4), z = THREE.MathUtils.clamp(car.pos.z + Math.cos(car.heading) * d, -ARENA + 4, ARENA - 4);
+    spawnPickup(miss[0], tmp.set(x, 0, z), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
   function spawnPickup(type, at, id, remote) {
@@ -4114,12 +4229,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
       p.sprite.position.y = 2.4 + Math.sin(p.t * 3) * 0.3 + Math.max(0, 1 - p.t * 2) * 2;   // выпрыгивает и покачивается
       p.ring.rotation.y += dt * 2;
       p.ring.scale.setScalar(1 + Math.sin(p.t * 4) * 0.08);
-      if (p.t > 75 && (p.type.startsWith('w_') || p.type === 'heal')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
-      const full = NET.on && NET.game && p.type.startsWith('w_') && weapons[p.type.slice(2)] >= W_MAX;           // maxed out: leave it for the others
+      if (p.t > 75 && (p.type.startsWith('w_') || p.type === 'heal' || p.type === 'upgrade')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
+      const full = (NET.on && NET.game && p.type.startsWith('w_') && weapons[p.type.slice(2)] >= W_MAX) || (p.type === 'upgrade' && upGot >= UP_MAX);           // maxed out: leave it for the others
       const can = !full && car.alive && car.depth < 0.3 && p.t > 0.4;
       let dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z), dK = cart.shown ? Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z) : 1e9;
       if (can) {                                           // loot drifts toward a passing ride (or its cart) so near misses still count
-        const pullR = LOOT_PULL * (abilities.grab ? 1.3 : 1), d = Math.min(dB, dK);
+        const pullR = LOOT_PULL * (abilities.grab ? (abLv.grab >= 2 ? 2 : 1.3) : 1), d = Math.min(dB, dK);
         if (d < pullR && d > 0.05) {
           const tx = dB <= dK ? car.pos.x : cart.pos.x, tz = dB <= dK ? car.pos.z : cart.pos.z, step = Math.min(d, (4 + 10 * (1 - d / pullR)) * dt);
           p.x += (tx - p.x) / d * step; p.z += (tz - p.z) / d * step;
@@ -4130,8 +4245,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (can && (dB < 2.6 || dK < 2.2)) {
         let extra = '';
         netEv({ t: 'pkx', id: p.id });
-        if (!p.type.startsWith('w_') && p.type !== 'heal' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
+        if (!p.type.startsWith('w_') && p.type !== 'heal' && p.type !== 'upgrade' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
         if (p.type === 'heal') car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.4);
+        else if (p.type === 'upgrade') { upPts++; upGot++; extra = '(' + upPts + ' to spend)'; abSig = ''; }
         else if (p.type.startsWith('w_')) { const lv = gainWeapon(p.type); extra = lv >= W_MAX ? 'MAX' : 'Lv ' + lv; }
         else { abilities[p.type] = true; applyAbilityVisuals(); crewSay('ability'); }
         toast(p.type, extra); SFX.play(p.type === 'heal' ? 'heal' : 'pickup', null);
@@ -4166,12 +4282,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (onGround >= 3) return;
     const lobby = NET.on && NET.game;
     const pool = [];
-    for (const k of W_ORDER) if (weapons[k] < W_MAX || lobby) pool.push(...Array(weapons[k] ? 2 : 3).fill(k));      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
+    for (const k of W_ORDER) if (k !== 'mortar' && (weapons[k] < W_MAX || lobby)) pool.push(...Array(weapons[k] ? 2 : 3).fill(k));      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
+    if (lobby || upGot < UP_MAX) pool.push('U', 'U');      // the mortar chip became the upgrade
     if (!pool.length) { if (Math.random() < 0.3) spawnPickup('heal', at); return; }
-    spawnPickup('w_' + pool[Math.floor(Math.random() * pool.length)], at);
+    const k = pool[Math.floor(Math.random() * pool.length)]; spawnPickup(k === 'U' ? 'upgrade' : 'w_' + k, at);
   }
   function crateDrop(o) {
-    if (o.room) return;                                    // the boss's ammo doesn't pay out
+    if (o.room || PH.i === 0) return;                     // the warm-up is fought with what the ride came with                                    // the boss's ammo doesn't pay out
     if (firstCrateDrop || Math.random() < Math.min(0.8, WEAPON_DROP * (1 + 0.5 * (NET.on && NET.game ? NET.remotes.size : 0)))) { firstCrateDrop = false; dropWeapon(o.mesh.position); }
   }
   function gainWeapon(type) {
@@ -5072,7 +5189,9 @@ const MONSTERS = [
     if (Math.random() < dt * 9) burst(tmp.set(m.pos.x + rand(-0.6, 0.6), 0.15, m.pos.z + rand(-0.6, 0.6)), 0x7a6a56, 2, 0.8 + m.K.r * 0.6, 1.5, 0.4);
   }
   function spawnWave() {
-    const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
+    const roll = PHASES[PH.i].key === 'roll', pick = a => a[Math.floor(Math.random() * a.length)];
+    const n = roll ? waves.n : waves.n++, plan = roll ? [[pick(['gremlin', 'gremlin', 'maw', 'stilt']), 12], [pick(['gremlin', 'flapper', 'maw', 'gloopling']), 8]]      // the warm-up: lots of small fry, easy to mow
+      : n < WAVE_PLANS.length ? WAVE_PLANS[n]
       : [[['gremlin', 'stilt', 'flapper', 'spitter', 'maw', 'jelly', 'wingmaw', 'spike'][Math.floor(Math.random() * 8)], 10 + Math.min(14, n * 2)],
          [['brute', 'spitter', 'gremlin', 'gloop', 'grubber', 'oculon', 'lamprey'][Math.floor(Math.random() * 7)], 3 + Math.min(6, n >> 1)]];
     const hell = PHASES[PH.i].key === 'hell';
@@ -5093,7 +5212,7 @@ const MONSTERS = [
     else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
     if (!mhid) for (let i = swN; i < swarm.length; i++) if (!swarm[i].K.fly) digOut(swarm[i]);
     waves.since = 0; waves.t = 35; waves.pending = true; waves.size = made; PH.wv++;
-    flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: 'WAVE ' + (n + 1) });
+    const wn = roll ? 'SWARM ' + PH.wv : 'WAVE ' + (n + 1); flashAlert(wn); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: wn });
   }
 
   const swA = new THREE.Vector3();
@@ -5107,7 +5226,7 @@ const MONSTERS = [
     if (!NET.client && !startEl.isConnected) {          // the phase decides whether waves come at all; a wave is cleared once ~80% of it is down
       const P = PHASES[PH.i], thr = Math.max(2, Math.ceil(waves.size * 0.2));
       waves.since += dt; waves.gap -= dt;
-      if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 4; dropWeapon(waves.lastKill); }
+      if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = PH.i === 0 ? 2 : 4; if (PH.i > 0) dropWeapon(waves.lastKill); }
       const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
       if (!calm && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
@@ -5899,7 +6018,7 @@ const MONSTERS = [
   function autoTargetPos(t) { return t === boss ? BOSS_POS : t.pos; }
 
   // ---------- выкапывание ----------
-  const DIG_TIME = 3;                                // одна архизлюка откапывает за 3 с, несколько — быстрее
+  const DIG_TIME = 3, digTime = () => DIG_TIME * (abLv.burrow >= 1 ? 1.6 : 1);                                // одна архизлюка откапывает за 3 с, несколько — быстрее
   const digBar = new THREE.Group();
   const dbBg = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.3), new THREE.MeshBasicMaterial({ color: 0x15161a, transparent: true, opacity: 0.8, depthTest: false }));
   const dbFillGeo = new THREE.PlaneGeometry(2.5, 0.2); dbFillGeo.translate(1.25, 0, 0);
@@ -5927,9 +6046,9 @@ const MONSTERS = [
     if (digBar.visible) {
       digBar.position.set(car.pos.x, 4.3, car.pos.z);
       digBar.quaternion.copy(camera.quaternion);
-      dbFill.scale.x = Math.max(0.001, Math.min(1, car.dig / DIG_TIME));
+      dbFill.scale.x = Math.max(0.001, Math.min(1, car.dig / digTime()));
     }
-    if (car.dig >= DIG_TIME) {                         // откопали: выкидывает наверх
+    if (car.dig >= digTime()) {                         // откопали: выкидывает наверх
       car.dig = 0; digBar.visible = false;
       car.burrow = 'up'; car.depth = 0; car.burrowCd = 2;
       car.vy = 9; car.airborne = true; car.usedDouble = true; car.popped = true;
@@ -6681,7 +6800,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt);
+    updatePickups(dt); updateKit(dt); updateDomes(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -6758,7 +6877,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 16;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 17;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6836,7 +6955,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible && !o.dormant) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6987,6 +7106,8 @@ const MONSTERS = [
       else if (d.t === 'aw') { const A = altars[d.k]; if (NET.client && A && !A.done) { A.awake = d.s === 1; if (d.n != null) A.spawnT = num(d.n, 0, 99); if (d.w === 1 || d.w === 2) altarWave(A, d.w); } }
       else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
+      else if (d.t === 'dome') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), r = num(d.r, 3, 14), T = num(d.T, 0.5, 6); addDome(x, z, r, T); if (!NET.client) { NET.applying = false; blastAt(x, z, r, 1, 26, true); } }
+      else if (d.t === 'blast') { if (!NET.client) { NET.applying = false; blastAt(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), num(d.r, 1, 9), num(d.d, 0, 4), num(d.p, 0, 20), d.s === 1); } }
       else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
       else if (d.t === 'fx') { const m = swById.get(d.i); if (NET.client && m && !m.dead && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 70) {
         if (d.k === 'mb') miniStart(m, Math.min(MINI_SEQ.length - 1, Math.round(num(d.p, 0, 9))), num(d.a, -9, 9));
@@ -7094,7 +7215,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: kitDone() ? 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -7174,7 +7295,8 @@ const MONSTERS = [
       const ox = R.pos.x, oz = R.pos.z;
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
-      const up = pr.a === 1; R.up = up; R.peer = p.peer; R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22;      // their screen size, so waves stay off it too R.tc.alive = up; R.tc.y = R.pos.y;
+      const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
+      R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22; R.ak = pr.ak === 1;      // their screen size (waves stay off it) and whether their kit is complete
       if (pr !== R.posePr) { R.posePr = pr; if (typeof pr.ph === 'number') { const d = num(pr.ph, -1e4, 1e4) * 2.4 - R.ph; R.ph += Math.abs(d) > 6 ? d : d * 0.3; } }
       const feet = R.ride === 'spider' && Array.isArray(pr.ft) && pr.ft.length === 24 ? pr.ft : null;
       if (R.anim.length && !feet) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08) * (R.ride === 'unicorn' ? 2.4 * 0.45 / 1.08 : 1);
@@ -7235,7 +7357,7 @@ const MONSTERS = [
   }
   // ---- phases: the run is a chain of phases, each a few waves with its own goals and a break before the next. The host runs it ----
   const PHASES = [
-    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: ride, smash crates, grab abilities',          waves: 2,  brk: 8,  mul: 0.8, over: 0.2, cap: 35 },
+    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: pick up your skills, mow the small fry',      waves: 99, brk: 8,  mul: 1.0, over: 0.5, cap: 13 },
     { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18, mul: 1.1, over: 0.3, cap: 30 },
     { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.4, over: 0.5, cap: 24 },
     { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 5,  brk: 18, mul: 2.6, over: 0.65, cap: 15 },
@@ -7253,7 +7375,7 @@ const MONSTERS = [
   const foundN = () => ({ a: altars.filter(A => A.found).length, r: rocks.filter(R => R.found).length });
   function phDone() {
     const k = PHASES[PH.i].key, f = foundN();
-    if (k === 'roll') return PH.clr >= 2;
+    if (k === 'roll') return kitDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every(R => R.ak));
     if (k === 'scout') return PH.clr >= 3 && f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
     if (k === 'save') return altarsDone >= 3;
     if (k === 'hell') return PH.clr >= PHASES[PH.i].waves && PH.hellN >= hellTotal() && hellAlive() === 0;
@@ -7327,7 +7449,8 @@ const MONSTERS = [
     const tk = (txt, done, n) => { const just = done && !tkDone.has(txt); if (done) tkDone.add(txt); return `<div class="tk${done ? ' done' : ''}${just ? ' just' : ''}"><i></i><span>${txt}</span>${n != null && !done ? `<em>${n}</em>` : ''}</div>`; };
     const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
     let t = '';
-    if (P.key === 'roll') t = tk('Survive 2 waves', PH.clr >= 2, PH.clr + '/2');
+    if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length; t = tk('Pick up your skills', have >= K.length, have + '/' + K.length);
+      if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (kitDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate) + tk('Survive 3 waves', PH.clr >= 3, PH.clr + '/3');
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
     else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive ' + P.waves + ' waves', PH.clr >= P.waves, PH.clr + '/' + P.waves) + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
