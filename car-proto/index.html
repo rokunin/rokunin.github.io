@@ -2745,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 91, buildEl = document.getElementById('build');
+  const BUILD = 92, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5015,19 +5015,28 @@ const MONSTERS = [
     return Math.abs(u) < V.R + m && Math.abs(w) < V.T + m;
   }
   // a ground point just past the edge of player p's screen, in screen direction th (0 = right, pi/2 = down), and off everybody else's screen too
-  function offscreenSpot(p, th, pad) {
-    const views = lobbyViews(), own = p === car.pos ? views[0] : views.find(V => V.r && V.r.pos === p) || views[0];
-    let best = null, bestD = -1;
+  function offscreenSpot(p, th, pad, fly) {
+    const views = lobbyViews(), lim = fly ? ARENA + 45 : ARENA - 3, own = p === car.pos ? views[0] : views.find(V => V.r && V.r.pos === p) || views[0];
+    let best = null, bestD = -1, first = null;
     for (const extra of [0, 10, 22]) for (let k = 0; k < 12; k++) {
       const a = th + (k ? (k & 1 ? 1 : -1) * Math.ceil(k / 2) * 0.52 : 0), su = Math.cos(a), sv = Math.sin(a);
       const t = Math.min(own.R / Math.max(1e-3, Math.abs(su)), own.T / Math.max(1e-3, Math.abs(sv))) + pad + extra;
       const u = su * t, w = sv * t / ISO_SQUASH;          // screen right = world (1,0,-1), screen down = world (1,0,1), depth foreshortened
-      const x = THREE.MathUtils.clamp(own.x + (u + w) * 0.7071, -ARENA + 3, ARENA - 3), z = THREE.MathUtils.clamp(own.z + (w - u) * 0.7071, -ARENA + 3, ARENA - 3);
-      if (!views.some(V => inView(V, x, z, 2))) return [x, z];
+      const x = THREE.MathUtils.clamp(own.x + (u + w) * 0.7071, -lim, lim), z = THREE.MathUtils.clamp(own.z + (w - u) * 0.7071, -lim, lim);
+      if (fly && inRoom(x, z)) continue;
+      if (!first) first = [x, z];                // fliers come in from the dark, never through the boss room
+      if (!views.some(V => inView(V, x, z, 2))) return [x, z, true];
       let d = 1e9; for (const V of views) d = Math.min(d, Math.hypot(x - V.x, z - V.z));
       if (d > bestD) { bestD = d; best = [x, z]; }
     }
-    return best;                                         // nowhere hidden (players spread over the whole arena): as far from everyone as it gets
+    if (fly && first) return [first[0], first[1], false];       // a flier just comes in over the nearest edge, in plain sight
+    return [best[0], best[1], false];                   // nowhere hidden (players spread over the whole arena): as far from everyone as it gets, dug in on screen
+  }
+  const DIG_T = 1.1;
+  function digOut(m) { m.dig = DIG_T; burst(tmp.set(m.pos.x, 0.2, m.pos.z), 0x6f5f4c, 5, 1.6 + m.K.r, 2.5, 0.5); SFX.play('land', m.pos, { vol: 0.45, rate: 0.6 }); }
+  function digTick(m, dt) {                              // still climbing out of the ground: dust, no moving, no biting
+    m.dig -= dt; m.vel.set(0, 0, 0);
+    if (Math.random() < dt * 9) burst(tmp.set(m.pos.x + rand(-0.6, 0.6), 0.15, m.pos.z + rand(-0.6, 0.6)), 0x7a6a56, 2, 0.8 + m.K.r * 0.6, 1.5, 0.4);
   }
   function spawnWave() {
     const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
@@ -5040,13 +5049,16 @@ const MONSTERS = [
       const ang = base + gi * 6.283 / Math.max(2, groups) + (Math.random() - 0.5) * 0.8;      // groups come from different sides of the screen
       count = Math.round(count * waveMul());            // the phase sets the pressure
       for (let i = 0; i < count && swarm.length < SW_CAP; i++) { made++;
-        const [x, z] = offscreenSpot(wp, ang + (Math.random() - 0.5) * 0.9, 3 + Math.random() * 5);
-        spawnCritter(kind, x, z);
+        const fly = !!SW_KINDS[kind].fly, [x, z, hid] = offscreenSpot(wp, ang + (Math.random() - 0.5) * 0.9, 3 + Math.random() * 5, fly);
+        const m = spawnCritter(kind, x, z);
+        if (fly) m.inbound = Math.abs(x) > ARENA || Math.abs(z) > ARENA;      // flies in over the wall
+        else if (!hid) digOut(m);
       }
     });
-    const [mx, mz] = offscreenSpot(wp, base + 3.14, 6);
+    const [mx, mz, mhid] = offscreenSpot(wp, base + 3.14, 6), swN = swarm.length;
     if (hell) { const per = Math.ceil(hellTotal() / 3); if (PH.hellN < hellTotal()) { const k = Math.min(per, hellTotal() - PH.hellN); const before = swarm.length; spawnMinis(k, mx, mz); for (let i = before; i < swarm.length; i++) if (swarm[i].mini) swarm[i].hell = true; PH.hellN += k; } }
     else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
+    if (!mhid) for (let i = swN; i < swarm.length; i++) if (!swarm[i].K.fly) digOut(swarm[i]);
     waves.since = 0; waves.t = 35; waves.pending = true; waves.size = made; PH.wv++;
     flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: 'WAVE ' + (n + 1) });
   }
@@ -5076,8 +5088,10 @@ const MONSTERS = [
           const k = 1 - Math.exp(-10 * dt), ox = m.pos.x, oz = m.pos.z;
           if (Math.abs(m.tx - ox) + Math.abs(m.tz - oz) > 20) { m.pos.x = m.tx; m.pos.z = m.tz; } else { m.pos.x += (m.tx - ox) * k; m.pos.z += (m.tz - oz) * k; }
           m.vel.set((m.pos.x - ox) / Math.max(dt, 1e-3), 0, (m.pos.z - oz) / Math.max(dt, 1e-3));
+          if (m.dig > 0) digTick(m, dt);
           break ai;
         }
+        if (m.dig > 0) { digTick(m, dt); break ai; }
         const T = m.tgt && m.tgt.up && NET.remotes.get(m.tgt.peer) === m.tgt ? m.tgt.tc : car, mine = T === car, seen = mine ? carSeen() : true;
         const dx = T.pos.x - m.pos.x, dz = T.pos.z - m.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist;
         // steering
@@ -5113,7 +5127,8 @@ const MONSTERS = [
         m.vel.x += (tx - m.vel.x) * k; m.vel.z += (tz - m.vel.z) * k;
         m.pos.addScaledVector(m.vel, dt);
         if (!K.fly) for (const o of obstacles) if (active(o)) pushOutOfBox(m.pos, K.r, o);
-        if (!inWorld(m.pos.x, m.pos.z)) { m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 1.5, ARENA - 1.5); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 1.5, ARENA - 1.5); }
+        if (m.inbound) { if (Math.abs(m.pos.x) < ARENA - 1.5 && Math.abs(m.pos.z) < ARENA - 1.5) m.inbound = false; }
+        else if (!inWorld(m.pos.x, m.pos.z)) { m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 1.5, ARENA - 1.5); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 1.5, ARENA - 1.5); }
   
         // contact with the car: get run over, get shoved, or bite
         const reachR = T.radius + K.r;
@@ -5163,7 +5178,7 @@ const MONSTERS = [
       const grow = Math.min(1, m.born / 0.35), sz = K.size * grow;
       m.sprite.scale.set(sz * m.facing, sz, 1);
       const hop = K.fly ? K.fly + Math.sin(m.phase * 1.6) * 0.25 : Math.abs(Math.sin(m.phase * Math.PI)) * (K.heavy ? 0.05 : 0.18);
-      m.sprite.position.set(m.pos.x, hop, m.pos.z);
+      m.sprite.position.set(m.pos.x, hop - (m.dig > 0 ? m.dig / DIG_T * K.size * 1.05 : 0), m.pos.z);
       m.shadow.position.set(m.pos.x, 0.03, m.pos.z);
       m.shadow.material.opacity = 1;
     }
@@ -6809,7 +6824,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0)]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -6825,9 +6840,9 @@ const MONSTERS = [
     if (d.t === 'sw') {
       for (const e of d.a.slice(0, 80)) {
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
-        const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA, ARENA), z = num(e[3], -ARENA, ARENA);
+        const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA - 50, ARENA + 50), z = num(e[3], -ARENA - 50, ARENA + 50);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 4) gateSpawned = true; }
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 4) gateSpawned = true; }
         m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
