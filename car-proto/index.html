@@ -2745,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 88, buildEl = document.getElementById('build');
+  const BUILD = 89, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4327,6 +4327,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const sawHitPos = new THREE.Vector3();
   function updateSaws(dt) {
     if (!weapons.orbit) return;
+    for (const m of swarm) if (m.sawCd > 0) m.sawCd -= dt;            // per-target cooldowns tick down (they never did: a saw used to hit each monster once)
+    for (const e of enemies) if (e.sawCd > 0) e.sawCd -= dt;
+    for (const o of obstacles) if (o.sawCd > 0) o.sawCd -= dt;
+    if (boss.sawCd > 0) boss.sawCd -= dt;
     const L = weapons.orbit - 1, S = W_STATS.orbit, on = car.alive && car.depth < 0.3;
     sawAngle += S.spd[L] * dt * (ride === 'halo' ? 1.86 : 1);
     saws.forEach((s, i) => {
@@ -4975,7 +4979,17 @@ const MONSTERS = [
     }
     if (q.i >= S.n) m.seq = null;
   }
-  function stunCritter(m, t) { if (m.net) { netEv({ t: 'stun', i: m.id, s: t }, NET.hostPeer); return; } m.stun = Math.max(m.stun || 0, t); }
+  let starsM = null;
+  function starsMat() {                                // one shared ring of little yellow stars, spun in the update
+    if (starsM) return starsM;
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
+    const star = (cx, cy, r) => { x.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; x.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } x.closePath(); x.fill(); x.stroke(); };
+    x.strokeStyle = '#1b1421'; x.lineWidth = 3; x.fillStyle = '#ffe14a';
+    for (let i = 0; i < 5; i++) { const a = i / 5 * 6.283; star(64 + Math.cos(a) * 46, 32 + Math.sin(a) * 18, 11 - (Math.sin(a) < 0 ? 3 : 0)); }
+    const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding;
+    starsM = new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false }); return starsM;
+  }
+  function stunCritter(m, t) { if (m.net) { m.stunVis = Math.max(m.stunVis || 0, t); netEv({ t: 'stun', i: m.id, s: t }, NET.hostPeer); return; } m.stun = Math.max(m.stun || 0, t); }
   const critterTop = m => (m.K.fly || 0) + m.K.size * 0.85;
 
   // waves: a new pack arrives off-screen every ~35 s (or sooner once the last one is nearly gone)
@@ -4998,7 +5012,7 @@ const MONSTERS = [
     let made = 0;
     plan.forEach(([kind, count], gi) => {
       const ang = base + gi * (2.2 + Math.random());
-      if (hell) count *= 2;                              // hell: twice the pack
+      count = Math.round(count * waveMul());            // the phase sets the pressure
       for (let i = 0; i < count && swarm.length < SW_CAP; i++) { made++;
         let x = 0, z = 0, ok = false;
         for (let tries = 0; tries < 8 && !ok; tries++) {
@@ -5029,12 +5043,13 @@ const MONSTERS = [
       const P = PHASES[PH.i], thr = Math.max(2, Math.ceil(waves.size * 0.2));
       waves.since += dt; waves.gap -= dt;
       if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 4; dropWeapon(waves.lastKill); }
-      if (!calm && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || waves.since >= 35)) spawnWave();
+      const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
+      if (!calm && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
       const m = swarm[i];
-      if (m.dead) { swarm.splice(i, 1); if (swById.get(m.id) === m) swById.delete(m.id); continue; }
+      if (m.dead) { swarm.splice(i, 1); if (swById.get(m.id) === m) swById.delete(m.id); if (m.stars) scene.remove(m.stars); continue; }
       const K = m.K; m.born += dt; m.cd -= dt; m.flash -= dt;
       ai: {
         if (m.net) {                                     // mirrored from the lobby host: glide to the last reported spot
@@ -5073,7 +5088,7 @@ const MONSTERS = [
           if (Math.abs(sx) > md || Math.abs(sz) > md) continue;
           const sd = Math.hypot(sx, sz) || 1e-3; if (sd < md) { tx += sx / sd * 8 * (md - sd); tz += sz / sd * 8 * (md - sd); }
         }
-        const dazed = m.stun > 0; if (dazed) { m.stun -= dt; tx = 0; tz = 0; }      // knocked silly by the unicorn's dodecahedra
+        const dazed = m.stun > 0; if (dazed) { m.stun -= dt; tx = 0; tz = 0; m.vel.set(0, 0, 0); }      // knocked silly (webs, the unicorn's dodecahedra): frozen on the spot
         const k = Math.min(1, 4 * dt);
         m.vel.x += (tx - m.vel.x) * k; m.vel.z += (tz - m.vel.z) * k;
         m.pos.addScaledVector(m.vel, dt);
@@ -5107,7 +5122,7 @@ const MONSTERS = [
         }
         if (K.ranged) {                                    // the car if it is in range, otherwise whoever sits on a rock
           if (!dazed) m.spitT -= dt;
-          if (m.spitT <= 0) {
+          if (m.spitT <= 0 && !dazed) {
             if (seen && dist < 17) { m.spitT = 2.6 + Math.random(); spit(m, null, T); }
             else { const c = perchedNear(m.pos, 19); if (c) { m.spitT = 3.5 + Math.random() * 2.5; spit(m, c); } else m.spitT = 0.4; }
           }
@@ -5116,6 +5131,9 @@ const MONSTERS = [
       }
       if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
       if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.5 * (2 - fl), 0.36 * fl, 1); }
+      { const st = m.net ? (m.stunVis = Math.max(0, (m.stunVis || 0) - dt)) > 0 : m.stun > 0;      // stars circle a stunned head
+        if (st && !m.stars) { m.stars = new THREE.Sprite(starsMat()); m.stars.renderOrder = 6; scene.add(m.stars); }
+        if (m.stars) { m.stars.visible = st; if (st) { const s = K.size * 0.75; m.stars.position.set(m.pos.x, (K.fly || 0) + K.size * 1.02, m.pos.z); m.stars.scale.set(s, s * 0.5, 1); m.stars.material.rotation = Math.sin(elapsed * 7) * 0.35; } } }
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
@@ -5481,7 +5499,7 @@ const MONSTERS = [
   }
   function altarWave(A, kind) {                          // kind 1: it just woke up; 2: the timer ran out. The host also spawns the guard
     A.waveAt = elapsed; A.pulse = 1;
-    if (!NET.client) altarGuards(A, 8);
+    if (!NET.client) altarGuards(A, Math.round(10 * waveMul()));
     const near = Math.hypot(car.pos.x - A.x, car.pos.z - A.z) < 70;      // only the players around it hear it laugh
     tmp.set(A.x, 3, A.z);
     if (kind === 1) { if (near) { SFX.play('laugh', null); flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5); } flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5); }
@@ -6650,7 +6668,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 15;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 16;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6771,7 +6789,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0)]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -6790,7 +6808,7 @@ const MONSTERS = [
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA, ARENA), z = num(e[3], -ARENA, ARENA);
         let m = swById.get(e[0]);
         if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 4) gateSpawned = true; }
-        m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1;
+        m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
         m.dead = true; scene.remove(m.sprite, m.shadow);
@@ -7127,15 +7145,19 @@ const MONSTERS = [
   }
   // ---- phases: the run is a chain of phases, each a few waves with its own goals and a break before the next. The host runs it ----
   const PHASES = [
-    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: ride, smash crates, grab abilities',          waves: 2,  brk: 8 },
-    { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18 },
-    { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18 },
-    { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 4,  brk: 18 },
-    { key: 'loot',  name: 'LOOT RUN',          desc: 'Grab everything before the gate opens',                waves: 0,  brk: 0 },
-    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0 },
+    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: ride, smash crates, grab abilities',          waves: 2,  brk: 8,  mul: 0.8, over: 0.2, cap: 35 },
+    { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18, mul: 1.1, over: 0.3, cap: 30 },
+    { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.4, over: 0.5, cap: 24 },
+    { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 5,  brk: 18, mul: 2.6, over: 0.65, cap: 15 },
+    { key: 'loot',  name: 'LOOT RUN',          desc: 'Grab everything before the gate opens',                waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99 },
+    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99 },
   ];
   const NEST_GOAL = 4, FIND_R = 34, LOOT_T = 40;
   const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
+  function waveMul() {                                 // how thick a wave is: phase, fed altars, and +35% per friend in the lobby
+    let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++;
+    return PHASES[PH.i].mul * (PHASES[PH.i].key === 'save' ? 1 + 0.3 * altarsDone : 1) * (1 + 0.35 * Math.min(3, o));
+  }
   const hellTotal = () => { let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++; return 12 + 4 * Math.min(3, o); };      // 12 for one, +4 per friend
   const hellAlive = () => { let n = 0; for (const m of swarm) if (!m.dead && m.hell) n++; return n; };
   const foundN = () => ({ a: altars.filter(A => A.found).length, r: rocks.filter(R => R.found).length });
@@ -7144,7 +7166,7 @@ const MONSTERS = [
     if (k === 'roll') return PH.clr >= 2;
     if (k === 'scout') return PH.clr >= 3 && f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
     if (k === 'save') return altarsDone >= 3;
-    if (k === 'hell') return PH.clr >= 4 && PH.hellN >= hellTotal() && hellAlive() === 0;
+    if (k === 'hell') return PH.clr >= PHASES[PH.i].waves && PH.hellN >= hellTotal() && hellAlive() === 0;
     if (k === 'loot') return PH.t >= LOOT_T;
     return false;
   }
@@ -7206,7 +7228,7 @@ const MONSTERS = [
     if (P.key === 'roll') t = tk('Survive 2 waves', PH.clr >= 2, PH.clr + '/2');
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate) + tk('Survive 3 waves', PH.clr >= 3, PH.clr + '/3');
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
-    else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive 4 waves', PH.clr >= 4, PH.clr + '/4') + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
+    else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive ' + P.waves + ' waves', PH.clr >= P.waves, PH.clr + '/' + P.waves) + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
     else if (P.key === 'loot') t = tk('Grab the loot', false, Math.max(0, Math.ceil(LOOT_T - PH.t)) + 's');
     else t = tk('Kill the Pyramidon', boss.state === 'dead');
     return `<div class="ph">${PH.brk > 0 ? 'NEXT: ' : ''}${P.name}</div><div class="sub">${PH.brk > 0 ? 'break · ' + Math.ceil(PH.brk) + 's' : P.desc}</div>` + t;
