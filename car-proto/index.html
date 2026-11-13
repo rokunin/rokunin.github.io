@@ -2745,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 89, buildEl = document.getElementById('build');
+  const BUILD = 90, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5003,28 +5003,37 @@ const MONSTERS = [
     [['grubber', 2], ['lamprey', 4], ['maw', 6]],
   ];
   const waves = { n: 0, t: 16, since: 0, lastKill: new THREE.Vector3(), pending: false, alive: 0, size: 0, gap: 0 };
+  // a ground point just past the edge of the visible screen around player p, in screen direction th (0 = right, pi/2 = down)
+  function offscreenSpot(p, th, pad) {
+    const c = p === car.pos ? camFocus : p, R = camera.right / camera.zoom, T = camera.top / camera.zoom;
+    let best = null, bestD = -1;
+    for (let k = 0; k < 10; k++) {
+      const a = th + (k ? (k & 1 ? 1 : -1) * Math.ceil(k / 2) * 0.55 : 0), su = Math.cos(a), sv = Math.sin(a);
+      const t = Math.min(R / Math.max(1e-3, Math.abs(su)), T / Math.max(1e-3, Math.abs(sv))) + pad;
+      const u = su * t, w = sv * t / ISO_SQUASH;          // screen right = world (1,0,-1), screen down = world (1,0,1), depth foreshortened
+      const x = c.x + (u + w) * 0.7071, z = c.z + (w - u) * 0.7071;
+      if (Math.abs(x) < ARENA - 3 && Math.abs(z) < ARENA - 3) return [x, z];
+      const cx = THREE.MathUtils.clamp(x, -ARENA + 3, ARENA - 3), cz = THREE.MathUtils.clamp(z, -ARENA + 3, ARENA - 3), d = Math.hypot(cx - p.x, cz - p.z);
+      if (d > bestD) { bestD = d; best = [cx, cz]; }
+    }
+    return best;                                         // boxed into a corner: the farthest spot the arena allows
+  }
   function spawnWave() {
     const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
       : [[['gremlin', 'stilt', 'flapper', 'spitter', 'maw', 'jelly', 'wingmaw', 'spike'][Math.floor(Math.random() * 8)], 10 + Math.min(14, n * 2)],
          [['brute', 'spitter', 'gremlin', 'gloop', 'grubber', 'oculon', 'lamprey'][Math.floor(Math.random() * 7)], 3 + Math.min(6, n >> 1)]];
-    const reach = Math.max(camera.right, camera.top * 1.5) + 5, hell = PHASES[PH.i].key === 'hell';
-    const base = Math.random() * 6.283, wp = netAnyPlayer();      // in a lobby the pack turns up next to a random player
+    const hell = PHASES[PH.i].key === 'hell';
+    const wp = netAnyPlayer(), groups = plan.length, base = Math.random() * 6.283;      // in a lobby the pack turns up around a random player
     let made = 0;
     plan.forEach(([kind, count], gi) => {
-      const ang = base + gi * (2.2 + Math.random());
+      const ang = base + gi * 6.283 / Math.max(2, groups) + (Math.random() - 0.5) * 0.8;      // groups come from different sides of the screen
       count = Math.round(count * waveMul());            // the phase sets the pressure
       for (let i = 0; i < count && swarm.length < SW_CAP; i++) { made++;
-        let x = 0, z = 0, ok = false;
-        for (let tries = 0; tries < 8 && !ok; tries++) {
-          const a = ang + (Math.random() - 0.5) * 0.9 + tries * 0.7, d = reach + Math.random() * 6;
-          x = wp.x + Math.sin(a) * d; z = wp.z + Math.cos(a) * d;
-          ok = Math.abs(x) < ARENA - 3 && Math.abs(z) < ARENA - 3;
-        }
-        if (!ok) { x = THREE.MathUtils.clamp(x, -ARENA + 3, ARENA - 3); z = THREE.MathUtils.clamp(z, -ARENA + 3, ARENA - 3); }
+        const [x, z] = offscreenSpot(wp, ang + (Math.random() - 0.5) * 0.9, 3 + Math.random() * 5);
         spawnCritter(kind, x, z);
       }
     });
-    const mx = wp.x + Math.sin(base) * (reach + 3), mz = wp.z + Math.cos(base) * (reach + 3);
+    const [mx, mz] = offscreenSpot(wp, base + 3.14, 6);
     if (hell) { const per = Math.ceil(hellTotal() / 3); if (PH.hellN < hellTotal()) { const k = Math.min(per, hellTotal() - PH.hellN); const before = swarm.length; spawnMinis(k, mx, mz); for (let i = before; i < swarm.length; i++) if (swarm[i].mini) swarm[i].hell = true; PH.hellN += k; } }
     else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
     waves.since = 0; waves.t = 35; waves.pending = true; waves.size = made; PH.wv++;
