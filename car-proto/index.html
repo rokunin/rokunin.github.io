@@ -2745,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 87, buildEl = document.getElementById('build');
+  const BUILD = 88, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -3261,7 +3261,17 @@ laugh(r) {                                       // a big man's belly laugh: bre
       d = 0;
     }
     const vn = car.vel.x * nx + car.vel.z * nz;
-    if ((o.pillar || o.rock) && -vn > PILLAR_RAM) {              // влетели в столб — он разлетается на куски
+    if (o.rock) {                                     // a chubzik nest never breaks: the ride bounces off it softly, the cart still feels the knock
+      const push = car.radius - d; car.pos.x += nx * push; car.pos.z += nz * push;
+      if (vn < 0) {
+        if (-vn > PILLAR_RAM) { cartKick(4); cartSpill(1); SFX.play('land', car.pos, { vol: 0.5, rate: 0.8 }); }
+        car.vel.x -= nx * vn * 1.6; car.vel.z -= nz * vn * 1.6;          // ~60% of the push comes back as a bounce
+        const into = -(Math.sin(car.heading) * nx + Math.cos(car.heading) * nz) * Math.sign(car.speed || 1);      // head-on: the ride rolls back, glancing: it slides along
+        car.speed -= car.speed * Math.max(0, into) * 1.45; shake = Math.max(shake, Math.min(0.25, -vn * 0.012));
+      }
+      return;
+    }
+    if (o.pillar && -vn > PILLAR_RAM) {              // влетели в столб — он разлетается на куски
       smashPillar(o, car.vel); cartKick(4); cartSpill(1);
       car.speed *= 0.8; car.vel.multiplyScalar(0.85);
       return;
@@ -3294,7 +3304,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const chunkGeos = [new THREE.TetrahedronGeometry(1, 0), new THREE.BoxGeometry(1.3, 1, 1.1), new THREE.DodecahedronGeometry(0.9, 0)];
   let pillarsSmashed = 0;
   function smashPillar(o, vel) {
-    if (!o.mesh.visible) return;
+    if (!o.mesh.visible || o.rock) return;              // nests are unbreakable
     o.mesh.visible = false; pillarsSmashed++;
     if (!NET.applying) netEv({ t: 'smash', i: obstacles.indexOf(o), vx: r1(vel.x), vz: r1(vel.z) });
     if (o.rock) rockSmashed(o);
@@ -6640,7 +6650,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 14;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 15;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
