@@ -17,6 +17,14 @@
   #tasks .tk.done { opacity: .55; text-decoration: line-through; } #tasks .tk.done i { color: #9cf59a; }
   #tasks .tk em { font-style: normal; color: #ffb347; margin-left: auto; padding-left: 10px; }
   #net { color: #9cf59a; display: block; font-size: 11px; margin-top: 4px; text-shadow: 0 1px 2px #000; }
+  #phcard { position: fixed; left: 50%; top: 8%; transform: translateX(-50%) scale(.9); text-align: center; pointer-events: none; opacity: 0; z-index: 7;
+             transition: opacity .35s, transform .35s; color: #f6e2be; text-shadow: 0 3px 0 #000, 0 0 18px rgba(0,0,0,.6); white-space: nowrap; }
+  #phcard.on { opacity: 1; transform: translateX(-50%) scale(1); }
+  #phcard .pn { font: 800 14px system-ui, sans-serif; letter-spacing: .3em; color: #ffb347; }
+  #phcard .nm { font: 900 clamp(26px, 4.3vw, 54px)/1.05 system-ui, sans-serif; letter-spacing: .02em; color: #ff8a3a; -webkit-text-stroke: 2px #1b1421; }
+  #phcard .ds { font: 600 17px system-ui, sans-serif; margin-top: 6px; }
+  #phcard .cd { font: 800 22px system-ui, sans-serif; margin-top: 10px; color: #9cf59a; }
+  body.touch #phcard .nm { font-size: 32px; } body.touch #phcard .ds { font-size: 12px; } body.touch #phcard .cd { font-size: 15px; }
   #minimap { position: fixed; right: 14px; bottom: 14px; width: 200px; height: 200px; pointer-events: none; z-index: 4; }
   body.touch #minimap { right: 8px; top: 50px; bottom: auto; width: 116px; height: 116px; }
   body.touch #tasks { min-width: 0; padding: 5px 8px; font-size: 10px; } body.touch #tasks .ph { font-size: 11px; } body.touch #tasks .sub { display: none; }
@@ -54,7 +62,7 @@
   .hint b { position: absolute; inset: 4px; border-radius: 50%; background: rgba(20,22,26,.8); border: 2px solid var(--c); color: var(--c);
             font: 700 12px/32px system-ui, sans-serif; text-align: center; white-space: nowrap; }
   .hint u { position: absolute; top: 46px; text-decoration: none; white-space: nowrap; padding: 1px 7px; border-radius: 6px; background: rgba(20,22,26,.8); color: var(--c); font: 700 11px/16px system-ui, sans-serif; letter-spacing: .03em; text-transform: uppercase; }
-  #alert { position: fixed; left: 50%; top: 32%; transform: translateX(-50%); pointer-events: none; opacity: 0;
+  #alert { position: fixed; left: 50%; top: 37%; transform: translateX(-50%); pointer-events: none; opacity: 0;
            color: #ffb347; font: 800 34px/1 system-ui, sans-serif; text-shadow: 0 3px 0 #000; transition: opacity .3s; }
   #bossbar { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); width: 420px; display: none; pointer-events: none;
              text-align: center; color: #ff8fc8; font: 800 15px/1 system-ui, sans-serif; letter-spacing: 3px; text-shadow: 0 2px 0 #000; }
@@ -177,6 +185,7 @@
   </div>
 </div>
 <canvas id="minimap"></canvas>
+<div id="phcard"><div class="pn"></div><div class="nm"></div><div class="ds"></div><div class="cd"></div></div>
 <div id="abilities"></div>
 <div id="weapons"></div>
 <div id="toast"></div>
@@ -2736,7 +2745,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 86, buildEl = document.getElementById('build');
+  const BUILD = 87, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4969,16 +4978,18 @@ const MONSTERS = [
     [['spike', 6], ['jelly', 4]],
     [['grubber', 2], ['lamprey', 4], ['maw', 6]],
   ];
-  const waves = { n: 0, t: 16, since: 0, lastKill: new THREE.Vector3(), pending: false, alive: 0 };
+  const waves = { n: 0, t: 16, since: 0, lastKill: new THREE.Vector3(), pending: false, alive: 0, size: 0, gap: 0 };
   function spawnWave() {
     const n = waves.n++, plan = n < WAVE_PLANS.length ? WAVE_PLANS[n]
       : [[['gremlin', 'stilt', 'flapper', 'spitter', 'maw', 'jelly', 'wingmaw', 'spike'][Math.floor(Math.random() * 8)], 10 + Math.min(14, n * 2)],
          [['brute', 'spitter', 'gremlin', 'gloop', 'grubber', 'oculon', 'lamprey'][Math.floor(Math.random() * 7)], 3 + Math.min(6, n >> 1)]];
-    const reach = Math.max(camera.right, camera.top * 1.5) + 5;
+    const reach = Math.max(camera.right, camera.top * 1.5) + 5, hell = PHASES[PH.i].key === 'hell';
     const base = Math.random() * 6.283, wp = netAnyPlayer();      // in a lobby the pack turns up next to a random player
+    let made = 0;
     plan.forEach(([kind, count], gi) => {
       const ang = base + gi * (2.2 + Math.random());
-      for (let i = 0; i < count && swarm.length < SW_CAP; i++) {
+      if (hell) count *= 2;                              // hell: twice the pack
+      for (let i = 0; i < count && swarm.length < SW_CAP; i++) { made++;
         let x = 0, z = 0, ok = false;
         for (let tries = 0; tries < 8 && !ok; tries++) {
           const a = ang + (Math.random() - 0.5) * 0.9 + tries * 0.7, d = reach + Math.random() * 6;
@@ -4989,8 +5000,10 @@ const MONSTERS = [
         spawnCritter(kind, x, z);
       }
     });
-    spawnMinis(1, wp.x + Math.sin(base) * (reach + 3), wp.z + Math.cos(base) * (reach + 3));      // every wave brings one mini-boss
-    waves.since = 0; waves.t = 35; waves.pending = true;
+    const mx = wp.x + Math.sin(base) * (reach + 3), mz = wp.z + Math.cos(base) * (reach + 3);
+    if (hell) { const per = Math.ceil(hellTotal() / 3); if (PH.hellN < hellTotal()) { const k = Math.min(per, hellTotal() - PH.hellN); const before = swarm.length; spawnMinis(k, mx, mz); for (let i = before; i < swarm.length; i++) if (swarm[i].mini) swarm[i].hell = true; PH.hellN += k; } }
+    else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
+    waves.since = 0; waves.t = 35; waves.pending = true; waves.size = made; PH.wv++;
     flashAlert('WAVE ' + (n + 1)); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: 'WAVE ' + (n + 1) });
   }
 
@@ -5002,12 +5015,11 @@ const MONSTERS = [
     for (const m of swarm) if (!m.dead) { if (!m.home) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
     if (!car.alive || threatNear(45)) crew.calm = 0; else if ((crew.calm += dt) > 24) { crew.calm = 0; crewSay('idle'); }
-    if (!calm && !NET.client) {
-      waves.t -= dt; waves.since += dt;
-      if (waves.t <= 0 || (alive <= 2 && waves.since > 10 && waves.n > 0)) spawnWave();
-    }
-    if (!NET.client && waves.pending && alive === 0 && waves.since > 1) {     // wave cleared: pay out a weapon chip
-      waves.pending = false; dropWeapon(waves.lastKill);
+    if (!NET.client && !startEl.isConnected) {          // the phase decides whether waves come at all; a wave is cleared once ~80% of it is down
+      const P = PHASES[PH.i], thr = Math.max(2, Math.ceil(waves.size * 0.2));
+      waves.since += dt; waves.gap -= dt;
+      if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 4; dropWeapon(waves.lastKill); }
+      if (!calm && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || waves.since >= 35)) spawnWave();
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
@@ -5339,10 +5351,7 @@ const MONSTERS = [
   let altarsDone = 0, gateOpen = false, gateSpawned = false;
   function openGate() { if (gateOpen) return; gateOpen = true; flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
   function gateTick() {                                 // host: all three altars fed -> nine mini-bosses at the gate; it opens when they are dead
-    if (NET.client || altarsDone < 3 || gateOpen) return;
-    if (!gateSpawned) { gateSpawned = true; spawnMinis(9, ROOM_X1 - 14, 0, true); return; }
-    for (const m of swarm) if (!m.dead && m.gate) return;
-    openGate(); netEv({ t: 'gate' });
+    return;                                            // the phases open the gate now (after the loot run)
   }
   const altNEl = document.getElementById('altN');
   {
@@ -5452,8 +5461,7 @@ const MONSTERS = [
       A.beam.material.color.setHex(0xffc24a); A.beam.material.opacity = 0.45; A.fill.material.color.setHex(0xffc24a);
       tmp.set(A.x, 2, A.z); flash(tmp, 0xffd27a, 30, 0.6, 5); burst(tmp, 0xffd27a, 16, 3, 9, 0.5); shake = Math.max(shake, 0.7);
       SFX.play('boss_roar', tmp, { rate: 1.6, vol: 0.6 }); SFX.play('loot', tmp);
-      if (altarsDone >= 3) flashAlert('THE GATE GUARD AWAKENS'); else { flashAlert('ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true); }
-      if (!NET.client && altarsDone < 3) spawnMinis(3, A.x, A.z);
+      flashAlert(altarsDone >= 3 ? 'ALL ALTARS FED' : 'ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true);
     }
   }
   function altarNear(A) {                                // distance from the altar to the nearest player who is up
@@ -5478,7 +5486,7 @@ const MONSTERS = [
       const lv = A.done ? 3.2 : 0.35 + A.n / ALTAR_NEED * 1.6 + A.pulse * 2;
       A.crystal.material.color.setRGB(A.done ? lv : lv * 0.25, A.done ? lv * 0.72 : lv * 0.7, A.done ? lv * 0.25 : lv);
       A.bar.quaternion.copy(camera.quaternion); A.bar.visible = !A.done || A.pulse > 0;
-      if (A.done) { A.zone.visible = false; continue; }
+      if (A.done || PH.i < 2) { A.zone.visible = false; continue; }      // altars sleep until the chubziks hatch
       const dA = Math.hypot(car.pos.x - A.x, car.pos.z - A.z), up = car.alive && car.depth < 0.3;
       let guards = 0, close = 0;
       for (const m of swarm) if (!m.dead) { if (m.home === A) guards++; if (Math.hypot(m.pos.x - A.x, m.pos.z - A.z) < 15) close++; }
@@ -5633,6 +5641,7 @@ const MONSTERS = [
     }
   }
 
+  let resInit = false;
   function seedResidents() {                           // packs that live around some of the rocks and lay siege to them
     if (!rocks.length || NET.client) return;
     for (const R of rocks.slice().sort(() => Math.random() - 0.5).slice(0, 9)) {
@@ -5641,7 +5650,8 @@ const MONSTERS = [
     }
   }
   function updateChubs(dt) {
-    if (!chubInit && !NET.client) { chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); seedResidents(); }
+    if (!resInit && !NET.client) { resInit = true; seedResidents(); }      // the nests' guards are there from the start
+    if (!chubInit && !NET.client && PH.i >= 2) { chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); }      // the chubziks hatch with SAVE & SACRIFICE
     chubSpawnT -= dt;
     if (chubSpawnT <= 0 && !NET.client) {                             // the colony slowly refills, a resident pack too
       chubSpawnT = 3; chubTick++;
@@ -5651,7 +5661,7 @@ const MONSTERS = [
         if (gone.length) { const o = gone[Math.floor(Math.random() * gone.length)]; rockGrow(o); netEv({ t: 'rock', i: obstacles.indexOf(o) }); for (let i = 0; i < 4; i++) spawnChub(o, true); }
       }
       let loose = 0; for (const c of chubs) if (c.state !== 'cart') loose++;
-      if (rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);   // only surviving rocks breed
+      if (PH.i >= 2 && rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);   // only surviving rocks breed
       let res = 0; for (const m of swarm) if (!m.dead && m.home) res++;
       if (chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) { const R = rocks[Math.floor(Math.random() * rocks.length)]; if (Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z) > 45) { const a = Math.random() * 6.283; spawnCritter(Math.random() < 0.3 ? 'spitter' : 'gremlin', R.mesh.position.x + Math.cos(a) * (R.r + 7), R.mesh.position.z + Math.sin(a) * (R.r + 7)).home = R; } }
     }
@@ -6566,7 +6576,7 @@ const MONSTERS = [
     updateRide(dt);
     if (ride === 'unicorn') updateHorn();
     updateNet(dt);
-    updateHints(dt); updateMinimap(dt);
+    updatePhases(dt); updateHints(dt); updateMinimap(dt);
     updateDiag();
 
     hurtFlash -= dt;
@@ -6630,7 +6640,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 13;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 14;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -6708,7 +6718,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6813,6 +6823,8 @@ const MONSTERS = [
         } }
       else if (d.t === 'rock') { if (NET.client) rockGrow(obAt(d.i)); }
       else if (d.t === 'gate') { if (NET.client) openGate(); }
+      else if (d.t === 'ph') { if (NET.client && Number.isInteger(d.i) && d.i >= 0 && d.i < PHASES.length && d.i !== PH.i) phEnter(d.i, num(d.b, 0, 60)); }
+      else if (d.t === 'fd') { if (NET.client && (d.k === 'a' || d.k === 'r' || d.k === 'g') && Number.isInteger(d.i)) phFind(d.k, d.i); }
       else if (d.t === 'pk') { if (typeof d.id === 'string' && d.id.length < 40 && typeof d.ty === 'string' && ICONS[d.ty] && !pickups.some(p => p.id === d.id) && pickups.length < 40)
         spawnPickup(d.ty, new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), d.id, true); }
       else if (d.t === 'pkx') { if (typeof d.id === 'string') pickupGone(d.id); }
@@ -6874,6 +6886,13 @@ const MONSTERS = [
         (Array.isArray(d.aw) ? d.aw : []).forEach((t, k) => { const A = altars[k]; if (A && typeof t === 'number' && t >= 0) { A.awake = true; A.spawnT = num(t, 0, 99); } });
         (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
         if (NET.goPending) { NET.goPending = false; openGate(); }
+        if (Array.isArray(d.ph) && Number.isInteger(d.ph[0]) && d.ph[0] >= 0 && d.ph[0] < PHASES.length) {
+          if (d.ph[0] !== PH.i) phEnter(d.ph[0], num(d.ph[1], 0, 60)); else PH.brk = num(d.ph[1], 0, 60);
+          PH.clr = num(d.ph[2], 0, 99) | 0; PH.wv = num(d.ph[3], 0, 99) | 0; PH.hellN = num(d.ph[4], 0, 99) | 0; PH.t = num(d.ph[5], 0, 9999);
+          if (d.ph[6] === 1) PH.gate = true;
+        }
+        (Array.isArray(d.fa) ? d.fa : []).forEach((v, k) => { if (v === 1 && altars[k]) altars[k].found = true; });
+        for (const i of Array.isArray(d.fr) ? d.fr.slice(0, 64) : []) { const o = obAt(i); if (o && o.rock) o.found = true; }
       }
     } finally { NET.applying = false; }
   }
@@ -7096,6 +7115,92 @@ const MONSTERS = [
     while (hints.length <= i) { const d = document.createElement('div'); d.className = 'hint'; d.innerHTML = '<i></i><b></b><u></u>'; document.body.appendChild(d); hints.push({ d, arrow: d.firstChild, label: d.children[1], cap: d.lastChild, text: '', col: '', capT: '', side: '' }); }
     return hints[i];
   }
+  // ---- phases: the run is a chain of phases, each a few waves with its own goals and a break before the next. The host runs it ----
+  const PHASES = [
+    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: ride, smash crates, grab abilities',          waves: 2,  brk: 8 },
+    { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18 },
+    { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18 },
+    { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 4,  brk: 18 },
+    { key: 'loot',  name: 'LOOT RUN',          desc: 'Grab everything before the gate opens',                waves: 0,  brk: 0 },
+    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0 },
+  ];
+  const NEST_GOAL = 4, FIND_R = 34, LOOT_T = 40;
+  const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
+  const hellTotal = () => { let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++; return 12 + 4 * Math.min(3, o); };      // 12 for one, +4 per friend
+  const hellAlive = () => { let n = 0; for (const m of swarm) if (!m.dead && m.hell) n++; return n; };
+  const foundN = () => ({ a: altars.filter(A => A.found).length, r: rocks.filter(R => R.found).length });
+  function phDone() {
+    const k = PHASES[PH.i].key, f = foundN();
+    if (k === 'roll') return PH.clr >= 2;
+    if (k === 'scout') return PH.clr >= 3 && f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
+    if (k === 'save') return altarsDone >= 3;
+    if (k === 'hell') return PH.clr >= 4 && PH.hellN >= hellTotal() && hellAlive() === 0;
+    if (k === 'loot') return PH.t >= LOOT_T;
+    return false;
+  }
+  function phEnter(i, brk) {                           // everybody: a new phase (or the break before it) begins
+    PH.i = i; PH.brk = brk; PH.wv = 0; PH.clr = 0; PH.t = 0; PH.cardT = brk > 0 ? brk : 3.5; PH.shown = -1;
+    waves.pending = false; waves.gap = 3;
+    const k = PHASES[i].key;
+    if (k === 'loot') { PH.lootT = 0; flashAlert('LOOT RUN!'); }
+    if (k === 'boss') openGate();
+    SFX.play('wave', null, { rate: 0.8 });
+  }
+  function phAdvance() {                               // host: goals met, on to the next phase
+    if (PH.i >= PHASES.length - 1) return;
+    const i = PH.i + 1; phEnter(i, PHASES[i].brk);
+    netEv({ t: 'ph', i, b: PH.brk });
+    if (PHASES[i].key === 'boss') netEv({ t: 'gate' });
+  }
+  function phFind(kind, idx) {                         // something was spotted: mark it for everybody; the host pays out a little loot
+    const o = kind === 'a' ? altars[idx] : kind === 'r' ? obstacles[idx] : null;
+    if (kind === 'g') { if (PH.gate) return; PH.gate = true; } else { if (!o || o.found) return; o.found = true; }
+    const at = kind === 'g' ? tmp.set(ROOM_X1 - 10, 0, 0) : kind === 'a' ? tmp.set(o.x, 0, o.z) : tmp.set(o.mesh.position.x, 0, o.mesh.position.z);
+    const f = foundN();
+    flashAlert(kind === 'a' ? `ALTAR FOUND ${f.a}/${altars.length}` : kind === 'g' ? 'BOSS GATE FOUND' : `NEST FOUND ${Math.min(f.r, NEST_GOAL)}/${NEST_GOAL}`);
+    if (!NET.client && (kind !== 'r' || f.r <= NEST_GOAL)) { const p = at.clone(); p.x += 3; dropWeapon(p); if (Math.random() < 0.5) dropLoot(p.setZ(p.z + 3)); }
+    if (!NET.client) netEv({ t: 'fd', k: kind, i: idx });
+  }
+  function phScan() {                                  // anyone driving close enough discovers things (each machine checks, the host's word is final)
+    const ps = []; if (car.alive) ps.push(car.pos); if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) ps.push(R.pos);
+    const near = (x, z, r) => ps.some(p => Math.hypot(p.x - x, p.z - z) < r);
+    altars.forEach((A, i) => { if (!A.found && near(A.x, A.z, FIND_R)) phFind('a', i); });
+    for (const R of rocks) if (!R.found && R.mesh.visible && near(R.mesh.position.x, R.mesh.position.z, FIND_R - 8)) phFind('r', obstacles.indexOf(R));
+    if (!PH.gate && near(ROOM_X1, 0, 50)) phFind('g', 0);
+  }
+  const phEl = document.getElementById('phcard'), phPn = phEl.querySelector('.pn'), phNm = phEl.querySelector('.nm'), phDs = phEl.querySelector('.ds'), phCd = phEl.querySelector('.cd');
+  function updatePhases(dt) {
+    if (startEl.isConnected) return;
+    if ((PH.findT -= dt) <= 0) { PH.findT = 0.4; if (!NET.client) phScan(); }
+    if (PH.brk > 0) PH.brk = Math.max(0, PH.brk - dt); else PH.t += dt;
+    if (!NET.client) {
+      if (PH.brk <= 0 && phDone()) phAdvance();
+      if (PHASES[PH.i].key === 'loot' && PH.brk <= 0 && (PH.lootT -= dt) <= 0) {       // the loot run: chips, abilities and medkits rain around every player
+        PH.lootT = 3.5; for (const p of waveTargets()) { const a = Math.random() * 6.283, d = 6 + Math.random() * 10, at = new THREE.Vector3(p.x + Math.sin(a) * d, 0, p.z + Math.cos(a) * d);
+          const r = Math.random(); if (r < 0.5) dropWeapon(at); else if (r < 0.8) dropLoot(at); else spawnPickup('heal', at); }
+      }
+    }
+    // the card: the next phase's name during a break with a countdown, a few seconds at the start of a phase
+    PH.cardT -= dt; const on = PH.brk > 0 || PH.cardT > 0;
+    phEl.classList.toggle('on', on);
+    if (on) {
+      const P = PHASES[PH.i];
+      if (PH.shown !== PH.i) { PH.shown = PH.i; phPn.textContent = 'PHASE ' + (PH.i + 1) + ' / ' + PHASES.length; phNm.textContent = P.name; phDs.textContent = P.desc; }
+      const cd = PH.brk > 0 ? 'starts in ' + Math.ceil(PH.brk) : 'GO!'; if (phCd.textContent !== cd) phCd.textContent = cd;
+    }
+  }
+  function phTasksHtml() {
+    const tk = (txt, done, n) => `<div class="tk${done ? ' done' : ''}"><i>${done ? '✔' : '☐'}</i>${txt}${n != null && !done ? `<em>${n}</em>` : ''}</div>`;
+    const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
+    let t = '';
+    if (P.key === 'roll') t = tk('Survive 2 waves', PH.clr >= 2, PH.clr + '/2');
+    else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate) + tk('Survive 3 waves', PH.clr >= 3, PH.clr + '/3');
+    else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
+    else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive 4 waves', PH.clr >= 4, PH.clr + '/4') + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
+    else if (P.key === 'loot') t = tk('Grab the loot', false, Math.max(0, Math.ceil(LOOT_T - PH.t)) + 's');
+    else t = tk('Kill the Pyramidon', boss.state === 'dead');
+    return `<div class="ph">${PH.brk > 0 ? 'NEXT: ' : ''}${P.name}</div><div class="sub">${PH.brk > 0 ? 'break · ' + Math.ceil(PH.brk) + 's' : P.desc}</div>` + t;
+  }
   // ---- minimap (bottom right, turned to match the iso camera) and the objectives panel ----
   const mmEl = document.getElementById('minimap'), mmX = mmEl.getContext('2d'), tasksEl = document.getElementById('tasks');
   let mmT = 0, tasksHtml = '';
@@ -7118,19 +7223,16 @@ const MONSTERS = [
     poly([[ROOM_X1, -ROOM_HZ], [ROOM_X2, -ROOM_HZ], [ROOM_X2, ROOM_HZ], [ROOM_X1, ROOM_HZ]], 'rgba(60,20,30,.6)', 'rgba(255,120,120,.35)', 1.2);
     const dot = (wx, wz, r, col, ring) => { const [px, py] = f(wx, wz); x.beginPath(); x.arc(px, py, r * dpr, 0, 6.283); if (ring) { x.strokeStyle = col; x.lineWidth = 2 * dpr; x.stroke(); } else { x.fillStyle = col; x.fill(); } return [px, py]; };
     const label = (px, py, t, col, size) => { x.font = `800 ${size * dpr}px system-ui,sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 3 * dpr; x.strokeStyle = 'rgba(0,0,0,.85)'; x.strokeText(t, px, py); x.fillStyle = col; x.fillText(t, px, py); };
-    { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : gateOpen ? '☠' : '🔒', gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
-    for (const R of rocks) { if (!R.mesh.visible) continue; const n = nestCount(R), [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
-    for (const A of altars) { const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
+    if (PH.gate) { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : gateOpen ? '☠' : '🔒', gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
+    for (const R of rocks) { if (!R.mesh.visible || !R.found) continue; const n = PH.i >= 2 ? nestCount(R) : 0, [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
+    for (const A of altars) { if (!A.found) continue; const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
       if (!A.done && A.n) { x.beginPath(); x.arc(px, py, 5 * dpr, -1.571, -1.571 + 6.283 * A.n / ALTAR_NEED); x.strokeStyle = '#5fd0ff'; x.lineWidth = 2 * dpr; x.stroke(); } }
     for (const R of NET.remotes.values()) if (R.up) dot(R.pos.x, R.pos.z, 3.4, '#9cf59a');
     if (car.alive) {                                   // me: an arrow along the heading
       const [px, py] = f(car.pos.x, car.pos.z), hx = Math.sin(car.heading), hz = Math.cos(car.heading), du = (hx - hz), dv = (hx + hz), L = Math.hypot(du, dv) || 1, ux = du / L, uy = dv / L, s = 6 * dpr;
       x.beginPath(); x.moveTo(px + ux * s, py + uy * s); x.lineTo(px - ux * s * 0.7 - uy * s * 0.6, py - uy * s * 0.7 + ux * s * 0.6); x.lineTo(px - ux * s * 0.7 + uy * s * 0.6, py - uy * s * 0.7 - ux * s * 0.6); x.closePath();
       x.fillStyle = '#ffd27a'; x.fill(); x.strokeStyle = '#1b1421'; x.lineWidth = 1.5 * dpr; x.stroke(); }
-    // objectives (the phases will own this list; for now the run's goals)
-    const tk = (txt, done, n) => `<div class="tk${done ? ' done' : ''}"><i>${done ? '✔' : '☐'}</i>${txt}${n && !done ? `<em>${n}</em>` : ''}</div>`;
-    const h = `<div class="ph">THE RUN</div><div class="sub">Feed the altars, break the gate, punch the Pyramidon</div>`
-      + tk('Fill the altars', altarsDone >= 3, altarsDone + '/3') + tk('Open the boss gate', gateOpen) + tk('Kill the Pyramidon', boss.state === 'dead');
+    const h = phTasksHtml();
     if (h !== tasksHtml) { tasksHtml = h; tasksEl.innerHTML = h; }
   }
   function updateHints(dt) {
@@ -7138,12 +7240,13 @@ const MONSTERS = [
       hintT = 0.3; hintList = [];
       if (!startEl.isConnected && car.alive && !angel.on && !inRoom(car.pos.x, car.pos.z)) {
         const rk = [];
-        for (const R of rocks) { const d = Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z); if (d > 80) continue;
+        for (const R of rocks) { const d = Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z); if (d > 50) continue;
           let n = 0; for (const c of chubs) if (!c.dead && c.state !== 'cart' && Math.hypot(c.pos.x - R.mesh.position.x, c.pos.z - R.mesh.position.z) < R.r + 9) n++;
-          if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 80, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' }); }
+          if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' });
+          else if (!R.found && PH.i <= 1) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '?', cap: 'chubzik nest' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
-        altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 120) hintList.push({ x: A.x, z: A.z, d, range: 120, col: '#ff7ad8', text: A.n + '/' + ALTAR_NEED, cap: 'sacrifice!' }); });
-        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z); if (d < 150 && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: 150, col: gateOpen ? '#ffd27a' : altarsDone >= 3 ? '#ff7a4a' : '#9a8f86', text: gateOpen ? 'BOSS' : altarsDone >= 3 ? '☠' : '🔒', cap: gateOpen ? 'kill boss' : altarsDone >= 3 ? 'kill the gate guard' : 'unlock boss' }); }
+        altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
+        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
       }
     }
     if (hintT === 0.3 && !startEl.isConnected && NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up)
