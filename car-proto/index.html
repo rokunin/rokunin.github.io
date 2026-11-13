@@ -8,8 +8,18 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font-family: system-ui, sans-serif;
                touch-action: none; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   canvas { display: block; cursor: crosshair; touch-action: none; }
-  #hud { position: fixed; left: 16px; top: 14px; color: #e8e6e1; font-size: 13px; line-height: 1.6;
-         background: rgba(20,22,26,.72); padding: 10px 14px; border-radius: 8px; pointer-events: none; user-select: none; }
+  #hud { position: fixed; left: 16px; top: 14px; color: #e8e6e1; font-size: 13px; line-height: 1.5; pointer-events: none; user-select: none; }
+  #tasks { background: rgba(20,22,26,.42); padding: 8px 12px; border-radius: 8px; min-width: 190px; }
+  #tasks .ph { font-weight: 800; color: #ffd27a; letter-spacing: .04em; font-size: 14px; }
+  #tasks .sub { opacity: .7; font-size: 11px; margin-bottom: 4px; }
+  #tasks .tk { display: flex; gap: 6px; align-items: baseline; }
+  #tasks .tk i { font-style: normal; width: 14px; display: inline-block; color: #9a9590; }
+  #tasks .tk.done { opacity: .55; text-decoration: line-through; } #tasks .tk.done i { color: #9cf59a; }
+  #tasks .tk em { font-style: normal; color: #ffb347; margin-left: auto; padding-left: 10px; }
+  #net { color: #9cf59a; display: block; font-size: 11px; margin-top: 4px; text-shadow: 0 1px 2px #000; }
+  #minimap { position: fixed; right: 14px; bottom: 14px; width: 200px; height: 200px; pointer-events: none; z-index: 4; }
+  body.touch #minimap { right: 8px; top: 50px; bottom: auto; width: 116px; height: 116px; }
+  body.touch #tasks { min-width: 0; padding: 5px 8px; font-size: 10px; } body.touch #tasks .ph { font-size: 11px; } body.touch #tasks .sub { display: none; }
   #hud b { color: #ffb347; font-weight: 600; }
   #speed { position: fixed; right: 18px; bottom: 14px; color: #e8e6e1; font: 600 28px/1 ui-monospace, monospace;
            background: rgba(20,22,26,.72); padding: 10px 14px; border-radius: 8px; pointer-events: none; }
@@ -157,16 +167,16 @@
 </head>
 <body>
 <div id="hud">
-  <span class="kb"><b>W / S</b> gas / brake-reverse · <b>A / D</b> steer (spider: <b>WASD</b> runs in screen directions)<br>
-  Machine gun fires by itself · hold <b>LMB</b> to aim at the cursor<br>
-  <b>Wheel</b> zoom · <b>R</b> respawn · <b>M</b> sound<br></span>
-  <span class="tc"><b>Left stick</b> drive · auto-fire · <b>Right stick</b> manual aim<br></span>
-  <span id="net" style="color:#9cf59a;display:block"></span>
-  Crates: <span id="kills">0</span> · Biters: <span id="ekills">0</span><br>
-  <span style="color:#7fc0ff">Chubziks alive: <b id="aliveN">0</b> · in cart: <b id="cartN">0</b> · eaten: <span id="eatN">0</span></span><br>
-  <span class="kb" style="opacity:.65">Some crates are faking it. Shimmering ones drop abilities<br></span>
-  <span style="color:#ff8fc8">Altars: <b id="altN">0/5 · 0/5 · 0/5</b> <span class="kb">(blue beams)<br>Fill all three to open the boss gate, east wall. Inside an altar's ring press <b>E</b> to sacrifice</span><span class="tc">· fill all to open the east gate</span></span>
+  <div id="tasks"></div>
+  <span id="net"></span>
+  <div style="display:none">
+  <span class="kb"></span><span class="tc"></span>
+  Crates: <span id="kills">0</span> · Biters: <span id="ekills">0</span>
+  Chubziks alive: <b id="aliveN">0</b> · in cart: <b id="cartN">0</b> · eaten: <span id="eatN">0</span>
+  Altars: <b id="altN">0/5 · 0/5 · 0/5</b>
+  </div>
 </div>
+<canvas id="minimap"></canvas>
 <div id="abilities"></div>
 <div id="weapons"></div>
 <div id="toast"></div>
@@ -178,7 +188,7 @@
   <table id="diagT" style="border-collapse:collapse;width:100%;margin-bottom:6px"></table><div id="diagL" style="white-space:pre-wrap;word-break:break-word"></div></div>
 <div id="build" style="position:fixed;left:50%;top:4px;transform:translateX(-50%);font:700 12px system-ui,sans-serif;color:#ffd27a;background:rgba(20,22,26,.8);padding:2px 8px;border-radius:6px;pointer-events:none;z-index:30;white-space:nowrap"></div>
 <div id="bossbar"><div id="bossname">PYRAMIDON</div><div id="bosshp"><div id="bossfill"></div></div></div>
-<div id="speed"><span id="spd">0</span><small>km/h</small></div>
+<div id="speed" style="display:none"><span id="spd">0</span><small>km/h</small></div>
 <button id="mute" title="Volume (M mutes)">🔊</button>
 <div id="volBox"><button id="volDown" title="Quieter">−</button><input id="vol" type="range" min="0" max="100" step="5"><button id="volUp" title="Louder">+</button></div>
 <button id="restart" title="Restart: back to the comic and ride choice">⟲</button>
@@ -2726,7 +2736,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 85, buildEl = document.getElementById('build');
+  const BUILD = 86, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -6556,7 +6566,7 @@ const MONSTERS = [
     updateRide(dt);
     if (ride === 'unicorn') updateHorn();
     updateNet(dt);
-    updateHints(dt);
+    updateHints(dt); updateMinimap(dt);
     updateDiag();
 
     hurtFlash -= dt;
@@ -7086,6 +7096,43 @@ const MONSTERS = [
     while (hints.length <= i) { const d = document.createElement('div'); d.className = 'hint'; d.innerHTML = '<i></i><b></b><u></u>'; document.body.appendChild(d); hints.push({ d, arrow: d.firstChild, label: d.children[1], cap: d.lastChild, text: '', col: '', capT: '', side: '' }); }
     return hints[i];
   }
+  // ---- minimap (bottom right, turned to match the iso camera) and the objectives panel ----
+  const mmEl = document.getElementById('minimap'), mmX = mmEl.getContext('2d'), tasksEl = document.getElementById('tasks');
+  let mmT = 0, tasksHtml = '';
+  const MM_PTS = [[-ARENA, -ARENA], [ARENA, -ARENA], [ARENA, ARENA], [-ARENA, ARENA], [ROOM_X2, -ROOM_HZ], [ROOM_X2, ROOM_HZ]];
+  function mmFit() {                                   // world (x, z) -> map pixels: screen right is (1,0,-1), screen down is (1,0,1)
+    const W = mmEl.clientWidth, dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (mmEl.width !== Math.round(W * dpr)) { mmEl.width = mmEl.height = Math.round(W * dpr); }
+    let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const [x, z] of MM_PTS) { const u = x - z, v = x + z; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+    const S = mmEl.width, k = (S - 10 * dpr) / Math.max(u1 - u0, v1 - v0), cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+    return { S, dpr, k, f: (x, z) => [S / 2 + ((x - z) - cu) * k, S / 2 + ((x + z) - cv) * k] };
+  }
+  function nestCount(R) { let n = 0; for (const c of chubs) if (!c.dead && c.state !== 'cart' && Math.hypot(c.pos.x - R.mesh.position.x, c.pos.z - R.mesh.position.z) < R.r + 9) n++; return n; }
+  function updateMinimap(dt) {
+    if ((mmT -= dt) > 0) return; mmT = 0.12;
+    const show = !startEl.isConnected; mmEl.style.display = show ? 'block' : 'none'; if (!show) return;
+    const { S, dpr, k, f } = mmFit(), x = mmX; x.clearRect(0, 0, S, S); x.lineJoin = 'round';
+    const poly = (pts, fill, stroke, lw) => { x.beginPath(); pts.forEach(([a, b], i) => { const [px, py] = f(a, b); i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.closePath(); if (fill) { x.fillStyle = fill; x.fill(); } if (stroke) { x.strokeStyle = stroke; x.lineWidth = lw * dpr; x.stroke(); } };
+    poly(MM_PTS.slice(0, 4), 'rgba(20,22,26,.55)', 'rgba(255,255,255,.35)', 1.5);
+    poly([[ROOM_X1, -ROOM_HZ], [ROOM_X2, -ROOM_HZ], [ROOM_X2, ROOM_HZ], [ROOM_X1, ROOM_HZ]], 'rgba(60,20,30,.6)', 'rgba(255,120,120,.35)', 1.2);
+    const dot = (wx, wz, r, col, ring) => { const [px, py] = f(wx, wz); x.beginPath(); x.arc(px, py, r * dpr, 0, 6.283); if (ring) { x.strokeStyle = col; x.lineWidth = 2 * dpr; x.stroke(); } else { x.fillStyle = col; x.fill(); } return [px, py]; };
+    const label = (px, py, t, col, size) => { x.font = `800 ${size * dpr}px system-ui,sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 3 * dpr; x.strokeStyle = 'rgba(0,0,0,.85)'; x.strokeText(t, px, py); x.fillStyle = col; x.fillText(t, px, py); };
+    { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : gateOpen ? '☠' : '🔒', gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
+    for (const R of rocks) { if (!R.mesh.visible) continue; const n = nestCount(R), [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
+    for (const A of altars) { const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
+      if (!A.done && A.n) { x.beginPath(); x.arc(px, py, 5 * dpr, -1.571, -1.571 + 6.283 * A.n / ALTAR_NEED); x.strokeStyle = '#5fd0ff'; x.lineWidth = 2 * dpr; x.stroke(); } }
+    for (const R of NET.remotes.values()) if (R.up) dot(R.pos.x, R.pos.z, 3.4, '#9cf59a');
+    if (car.alive) {                                   // me: an arrow along the heading
+      const [px, py] = f(car.pos.x, car.pos.z), hx = Math.sin(car.heading), hz = Math.cos(car.heading), du = (hx - hz), dv = (hx + hz), L = Math.hypot(du, dv) || 1, ux = du / L, uy = dv / L, s = 6 * dpr;
+      x.beginPath(); x.moveTo(px + ux * s, py + uy * s); x.lineTo(px - ux * s * 0.7 - uy * s * 0.6, py - uy * s * 0.7 + ux * s * 0.6); x.lineTo(px - ux * s * 0.7 + uy * s * 0.6, py - uy * s * 0.7 - ux * s * 0.6); x.closePath();
+      x.fillStyle = '#ffd27a'; x.fill(); x.strokeStyle = '#1b1421'; x.lineWidth = 1.5 * dpr; x.stroke(); }
+    // objectives (the phases will own this list; for now the run's goals)
+    const tk = (txt, done, n) => `<div class="tk${done ? ' done' : ''}"><i>${done ? '✔' : '☐'}</i>${txt}${n && !done ? `<em>${n}</em>` : ''}</div>`;
+    const h = `<div class="ph">THE RUN</div><div class="sub">Feed the altars, break the gate, punch the Pyramidon</div>`
+      + tk('Fill the altars', altarsDone >= 3, altarsDone + '/3') + tk('Open the boss gate', gateOpen) + tk('Kill the Pyramidon', boss.state === 'dead');
+    if (h !== tasksHtml) { tasksHtml = h; tasksEl.innerHTML = h; }
+  }
   function updateHints(dt) {
     if ((hintT -= dt) <= 0) {                           // what is worth pointing at: refreshed a few times a second
       hintT = 0.3; hintList = [];
@@ -7103,13 +7150,14 @@ const MONSTERS = [
       hintList.push({ x: R.pos.x, z: R.pos.z, d: 0, range: 1, col: '#8dff9a', text: '☺', cap: R.labelText || 'friend', live: R });
     for (const h of hintList) if (h.live) { h.x = h.live.pos.x; h.z = h.live.pos.z; }
     const W = innerWidth, H = innerHeight, x0 = 40, x1 = W - 40, y0 = 84, y1 = H - 100, cx = W / 2, cy = (y0 + y1) / 2;      // clear of the buttons on top and the bars below
-    let i = 0; const placed = [];
+    let i = 0; const placed = [], mmR = mmEl.style.display !== 'none' ? mmEl.getBoundingClientRect() : null;
     for (const h of hintList) {
       hintV.set(h.x, 1, h.z).project(camera);
       const e = hintEl(i++), on = Math.abs(hintV.x) < 0.95 && Math.abs(hintV.y) < 0.95;
       const dx = hintV.x * W / 2 + W / 2 - cx, dy = -hintV.y * H / 2 + H / 2 - cy;
       const k = Math.max(dx > 0 ? dx / (x1 - cx) : dx / (x0 - cx), dy > 0 ? dy / (y1 - cy) : dy / (y0 - cy), 1), px = cx + dx / k, py = cy + dy / k;
       let qx = px, qy = py; if (!on) { for (let g = 0; g < 4 && placed.some(q => Math.abs(q[0] - qx) < 120 && Math.abs(q[1] - qy) < 62); g++) { if (qx <= x0 + 1 || qx >= x1 - 1) qy += qy > cy ? -64 : 64; else qx += qx > cx ? -124 : 124; } placed.push([qx, qy]); }      // two pointers in one spot: slide the second along the edge
+      if (!on && mmR && qx > mmR.left - 70 && qy > mmR.top - 60 && qx < mmR.right + 40 && qy < mmR.bottom + 40) { if (qx >= x1 - 1) qy = mmR.top - 60; else qx = mmR.left - 70; }   // never under the minimap
       e.d.style.opacity = on ? 0 : Math.min(1, (1 - h.d / h.range) * 4 + 0.25);
       e.d.style.transform = `translate(${qx.toFixed(0)}px,${qy.toFixed(0)}px)`;
       e.arrow.style.transform = `rotate(${Math.atan2(dx, -dy).toFixed(2)}rad)`;
