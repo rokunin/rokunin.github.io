@@ -21,13 +21,13 @@
   #tasks .tk { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 30px 0 9px; margin: 2px 0; color: #2a2118; font: 700 20px/1 'Caveat', system-ui, sans-serif;
                border-image: var(--i-arrow) 0 70 0 30 fill / 0 24px 0 10px stretch; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
   #tasks .tk:nth-child(odd) { transform: rotate(.6deg); } #tasks .tk:nth-child(even) { transform: rotate(-.5deg); }
-  #tasks .tk i { flex: none; position: relative; width: 22px; height: 22px; background: var(--i-box) center/contain no-repeat; }
-  #tasks .tk.done i::after { content: ''; position: absolute; left: -2px; top: -6px; width: 28px; height: 28px; background: var(--i-tick) center/contain no-repeat; }
+  #tasks .tk i { flex: none; position: relative; width: 15px; height: 15px; margin: 0 2px; border: 2.5px solid #3a2c1f; border-radius: 3px 5px 3px 4px; transform: rotate(-4deg); }
+  #tasks .tk.done i::after { content: ''; position: absolute; left: -5px; top: -11px; width: 28px; height: 28px; background: var(--i-tick) center/contain no-repeat; }
   #tasks .tk span { position: relative; white-space: nowrap; }
-  #tasks .tk.done span::after { content: ''; position: absolute; left: -4px; right: -4px; top: 46%; height: 11px; background: var(--i-strike) center/100% 100% no-repeat; }
-  #tasks .tk.done { color: #6d5f4e; }
+  #tasks .tk.done span::after { content: ''; position: absolute; left: -3px; right: -3px; top: 50%; height: 6px; margin-top: -2px; background: var(--i-strike) center/100% 100% no-repeat; opacity: .8; }
+  #tasks .tk.done { color: #5a4a3a; }
   #tasks .tk.just i::after { animation: tickIn .35s cubic-bezier(.2,1.6,.4,1) both; } #tasks .tk.just span::after { animation: strikeIn .4s .15s ease-out both; }
-  #tasks .tk em { font: 900 17px 'Londrina', system-ui, sans-serif; font-style: normal; color: #d9601a; margin-left: auto; padding-left: 10px; }
+  #tasks .tk em { font: 700 22px/1 'Caveat', system-ui, sans-serif; font-style: normal; color: #d0561a; margin-left: auto; padding-left: 10px; }
   @keyframes tickIn { from { transform: scale(2.2) rotate(-25deg); opacity: 0; } }
   @keyframes strikeIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
   #phcard { position: fixed; left: 50%; top: 7%; --k: 1; transform: translateX(-50%) scale(var(--k)); transform-origin: top center; pointer-events: none; opacity: 0; z-index: 7;
@@ -35,13 +35,13 @@
   #phcard.on { opacity: 1; }
   #phcard .bn { position: relative; height: 128px; min-width: 300px; padding: 0 74px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center;
                 border-image: var(--i-banner) 0 110 0 110 fill / 0 49px 0 49px stretch; filter: drop-shadow(0 6px 6px rgba(0,0,0,.45)); }
-  #phcard .pn { font: 900 15px 'Londrina', system-ui, sans-serif; letter-spacing: .28em; color: #f6ead2; margin: 4px 0 -2px; opacity: .9; }
+  #phcard .pn { font: 700 21px/1 'Caveat', system-ui, sans-serif; letter-spacing: .12em; color: #f6ead2; margin: 2px 0 0; opacity: .92; }
   #phcard .nm { font: 900 58px/1 'Londrina', system-ui, sans-serif; letter-spacing: .03em; color: #f28b3a;
                 text-shadow: 3px 0 0 #f6ead2, -3px 0 0 #f6ead2, 0 3px 0 #f6ead2, 0 -3px 0 #f6ead2, 2px 2px 0 #f6ead2, -2px 2px 0 #f6ead2, 2px -2px 0 #f6ead2, -2px -2px 0 #f6ead2, 0 6px 0 #1a120c; }
   #phcard .ds { position: relative; margin-top: -16px; height: 40px; line-height: 40px; padding: 0 40px 0 18px; color: #2a2118; font: 700 24px 'Caveat', system-ui, sans-serif;
                 border-image: var(--i-label) 0 60 0 30 fill / 0 30px 0 15px stretch; transform: translateX(26px) rotate(-1.2deg); filter: drop-shadow(0 3px 3px rgba(0,0,0,.4)); }
   #phcard .ds::after { content: ''; position: absolute; right: -40px; top: -22px; width: 58px; height: 62px; background: var(--i-chub) center/contain no-repeat; transform: rotate(14deg); }
-  #phcard .cd { margin-top: 8px; height: 46px; line-height: 48px; padding: 0 30px 0 20px; font: 900 22px 'Londrina', system-ui, sans-serif; letter-spacing: .04em; color: #f6ead2; text-shadow: 0 2px 0 #3a1a08;
+  #phcard .cd { margin-top: 8px; height: 46px; line-height: 46px; padding: 0 30px 0 20px; font: 700 27px 'Caveat', system-ui, sans-serif; letter-spacing: .02em; color: #f6ead2; text-shadow: 0 2px 0 #3a1a08;
                 border-image: var(--i-tago) 0 60 0 40 fill / 0 19px 0 13px stretch; transform: translateX(-60px) rotate(3deg); filter: drop-shadow(0 3px 3px rgba(0,0,0,.4)); }
   #phcard .cd.go { border-image-source: var(--i-tagr); }
   #phcard.slap .bn { animation: slap .5s cubic-bezier(.2,1.4,.4,1) both; } #phcard.slap .ds { animation: slap .45s .14s cubic-bezier(.2,1.5,.4,1) both; }
@@ -2768,7 +2768,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 93, buildEl = document.getElementById('build');
+  const BUILD = 94, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
