@@ -61,11 +61,12 @@
   #dead { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none;
           color: #ff5a5a; font: 800 44px/1 system-ui, sans-serif; text-shadow: 0 3px 0 #000; letter-spacing: 1px; }
   #abilities { position: fixed; left: 16px; bottom: 14px; display: flex; gap: 8px; pointer-events: none; }
-  #weapons { position: fixed; left: 16px; bottom: 90px; display: flex; gap: 6px; pointer-events: none; }
-  .wslot { width: 40px; text-align: center; background: rgba(20,22,26,.72); border-radius: 8px; padding: 4px 3px 3px; animation: pop .5s ease-out; }
+  #weapons { position: fixed; z-index: 4; left: 16px; bottom: 132px; display: flex; gap: 6px; pointer-events: none; }
+  .wslot { width: 40px; text-align: center; background: rgba(20,22,26,.72); border-radius: 8px; padding: 4px 3px 3px; } .wslot.new { animation: pop .5s ease-out; }
   .wslot img { width: 34px; height: 34px; display: block; margin: 0 auto 2px; border-radius: 7px; }
   .wslot b { color: #ffd27a; font: 800 10px/1 system-ui, sans-serif; }
-  body.touch #weapons { left: 8px; top: 74px; bottom: auto; }
+  .wslot { position: relative; } .wslot .up { display: none; } .wslot.can .up { display: block; top: -30px; width: 24px; height: 24px; margin-left: -12px; font-size: 21px; line-height: 23px; }
+  body.touch #weapons { left: 10px; top: auto; bottom: 168px; }
   body.touch .wslot { width: 32px; padding: 3px 2px 2px; }
   body.touch .wslot img { width: 28px; height: 28px; }
   .ab { width: 56px; text-align: center; color: #e8e6e1; font: 600 11px/1.2 system-ui, sans-serif;
@@ -73,9 +74,9 @@
   .ab img { width: 44px; height: 44px; display: block; margin: 0 auto 3px; border-radius: 8px; }
   .ab.locked { opacity: .28; filter: grayscale(1); }
   .ab { position: relative; }
-  .ab .up { display: none; position: absolute; left: 50%; top: -34px; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; pointer-events: auto; cursor: pointer;
+  .ab .up, .wslot .up { position: absolute; left: 50%; top: -34px; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; pointer-events: auto; cursor: pointer;
             background: #e8b417; color: #2a1d05; font: 900 24px/27px 'Londrina', system-ui, sans-serif; border: 2px solid #fff6dc; box-shadow: 0 2px 0 #6a4a04, 0 0 10px rgba(255,210,80,.7); animation: upPulse 1s ease-in-out infinite; }
-  .ab.can .up { display: block; }
+  .ab .up { display: none; } .ab.can .up { display: block; }
   @keyframes upPulse { 50% { transform: translateY(-3px) scale(1.08); } }
   .ab .lv { position: absolute; right: 2px; top: 1px; color: #ffd23a; font: 900 11px/1 system-ui, sans-serif; text-shadow: 0 1px 0 #000; font-style: normal; }
   .ab .cdv { position: absolute; left: 6px; right: 6px; top: 5px; height: calc(var(--cd, 0) * 44px); background: rgba(10,10,14,.65); border-radius: 0 0 8px 8px; pointer-events: none; }
@@ -2779,7 +2780,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 96, buildEl = document.getElementById('build');
+  const BUILD = 97, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -3271,7 +3272,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (e.carried) { releaseIfHeld(e); e.carried = false; }
       e.dead = true; e.root.visible = false;
       enemyDieFx(e);
-      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); }
+      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); }
       if (e.elite) { dropLoot(e.pos); shake = Math.max(shake, 0.5); }
       enemyQueue.push({ e, t: e.elite ? 8 : 5 });
     }
@@ -3433,7 +3434,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       o.mesh.visible = false;
       spawnParticles(o.mesh.position, 0xd2873c, 16, 9); SFX.play('crate_break', o.mesh.position);
       flash(o.mesh.position, 0xffb060, 4.5, 0.18, 1.6, false); burst(o.mesh.position, 0xa08a6a, 5, 1.6, 3.5, 0.35);
-      kills++; killsEl.textContent = kills; crateDrop(o);
+      kills++; killsEl.textContent = kills; crateDrop(o); if (!NET.applying) myKill(o.mesh.position.x, o.mesh.position.z, 3);
       respawnQueue.push({ o, t: 4 });
       if (!o.room) netEv({ t: 'crate', i: obstacles.indexOf(o) });
     }
@@ -4163,6 +4164,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const L = abLv.bomb, bk = abilities.bomb ? Math.max(0, bombCd) / BOMB.cd[L] : 0;
     const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + upPts + '|' + bk.toFixed(2);
     if (sig === abSig) return; abSig = sig;
+    if (wUpSeen !== upPts) { wUpSeen = upPts; updateWeaponHUD(); }      // weapons take upgrades too
     for (const t of kit()) {
       const el = document.getElementById('ab-' + t); if (!el) continue;
       if (abilities[t] && el.classList.contains('locked')) { el.classList.remove('locked'); el.classList.add('fresh'); }
@@ -4192,13 +4194,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function dropLoot(at) {                                  // elites, finds, the boss, the loot run: an upgrade or a medkit
     spawnPickup((NET.on && NET.game) || upGot < UP_MAX ? (Math.random() < 0.6 ? 'upgrade' : 'heal') : 'heal', at);
   }
-  let kitT = 4;
-  function updateKit(dt) {                                 // your ride's skills arrive one by one, just for you, a little ahead of the ride
-    if (startEl.isConnected || !car.alive || PH.brk > 0 && PH.i === 0) return;
-    const miss = kit().filter(t => !abilities[t]); if (!miss.length || pickups.some(p => p.own)) return;
-    if ((kitT -= dt) > 0) return; kitT = 9;
-    const d = 9, x = THREE.MathUtils.clamp(car.pos.x + Math.sin(car.heading) * d, -ARENA + 4, ARENA - 4), z = THREE.MathUtils.clamp(car.pos.z + Math.cos(car.heading) * d, -ARENA + 4, ARENA - 4);
-    spawnPickup(miss[0], tmp.set(x, 0, z), undefined, true); pickups[pickups.length - 1].own = true;
+  let kitProg = 0, kitNeed = 3;
+  function myKill(x, z, w) {                               // something I killed or smashed: every few of them, my next missing skill drops right there (just for me)
+    if (startEl.isConnected || kitDone()) return;
+    kitProg += w; if (kitProg < kitNeed || pickups.some(p => p.own)) return;
+    kitProg = 0; kitNeed = 7;
+    const miss = kit().filter(t => !abilities[t]);
+    spawnPickup(miss[0], tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
   function spawnPickup(type, at, id, remote) {
@@ -4273,10 +4275,15 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   // HUD: owned weapons with their level
   const wBar = document.getElementById('weapons');
-  function updateWeaponHUD() {
+  function updateWeaponHUD(fresh) {                      // fresh: the weapon that just changed pops
     wBar.innerHTML = W_ORDER.filter(k => weapons[k]).map(k =>
-      `<div class="wslot"><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + weapons[k]}</b></div>`).join('');
+      `<div class="wslot${k === fresh ? ' new' : ''}${upPts > 0 && weapons[k] < W_MAX ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + weapons[k]}</b></div>`).join('');
   }
+  { const spendW = e => { const u = e.target.closest && e.target.closest('.up'); if (!u) return; e.preventDefault(); e.stopPropagation();
+      const k = u.dataset.k; if (upPts <= 0 || !weapons[k] || weapons[k] >= W_MAX) return; upPts--; const lv = gainWeapon('w_' + k);
+      toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + lv); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
+    wBar.addEventListener('mousedown', spendW); wBar.addEventListener('touchstart', spendW, { passive: false }); }
+  let wUpSeen = -1;
   function dropWeapon(at) {
     const onGround = pickups.filter(p => p.type.startsWith('w_') && Math.hypot(p.x - at.x, p.z - at.z) < 45).length;      // only chips lying around here count, not the whole map's
     if (onGround >= 3) return;
@@ -4293,7 +4300,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
   function gainWeapon(type) {
     const k = type.slice(2); weapons[k] = Math.min(W_MAX, weapons[k] + 1);
-    updateWeaponHUD(); crewSay('weapon');
+    updateWeaponHUD(k); crewSay('weapon');
     if (k === 'orbit') buildSaws();
     return weapons[k];
   }
@@ -5064,7 +5071,7 @@ const MONSTERS = [
     spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7);
     flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false);
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
-    if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
+    if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
     waves.lastKill.copy(m.pos);
     if (m.mini && !NET.client) { dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
     if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
@@ -6800,7 +6807,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt); updateKit(dt); updateDomes(dt); updateAbHud();
+    updatePickups(dt); updateDomes(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -7025,7 +7032,7 @@ const MONSTERS = [
           const p = tmp.set(m.pos.x, (m.K.fly || 0) + m.K.size * 0.4, m.pos.z);
           spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7); flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false); SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
         }
-        if (elapsed - (m.myHit || -9) < 1.2) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); }
+        if (elapsed - (m.myHit || -9) < 1.2) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
       }
     } else if (!angel.on) {
       const M = NET.chMir || (NET.chMir = new Map());
@@ -7079,7 +7086,7 @@ const MONSTERS = [
       else if (d.t === 'en') { const quiet = !NET.enSeen; NET.enSeen = true; if (NET.client && Array.isArray(d.a)) for (const r of d.a.slice(0, 64)) {
         const e = Array.isArray(r) && enemies[r[0]]; if (!e || e.carried) continue;
         const fl = num(r[4], 0, 31), x = num(r[1], -ARENA, ARENA), z = num(r[2], -ARENA, ARENA);
-        if (fl & 2) { if (!e.dead) { e.dead = true; e.root.visible = false; if (!quiet) enemyDieFx(e); if (elapsed - (e.myHit || -9) < 1.5) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); } } continue; }
+        if (fl & 2) { if (!e.dead) { e.dead = true; e.root.visible = false; if (!quiet) enemyDieFx(e); if (elapsed - (e.myHit || -9) < 1.5) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); } } continue; }
         if (e.dead || (e.awake && !(fl & 1))) {          // came back from the respawn queue: a sleeping crate again
           e.dead = false; e.root.visible = true; e.awake = false; e.awakeParts.forEach(q => q.visible = false); setEnemyLook(e, e.matDormant);
           e.pivot.rotation.x = 0; e.hop.position.y = 0; e.hop.scale.set(1, 1, 1); e.open = 0; e.pos.set(x, 0, z); e.yaw = num(r[3], -99, 99);
@@ -7402,7 +7409,6 @@ const MONSTERS = [
     const at = kind === 'g' ? tmp.set(ROOM_X1 - 10, 0, 0) : kind === 'a' ? tmp.set(o.x, 0, o.z) : tmp.set(o.mesh.position.x, 0, o.mesh.position.z);
     const f = foundN();
     flashAlert(kind === 'a' ? `ALTAR FOUND ${f.a}/${altars.length}` : kind === 'g' ? 'BOSS GATE FOUND' : `NEST FOUND ${Math.min(f.r, NEST_GOAL)}/${NEST_GOAL}`);
-    if (!NET.client && (kind !== 'r' || f.r <= NEST_GOAL)) { const p = at.clone(); p.x += 3; dropWeapon(p); if (Math.random() < 0.5) dropLoot(p.setZ(p.z + 3)); }
     if (!NET.client) netEv({ t: 'fd', k: kind, i: idx });
   }
   function phScan() {                                  // anyone driving close enough discovers things (each machine checks, the host's word is final)
