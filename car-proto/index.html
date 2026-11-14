@@ -2673,8 +2673,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (e.code === 'KeyR') respawn();
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
-    if (e.code === 'KeyE' && !e.repeat) { if (unloadAltar) doUnload(); else special(); }     // E sacrifices inside an altar's ring
-    if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) special();      // the ride's special: Mole for the spider, Dome Bomb for the unicorn
+    if (e.code === 'KeyE' && !e.repeat && unloadAltar) doUnload();     // E sacrifices inside an altar's ring
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
   let rmb = false;
@@ -2780,7 +2779,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 99, buildEl = document.getElementById('build');
+  const BUILD = 100, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5345,7 +5344,7 @@ const MONSTERS = [
     else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
     if (!mhid) for (let i = swN; i < swarm.length; i++) if (!swarm[i].K.fly) digOut(swarm[i]);
     waves.since = 0; waves.t = 35; waves.pending = true; waves.size = made; PH.wv++;
-    const wn = roll ? 'SWARM ' + PH.wv : 'WAVE ' + (n + 1); flashAlert(wn); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: wn });
+    const wn = 'WAVE ' + (roll ? PH.wv : n + 1); flashAlert(wn); SFX.play('wave', null); crewSay('wave', 0.85, true); netEv({ t: 'alert', s: wn });
   }
 
   const swA = new THREE.Vector3();
@@ -7015,7 +7014,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 18;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 19;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7501,10 +7500,9 @@ const MONSTERS = [
     { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18, mul: 1.1, over: 0.3, cap: 30 },
     { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.4, over: 0.5, cap: 24 },
     { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 5,  brk: 18, mul: 2.6, over: 0.65, cap: 15 },
-    { key: 'loot',  name: 'LOOT RUN',          desc: 'Grab everything before the gate opens',                waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99 },
     { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99 },
   ];
-  const NEST_GOAL = 4, FIND_R = 34, LOOT_T = 40;
+  const NEST_GOAL = 4, FIND_R = 34;
   const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
   function waveMul() {                                 // how thick a wave is: phase, fed altars, and +35% per friend in the lobby
     let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++;
@@ -7519,14 +7517,12 @@ const MONSTERS = [
     if (k === 'scout') return PH.clr >= 3 && f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
     if (k === 'save') return altarsDone >= 3;
     if (k === 'hell') return PH.clr >= PHASES[PH.i].waves && PH.hellN >= hellTotal() && hellAlive() === 0;
-    if (k === 'loot') return PH.t >= LOOT_T;
     return false;
   }
   function phEnter(i, brk) {                           // everybody: a new phase (or the break before it) begins
     PH.i = i; PH.brk = brk; PH.wv = 0; PH.clr = 0; PH.t = 0; PH.cardT = brk > 0 ? brk : 3.5; PH.shown = -1;
     waves.pending = false; waves.gap = 3;
     const k = PHASES[i].key;
-    if (k === 'loot') { PH.lootT = 0; flashAlert('LOOT RUN!'); }
     if (k === 'boss') openGate();
     SFX.play('wave', null, { rate: 0.8 });
   }
@@ -7567,10 +7563,6 @@ const MONSTERS = [
     if (PH.brk > 0) PH.brk = Math.max(0, PH.brk - dt); else PH.t += dt;
     if (!NET.client) {
       if (PH.brk <= 0 && phDone()) phAdvance();
-      if (PHASES[PH.i].key === 'loot' && PH.brk <= 0 && (PH.lootT -= dt) <= 0) {       // the loot run: chips, abilities and medkits rain around every player
-        PH.lootT = 3.5; for (const p of waveTargets()) { const a = Math.random() * 6.283, d = 6 + Math.random() * 10, at = new THREE.Vector3(p.x + Math.sin(a) * d, 0, p.z + Math.cos(a) * d);
-          const r = Math.random(); if (r < 0.5) dropWeapon(at); else if (r < 0.8) dropLoot(at); else spawnPickup('heal', at); }
-      }
     }
     // the card: the next phase's name during a break with a countdown, a few seconds at the start of a phase
     PH.cardT -= dt; const on = PH.brk > 0 || PH.cardT > 0;
@@ -7593,7 +7585,6 @@ const MONSTERS = [
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate) + tk('Survive 3 waves', PH.clr >= 3, PH.clr + '/3');
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
     else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive ' + P.waves + ' waves', PH.clr >= P.waves, PH.clr + '/' + P.waves) + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
-    else if (P.key === 'loot') t = tk('Grab the loot', false, Math.max(0, Math.ceil(LOOT_T - PH.t)) + 's');
     else t = tk('Kill the Pyramidon', boss.state === 'dead');
     return `<div class="ph">${PH.brk > 0 ? 'NEXT: ' : ''}${P.name}</div><div class="sub${PH.brk > 0 ? '' : ' desc'}">${PH.brk > 0 ? 'break · ' + Math.ceil(PH.brk) + 's' : P.desc}</div>` + t;
   }
