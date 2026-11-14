@@ -2780,7 +2780,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 97, buildEl = document.getElementById('build');
+  const BUILD = 98, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4236,9 +4236,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
       const can = !full && car.alive && car.depth < 0.3 && p.t > 0.4;
       let dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z), dK = cart.shown ? Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z) : 1e9;
       if (can) {                                           // loot drifts toward a passing ride (or its cart) so near misses still count
-        const pullR = LOOT_PULL * (abilities.grab ? (abLv.grab >= 2 ? 2 : 1.3) : 1), d = Math.min(dB, dK);
+        const pullR = p.own && p.t > 0.7 ? 1e4 : LOOT_PULL * (abilities.grab ? (abLv.grab >= 2 ? 2 : 1.3) : 1), d = Math.min(dB, dK);      // your own skill pops out of the kill and flies to you
         if (d < pullR && d > 0.05) {
-          const tx = dB <= dK ? car.pos.x : cart.pos.x, tz = dB <= dK ? car.pos.z : cart.pos.z, step = Math.min(d, (4 + 10 * (1 - d / pullR)) * dt);
+          const tx = dB <= dK ? car.pos.x : cart.pos.x, tz = dB <= dK ? car.pos.z : cart.pos.z, step = Math.min(d, (p.own ? 14 + 30 * Math.min(1, p.t - 0.7) : 4 + 10 * (1 - d / pullR)) * dt);
           p.x += (tx - p.x) / d * step; p.z += (tz - p.z) / d * step;
           p.sprite.position.x = p.x; p.sprite.position.z = p.z; p.ring.position.x = p.x; p.ring.position.z = p.z; p.beam.position.x = p.x; p.beam.position.z = p.z;
           dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z); if (cart.shown) dK = Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z);
