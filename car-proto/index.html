@@ -2679,7 +2679,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   addEventListener('keyup', e => { keys[e.code] = false; });
   let rmb = false;
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseFire = false; rmb = false; });
-  renderer.domElement.addEventListener('mousedown', e => { if (e.button === 0) mouseFire = true; if (e.button === 2) rmb = true; });
+  renderer.domElement.addEventListener('mousedown', e => { if (e.button === 0) mouseFire = true; if (e.button === 2) special(); });
   addEventListener('mouseup', e => { if (e.button === 0) mouseFire = false; if (e.button === 2) rmb = false; });
   addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('wheel', e => {
@@ -2711,7 +2711,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function layoutTouch() {
     if (!touch.enabled) return;
     const small = Math.min(innerWidth, innerHeight) < 420, c = small ? 84 : 95, R = small ? 120 : 138;
-    const arc = { jump: 2, grab: 40, burrow: 80, bomb: 80, drill: 80 };    // degrees around the right thumb, from left to top
+    const arc = { jump: 2, decoy: 40, cubes: 40, burrow: 40, bomb: 40, drill: 80, trail: 80 };    // degrees around the right thumb: jump, the active, the passive
     for (const t in arc) {
       const el = document.getElementById('ab-' + t), a = arc[t] * Math.PI / 180;
       if (!el) continue;
@@ -2780,7 +2780,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 98, buildEl = document.getElementById('build');
+  const BUILD = 99, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -3815,7 +3815,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
 
   const carSeen = () => car.alive && car.depth < 0.5;
 
-  function special() { if (ride === 'spider') toggleBurrow(); else if (ride === 'unicorn') bombDome(); }
+  function special() { if (ride === 'spider') toggleBurrow(); else if (ride === 'unicorn') bombDome(); else if (ride === 'buggy') throwDecoys(); else if (ride === 'halo') releaseCubes(); }
   function toggleBurrow() {
     if (!abilities.burrow || ride !== 'spider' || !car.alive || car.burrowCd > 0 || car.airborne) return;
     if (car.burrow === 'up' || car.burrow === 'rising') { car.burrow = 'down'; SFX.play('dig_down', car.pos); crewSay('burrow', 0.7); }
@@ -3948,6 +3948,116 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (D.t >= D.T) { scene.remove(D.m, D.ring); D.m.material.dispose(); D.ring.material.dispose(); domes.splice(i, 1); }
     }
   }
+  const activeCdK = () => ride === 'unicorn' ? Math.max(0, bombCd) / BOMB.cd[abLv.bomb] : ride === 'buggy' ? Math.max(0, decoyCd) / DECOY_CD : ride === 'halo' ? Math.max(0, cubeCd) / CUBE_CD : 0;
+  // ----- Decoy Chubz (buggy): a squeaky fake chubzik; on the host every monster nearby goes for it, then it blows up -----
+  const DECOY_CD = 9, DECOY_T = 3.2, decoys = []; let decoyCd = 0;
+  function throwDecoys() {
+    if (!abilities.decoy || ride !== 'buggy' || !car.alive || decoyCd > 0) return;
+    decoyCd = DECOY_CD;
+    const n = 1 + abLv.decoy, dx = groundAim.x - car.pos.x, dz = groundAim.z - car.pos.z, dd = Math.hypot(dx, dz) || 1;
+    const a0 = Math.atan2(dx / dd, dz / dd), L = THREE.MathUtils.clamp(dd, 7, 16);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i - (n - 1) / 2) * 0.42;
+      const x = THREE.MathUtils.clamp(car.pos.x + Math.sin(a) * L, -ARENA + 3, ARENA - 3), z = THREE.MathUtils.clamp(car.pos.z + Math.cos(a) * L, -ARENA + 3, ARENA - 3);
+      addDecoy(car.pos.x, car.pos.z, x, z); netEv({ t: 'decoy', a: r1(car.pos.x), b: r1(car.pos.z), x: r1(x), z: r1(z) });
+    }
+    SFX.play('chub', car.pos, { rate: 1.5 });
+  }
+  function addDecoy(x0, z0, x, z) {
+    const sprite = new THREE.Sprite(chubMats[0][0]); sprite.center.set(0.5, 0.04); scene.add(sprite);
+    const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); scene.add(shadow);
+    decoys.push({ x0, z0, x, z, t: -0.45, sprite, shadow, sq: 0 });
+  }
+  function decoyNear(m) { let b = null, bd = 22; for (const D of decoys) { if (D.t < 0) continue; const d = Math.hypot(D.x - m.pos.x, D.z - m.pos.z); if (d < bd) { bd = d; b = D; } } return b; }
+  function updateDecoys(dt) {
+    decoyCd -= dt;
+    for (let i = decoys.length - 1; i >= 0; i--) {
+      const D = decoys[i]; D.t += dt;
+      if (D.t < 0) {                                       // in the air
+        const u = 1 + D.t / 0.45; D.sprite.position.set(D.x0 + (D.x - D.x0) * u, 1 + Math.sin(Math.PI * u) * 4, D.z0 + (D.z - D.z0) * u);
+      } else {
+        const hop = Math.abs(Math.sin(D.t * 9)) * 0.5; D.sprite.position.set(D.x, hop, D.z);
+        if ((D.sq -= dt) <= 0) { D.sq = 0.45; SFX.play('chub', D.sprite.position, { rate: 1.3 + Math.random() * 0.4, vol: 0.6 }); }
+      }
+      const sc = CHUB_SIZE * (1.1 + 0.15 * Math.sin(D.t * 18)); D.sprite.scale.set(sc, sc, 1); D.shadow.position.set(D.sprite.position.x, 0.03, D.sprite.position.z);
+      if (D.t >= DECOY_T) {
+        tmp.set(D.x, 0.6, D.z); burst(tmp, 0xffb040, 16, 3.5, 10, 0.6); flash(tmp, 0xffb040, 6, 0.3, 4, false); SFX.play('explode', tmp, { vol: 0.7 });
+        if (!NET.client) blastAt(D.x, D.z, 5, 6, 18, false);
+        scene.remove(D.sprite, D.shadow); decoys.splice(i, 1);
+      }
+    }
+  }
+  // ----- Wing Cubes (angel): run by the caster's machine; others just see them flutter round the angel -----
+  const CUBE_CD = 15, CUBE_T = 8, cubes = []; let cubeCd = 0;
+  const cubeGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9), wingGeo = new THREE.PlaneGeometry(0.9, 0.5); wingGeo.translate(0.45, 0, 0);
+  const wingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const CUBE_COLS = [0xffb3c7, 0xa8e6ff, 0xfff0a0, 0xc8b3ff, 0xb8f5c0];
+  function releaseCubes() {
+    if (!abilities.cubes || ride !== 'halo' || !car.alive || cubeCd > 0) return;
+    cubeCd = CUBE_CD; const n = abLv.cubes >= 1 ? 5 : 3;
+    spawnCubes(n, null, abLv.cubes); netEv({ t: 'cubes', n, l: abLv.cubes });
+    SFX.play('jump2', car.pos, { rate: 1.6 });
+  }
+  function spawnCubes(n, R, lv) {
+    const host = R ? R.pos : car.pos;
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group(), body = new THREE.Mesh(cubeGeo, new THREE.MeshStandardMaterial({ color: CUBE_COLS[i % 5], roughness: 0.6 }));
+      const wl = new THREE.Mesh(wingGeo, wingMat), wr = new THREE.Mesh(wingGeo, wingMat); wl.position.x = 0.4; wr.position.x = -0.4; wr.rotation.y = Math.PI;
+      g.add(body, wl, wr); g.position.set(host.x + Math.cos(i / n * 6.283) * 1.6, 2.5, host.z + Math.sin(i / n * 6.283) * 1.6); scene.add(g);
+      cubes.push({ g, body, wl, wr, R, lv, t: 0, eaten: 0, bite: 0, a: i / n * 6.283, tgt: null, sc: 1 });
+    }
+  }
+  function cubePop(c) {
+    tmp.copy(c.g.position); burst(tmp, 0xffffff, 8, 1.5, 6, 0.5); SFX.play('pop', tmp, { rate: 1.4 });
+    if (!c.R && c.lv >= 2) ringBlast(c.g.position.x, c.g.position.z, 3.5, 3, 12, 0xa8e6ff, false);      // swollen cubes burst
+    scene.remove(c.g); c.body.material.dispose();
+  }
+  function updateCubes(dt) {
+    cubeCd -= dt;
+    for (let i = cubes.length - 1; i >= 0; i--) {
+      const c = cubes[i]; c.t += dt; c.a += dt * 2.5;
+      const own = !c.R, hp = own ? car.pos : c.R.pos;
+      if (!own && NET.remotes.get(c.R.peer) !== c.R) c.t = CUBE_T;
+      let gx = hp.x + Math.cos(c.a) * 3, gz = hp.z + Math.sin(c.a) * 3;
+      if (own) {                                         // hunt the nearest small fry around the angel
+        if (!c.tgt || c.tgt.dead || (c.retgt -= dt) <= 0) { c.retgt = 0.4; c.tgt = null; let bd = 16;
+          for (const m of swarm) { if (m.dead || m.dig > 0 || cubes.some(o => o !== c && o.tgt === m)) continue;      // each cube picks its own victim
+            const d = Math.hypot(m.pos.x - c.g.position.x, m.pos.z - c.g.position.z) + Math.hypot(m.pos.x - hp.x, m.pos.z - hp.z) * 0.5; if (d < bd) { bd = d; c.tgt = m; } } }
+        if (c.tgt) { gx = c.tgt.pos.x; gz = c.tgt.pos.z;
+          const d = Math.hypot(gx - c.g.position.x, gz - c.g.position.z);
+          if (d < c.tgt.K.r + 0.9 && (c.bite -= dt) <= 0) {
+            const big = c.tgt.K.heavy || c.tgt.elite; c.bite = 0.45; SFX.play('chomp', c.g.position, { rate: 1.6, vol: 0.6 });
+            hitCritter(c.tgt, big ? 2 : 99, tmp.set(0, 0, 0), 0);
+            if (!big) { c.eaten++; c.sc = c.lv >= 2 ? 1 + 0.18 * c.eaten : 1; c.tgt = null; }
+          } }
+      }
+      const dx = gx - c.g.position.x, dz = gz - c.g.position.z, d = Math.hypot(dx, dz) || 1, sp = Math.min(d, 17 * dt);
+      c.g.position.x += dx / d * sp; c.g.position.z += dz / d * sp; c.g.position.y = 2.2 + Math.sin(c.t * 5 + c.a) * 0.35;
+      c.g.rotation.y = Math.atan2(dx, dz); const f = Math.sin(c.t * 28) * 0.8; c.wl.rotation.z = f; c.wr.rotation.z = -f;
+      const chew = c.bite > 0.3 ? 1.15 : 1; c.g.scale.setScalar(c.sc * chew);
+      if (c.t >= CUBE_T || c.eaten >= 5) { cubePop(c); cubes.splice(i, 1); }
+    }
+  }
+  // ----- Rainbow Trail (unicorn, passive): biters that step on it lose you; the host runs it for every unicorn it knows -----
+  const TRAIL_T = [3, 5, 5], trails = new Map(); let trailTick = 0;
+  const trailGeo = new THREE.CircleGeometry(0.85, 12); trailGeo.rotateX(-Math.PI / 2);
+  function trailFor(key, pos, moving, lv, dt) {
+    let T = trails.get(key); if (!T) { T = { pts: [], acc: 0, hue: 0 }; trails.set(key, T); }
+    T.acc += dt;
+    if (lv > 0 && moving && T.acc > 0.09) { T.acc = 0; T.hue = (T.hue + 0.07) % 1;
+      const m = new THREE.Mesh(trailGeo, glow(new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(T.hue, 0.9, 0.62), transparent: true, opacity: 0.55, depthWrite: false }), 1.4));
+      m.position.set(pos.x, 0.05, pos.z); scene.add(m); T.pts.push({ x: pos.x, z: pos.z, t: 0, T: TRAIL_T[lv - 1], m, slow: lv >= 3 });
+    }
+    for (let i = T.pts.length - 1; i >= 0; i--) { const q = T.pts[i]; q.t += dt; q.m.material.opacity = 0.55 * Math.min(1, (q.T - q.t) / 0.6);
+      if (q.t >= q.T) { scene.remove(q.m); q.m.material.dispose(); T.pts.splice(i, 1); } }
+  }
+  function updateTrails(dt) {
+    trailFor('me', car.pos, ride === 'unicorn' && car.alive && Math.abs(car.speed) > 3, ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, dt);
+    for (const R of NET.remotes.values()) trailFor(R.peer, R.pos, R.up && Math.hypot(R.vel.x, R.vel.z) > 3, R.ride === 'unicorn' ? R.tl || 0 : 0, dt);
+    if (NET.client || (trailTick += dt) < 0.1) return; trailTick = 0;
+    for (const T of trails.values()) for (const q of T.pts)
+      for (const m of swarm) { if (m.dead || m.K.fly) continue; if (Math.abs(m.pos.x - q.x) < 1.5 && Math.abs(m.pos.z - q.z) < 1.5) { m.lost = 2; if (q.slow) m.slow = 2; } }
+  }
   // ---------- jump ----------
   const JUMP_V = 15, CAR_G = 32;                    // ~0.95 с в воздухе, высота ~3.5 — перелетает ящики и злюк
   function jump() {
@@ -4002,20 +4112,25 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
 
   // ---------- abilities & loot ----------
-  const abilities = { drill: false, burrow: false, grab: false, jump: false, doubleJump: false, bomb: false };
+  const abilities = { drill: false, burrow: false, grab: false, jump: false, doubleJump: false, bomb: false, decoy: false, cubes: false, trail: false };
   // every ride has its own kit; the specials sit on Shift, the drill runs by itself
-  const RIDE_KIT = { buggy: ['drill', 'jump', 'grab'], spider: ['burrow', 'jump', 'grab'], halo: ['jump', 'doubleJump', 'grab'], unicorn: ['bomb', 'jump', 'grab'] };
+  const RIDE_KIT = { buggy: ['drill', 'decoy', 'jump'], spider: ['burrow', 'jump'], halo: ['jump', 'doubleJump', 'cubes'], unicorn: ['bomb', 'trail', 'jump'] };      // active on RMB, a passive, the jump
+  const RIDE_ACTIVE = { buggy: 'decoy', spider: 'burrow', halo: 'cubes', unicorn: 'bomb' };
   const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
   const kitDone = () => kit().every(t => abilities[t]);
-  const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0 };      // upgrades spent on each, 0..AB_LV_MAX
+  const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0, decoy: 0, cubes: 0, trail: 0 };      // upgrades spent on each, 0..AB_LV_MAX
   const AB_LV_MAX = 2, UP_MAX = 5;                         // ~5 upgrades a run: enough for two or three skills, not all
   let upPts = 0, upGot = 0;
   const UP_TEXT = { drill: ['spins longer', 'wider and meaner'], burrow: ['harder to dig out', 'surfacing knocks everyone back'], grab: ['throws hit twice as hard', 'throws x3, loot flies to you'],
-                    jump: ['bigger landing crush', 'landing shockwave stuns'], doubleJump: ['a third jump', 'air jumps blast below'], bomb: ['bigger dome, 3 s', 'huge dome, 4 s'] };
+                    jump: ['bigger landing crush', 'landing shockwave stuns'], doubleJump: ['a third jump', 'air jumps blast below'], bomb: ['bigger dome, 3 s', 'huge dome, 4 s'],
+                    decoy: ['two decoys at once', 'three decoys at once'], cubes: ['five cubes', 'cubes swell up and burst'], trail: ['the trail lasts longer', 'the trail slows them too'] };
   const AB_INFO = {
     drill:      { title: 'Drill',            key: 'auto',  hint: 'spins up by itself between nova pulses, grinds a 180° arc ahead', bg: '#ff8c32' },
-    burrow:     { title: 'Mole',             key: 'Shift', hint: 'Shift — dig in / pop out, biters scatter', bg: '#8a6a44' },
-    bomb:       { title: 'Dome Bomb',        key: 'Shift', hint: 'Shift — blasts the biters away, nobody gets into the dome', bg: '#c45cb4' },
+    burrow:     { title: 'Mole',             key: 'RMB',   hint: 'RMB — dig in / pop out, biters scatter', bg: '#8a6a44' },
+    bomb:       { title: 'Dome Bomb',        key: 'RMB',   hint: 'RMB — blasts the biters away, nobody gets into the dome', bg: '#c45cb4' },
+    decoy:      { title: 'Decoy Chubz',      key: 'RMB',   hint: 'RMB — toss a squeaky fake chubzik: monsters chase it, then boom', bg: '#e0902c' },
+    cubes:      { title: 'Wing Cubes',       key: 'RMB',   hint: 'RMB — little winged cubes fly out and gobble the small fry', bg: '#5fb0e8' },
+    trail:      { title: 'Rainbow Trail',    key: 'passive', hint: 'biters that step on your trail lose you for a moment', bg: '#e865a8' },
     upgrade:    { title: 'Upgrade',          key: '',      hint: 'click the + over a skill to level it up', bg: '#e8b417' },
     grab:       { title: 'Frog Tongue',      key: 'RMB',   hint: 'RMB at cursor — pulls onto the drill, release to throw', bg: '#2b6f8a' },
     jump:       { title: 'Kangaroo',         key: 'Space', hint: 'Space — jump, landing crushes', bg: '#2fa3b5' },
@@ -4085,6 +4200,19 @@ laugh(r) {                                       // a big man's belly laugh: bre
       ctx.beginPath(); ctx.arc(64, 92, 42, Math.PI, 0); ctx.stroke(); ctx.beginPath(); ctx.moveTo(14, 92); ctx.lineTo(114, 92); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.beginPath();
       for (let i = 0; i < 14; i++) { const r = i % 2 ? 8 : 19, b = i / 14 * Math.PI * 2; ctx[i ? 'lineTo' : 'moveTo'](64 + Math.cos(b) * r, 70 + Math.sin(b) * r); } ctx.closePath(); ctx.fill();
+    } else if (type === 'decoy') {                        // a round chubzik with sound waves
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(52, 74, 28, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e0902c'; ctx.beginPath(); ctx.arc(43, 70, 4.5, 0, 7); ctx.arc(61, 70, 4.5, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      for (const r of [16, 30]) { ctx.beginPath(); ctx.arc(84, 52, r, -0.9, 0.2); ctx.stroke(); }
+    } else if (type === 'cubes') {                        // a cube with wings
+      ctx.fillStyle = '#fff'; ctx.fillRect(46, 50, 36, 36);
+      ctx.beginPath(); ctx.moveTo(46, 60); ctx.quadraticCurveTo(16, 34, 12, 66); ctx.quadraticCurveTo(28, 64, 46, 74); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(82, 60); ctx.quadraticCurveTo(112, 34, 116, 66); ctx.quadraticCurveTo(100, 64, 82, 74); ctx.fill();
+      ctx.fillStyle = '#5fb0e8'; ctx.fillRect(52, 74, 24, 5);
+    } else if (type === 'trail') {                        // rainbow arcs
+      ctx.lineWidth = 9; ctx.lineCap = 'round';
+      ['#fff', '#ffe08a', '#a8f0ff'].forEach((c, i) => { ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(64, 96, 44 - i * 12, Math.PI, 0); ctx.stroke(); });
     } else if (type === 'upgrade') {                      // two chevrons up
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 13; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (const y of [58, 92]) { ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(64, y - 30); ctx.lineTo(96, y); ctx.stroke(); }
@@ -4146,10 +4274,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     bindAb('jump', () => jump());
     bindAb('burrow', () => toggleBurrow());
     bindAb('bomb', () => bombDome());
-    bindAb('grab', () => { rmb = true; }, () => { rmb = false; }, (dx, dy) => {
-      const d = Math.hypot(dx, dy);
-      if (d > 14) { stickWorld(dx, dy, touch.aimDir); touch.aimDist = 6 + 12 * Math.min(1, d / 70); }
-    });
+    bindAb('decoy', () => throwDecoys(), null, (dx, dy) => { if (Math.hypot(dx, dy) > 14) { stickWorld(dx, dy, touch.aimDir); touch.aimDist = 6 + 12 * Math.min(1, Math.hypot(dx, dy) / 70); } });
+    bindAb('cubes', () => releaseCubes());
     layoutTouch(); updateAbHud();
   }
   function upgradeAb(t) {
@@ -4161,7 +4287,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
   function updateAbHud() {
     if (abDirty) { buildAbBar(); return; }
-    const L = abLv.bomb, bk = abilities.bomb ? Math.max(0, bombCd) / BOMB.cd[L] : 0;
+    const act = RIDE_ACTIVE[ride], bk = act && abilities[act] ? activeCdK() : 0;
     const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + upPts + '|' + bk.toFixed(2);
     if (sig === abSig) return; abSig = sig;
     if (wUpSeen !== upPts) { wUpSeen = upPts; updateWeaponHUD(); }      // weapons take upgrades too
@@ -4170,7 +4296,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (abilities[t] && el.classList.contains('locked')) { el.classList.remove('locked'); el.classList.add('fresh'); }
       el.classList.toggle('can', upPts > 0 && abilities[t] && abLv[t] < AB_LV_MAX);
       el.querySelector('.lv').textContent = abLv[t] ? '★'.repeat(abLv[t]) : '';
-      if (t === 'bomb') el.style.setProperty('--cd', bk.toFixed(2));
+      if (t === act) el.style.setProperty('--cd', bk.toFixed(2));
     }
     const tag = document.getElementById('upTag');
     if (tag) { tag.style.display = upPts > 0 ? 'block' : 'none'; tag.textContent = 'UPGRADE ×' + upPts; }
@@ -5235,7 +5361,8 @@ const MONSTERS = [
       waves.since += dt; waves.gap -= dt;
       if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = PH.i === 0 ? 2 : 4; if (PH.i > 0) dropWeapon(waves.lastKill); }
       const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
-      if (!calm && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
+      const room = PH.i !== 0 || alive < 36;               // the warm-up stays a mow, not a pile-up: no new swarm while 36 are still around
+      if (!calm && room && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
@@ -5256,8 +5383,11 @@ const MONSTERS = [
         // steering
         let tx = 0, tz = 0;
         if ((m.think -= dt) <= 0) { m.think = 0.3 + Math.random() * 0.25; m.prey = pickPrey(m, dist); m.tgt = netPick(m); }
-        const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null;
-        if (prey) {                                        // run a chubzik down and eat it
+        const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null, dec = decoys.length ? decoyNear(m) : null;
+        if (m.lost > 0) m.lost -= dt;
+        if (dec) { const ex = dec.x - m.pos.x, ez = dec.z - m.pos.z, ed = Math.hypot(ex, ez) || 1e-3; tx = ex / ed * K.speed * 1.15; tz = ez / ed * K.speed * 1.15; }      // squeak! everybody goes for the decoy
+        else if (m.lost > 0) { tx = Math.sin(m.phase * 0.7) * K.speed * 0.5; tz = Math.cos(m.phase * 0.9) * K.speed * 0.5; }      // stepped on the rainbow: wanders, lost
+        else if (prey) {                                        // run a chubzik down and eat it
           const px = prey.pos.x - m.pos.x, pz = prey.pos.z - m.pos.z, pd = Math.hypot(px, pz) || 1e-4;
           tx = px / pd * K.speed; tz = pz / pd * K.speed;
           if (pd < K.r + 0.6 && m.cd <= 0) { m.cd = 0.7; eatChub(prey, m); }
@@ -5275,6 +5405,7 @@ const MONSTERS = [
           const cp = mine ? cart.pos : T.R.cpos, cx = cp.x - m.pos.x, cz = cp.z - m.pos.z, cd = Math.hypot(cx, cz) || 1; tx = cx / cd * K.speed; tz = cz / cd * K.speed;
         }
         else { const q = K.lunge ? (dist < 10 ? 1.75 : 0.7) : 1; tx = nx * K.speed * q; tz = nz * K.speed * q; }
+        if (m.slow > 0) { m.slow -= dt; tx *= 0.5; tz *= 0.5; }
         for (const o of swarm) {                           // separation (local only)
           if (o === m || o.dead) continue;
           const sx = m.pos.x - o.pos.x, sz = m.pos.z - o.pos.z, md = K.r + o.K.r + 0.3;
@@ -6807,7 +6938,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt); updateDomes(dt); updateAbHud();
+    updatePickups(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -6884,7 +7015,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 17;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 18;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7113,6 +7244,8 @@ const MONSTERS = [
       else if (d.t === 'aw') { const A = altars[d.k]; if (NET.client && A && !A.done) { A.awake = d.s === 1; if (d.n != null) A.spawnT = num(d.n, 0, 99); if (d.w === 1 || d.w === 2) altarWave(A, d.w); } }
       else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
+      else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
+      else if (d.t === 'cubes') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R) spawnCubes(Math.round(num(d.n, 1, 5)), R, Math.round(num(d.l, 0, 2))); }
       else if (d.t === 'dome') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), r = num(d.r, 3, 14), T = num(d.T, 0.5, 6); addDome(x, z, r, T); if (!NET.client) { NET.applying = false; blastAt(x, z, r, 1, 26, true); } }
       else if (d.t === 'blast') { if (!NET.client) { NET.applying = false; blastAt(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), num(d.r, 1, 9), num(d.d, 0, 4), num(d.p, 0, 20), d.s === 1); } }
       else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
@@ -7222,7 +7355,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: kitDone() ? 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: kitDone() ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -7303,7 +7436,7 @@ const MONSTERS = [
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
       const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
-      R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22; R.ak = pr.ak === 1;      // their screen size (waves stay off it) and whether their kit is complete
+      R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22; R.ak = pr.ak === 1; R.tl = Math.round(num(pr.tl, 0, 3));      // their screen size (waves stay off it) and whether their kit is complete
       if (pr !== R.posePr) { R.posePr = pr; if (typeof pr.ph === 'number') { const d = num(pr.ph, -1e4, 1e4) * 2.4 - R.ph; R.ph += Math.abs(d) > 6 ? d : d * 0.3; } }
       const feet = R.ride === 'spider' && Array.isArray(pr.ft) && pr.ft.length === 24 ? pr.ft : null;
       if (R.anim.length && !feet) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08) * (R.ride === 'unicorn' ? 2.4 * 0.45 / 1.08 : 1);
