@@ -77,6 +77,9 @@
   .ab .up, .wslot .up { position: absolute; left: 50%; top: -34px; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; pointer-events: auto; cursor: pointer;
             background: #e8b417; color: #2a1d05; font: 900 24px/27px 'Londrina', system-ui, sans-serif; border: 2px solid #fff6dc; box-shadow: 0 2px 0 #6a4a04, 0 0 10px rgba(255,210,80,.7); animation: upPulse 1s ease-in-out infinite; }
   .ab .up { display: none; } .ab.can .up { display: block; }
+  body:not(.touch) .ab.can .up, body:not(.touch) .wslot.can .up { top: 50%; margin-top: -27px; width: 34px; height: 34px; margin-left: -17px; font-size: 30px; line-height: 33px; }
+  body:not(.touch) .wslot.can .up { margin-top: -21px; width: 28px; height: 28px; margin-left: -14px; font-size: 25px; line-height: 27px; }
+  body:not(.touch) .ab.can img, body:not(.touch) .wslot.can img { opacity: .38; filter: grayscale(.5); }
   @keyframes upPulse { 50% { transform: translateY(-3px) scale(1.08); } }
   .ab .lv { position: absolute; right: 2px; top: 1px; color: #ffd23a; font: 900 11px/1 system-ui, sans-serif; text-shadow: 0 1px 0 #000; font-style: normal; }
   .ab .cdv { position: absolute; left: 6px; right: 6px; top: 5px; height: calc(var(--cd, 0) * 44px); background: rgba(10,10,14,.65); border-radius: 0 0 8px 8px; pointer-events: none; }
@@ -2779,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 101, buildEl = document.getElementById('build');
+  const BUILD = 102, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4240,6 +4243,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
   }
   const ICONS = {}, ICON_URLS = {};
   for (const t of Object.keys(AB_INFO)) { ICONS[t] = makeIcon(t); ICON_URLS[t] = ICONS[t].toDataURL(); }
+  const X_TOKENS = { x_spread: ['w_spread', 'Bullet Storm'], x_nova: ['w_nova', 'Nova Burst'], x_saw: ['w_orbit', 'Saw Blast'], x_decoy: ['decoy', 'Decoy Party'], x_cubes: ['cubes', 'Cube Swarm'], x_dome: ['bomb', 'Dome Drop'] };
+  for (const [x, [src, title]] of Object.entries(X_TOKENS)) { AB_INFO[x] = { title, key: '', hint: 'went off right here, once', bg: AB_INFO[src].bg }; ICONS[x] = ICONS[src]; ICON_URLS[x] = ICON_URLS[src]; }
 
   // HUD: the ride's own skills, each with a + over it while there are upgrades to spend
   const abBar = document.getElementById('abilities');
@@ -4298,7 +4303,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (t === act) el.style.setProperty('--cd', bk.toFixed(2));
     }
     const tag = document.getElementById('upTag');
-    if (tag) { tag.style.display = upPts > 0 ? 'block' : 'none'; tag.textContent = 'UPGRADE ×' + upPts; }
+    if (tag) { tag.style.display = upPts > 0 ? 'block' : 'none'; tag.textContent = 'UPGRADES ' + upGot + '/' + UP_MAX; }
   }
   const toastEl = document.getElementById('toast'); let toastTimer = 0;
   function toast(type, extra, hint) {
@@ -4316,16 +4321,38 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // лут
   const pickups = [];
   const pickupTex = {};
-  function dropLoot(at) {                                  // elites, finds, the boss, the loot run: an upgrade or a medkit
-    spawnPickup((NET.on && NET.game) || upGot < UP_MAX ? (Math.random() < 0.6 ? 'upgrade' : 'heal') : 'heal', at);
+  function dropLoot(at) {                                  // elites and the boss: a one-shot token or a medkit
+    const xs = Object.keys(X_TOKENS); spawnPickup(Math.random() < 0.65 ? xs[Math.floor(Math.random() * xs.length)] : 'heal', at);
+  }
+  function fireToken(type) {                               // a token goes off where you stand
+    const o = new THREE.Vector3(car.pos.x, 1.0 + car.y, car.pos.z);
+    if (type === 'x_spread' || type === 'x_nova') {
+      const n = type === 'x_nova' ? 28 : 36, ph = Math.random() * 6.283;
+      for (let i = 0; i < n; i++) { const a = ph + i / n * 6.283, dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), m = new THREE.Mesh(bulletGeo, type === 'x_nova' ? novaMat : bulletMat);
+        m.position.copy(o).addScaledVector(dir, 1.6); m.lookAt(m.position.x + dir.x, m.position.y, m.position.z + dir.z); scene.add(m); bullets.push({ m, v: dir.multiplyScalar(44), life: type === 'x_nova' ? 0.6 : 0.8, dmg: 3 }); }
+      flash(o, type === 'x_nova' ? 0x5ff5e6 : 0xffd27a, 8, 0.3, 3); SFX.play('nova', car.pos);
+    } else if (type === 'x_saw') ringBlast(car.pos.x, car.pos.z, 7, 5, 14, 0xd8d8e0, false);
+    else if (type === 'x_decoy') { for (let i = 0; i < 3; i++) { const a = car.heading + i * 2.094, x = THREE.MathUtils.clamp(car.pos.x + Math.sin(a) * 9, -ARENA + 3, ARENA - 3), z = THREE.MathUtils.clamp(car.pos.z + Math.cos(a) * 9, -ARENA + 3, ARENA - 3);
+        addDecoy(car.pos.x, car.pos.z, x, z); netEv({ t: 'decoy', a: r1(car.pos.x), b: r1(car.pos.z), x: r1(x), z: r1(z) }); } }
+    else if (type === 'x_cubes') { spawnCubes(4, null, 1); netEv({ t: 'cubes', n: 4, l: 1 }); }
+    else if (type === 'x_dome') { const x = r1(car.pos.x), z = r1(car.pos.z); addDome(x, z, 9, 3); netEv({ t: 'dome', x, z, r: 9, T: 3 }); if (!NET.client) blastAt(x, z, 9, 1, 26, true); }
   }
   let kitProg = 0, kitNeed = 3;
-  function myKill(x, z, w) {                               // something I killed or smashed: every few of them, my next missing skill drops right there (just for me)
-    if (startEl.isConnected || kitDone()) return;
+  const W_GEAR = ['spread', 'nova', 'orbit'];
+  function gearNext() {                                    // what I am still missing: my ride's skills, then the three guns, then upgrades
+    const t = kit().find(t => !abilities[t]); if (t) return t;
+    const w = W_GEAR.find(k => !weapons[k]); if (w) return 'w_' + w;
+    return upGot < UP_MAX ? 'upgrade' : null;
+  }
+  const gearDone = () => !gearNext();
+  function myKill(x, z, w) {                               // something I killed or smashed: every few of them, my next missing piece of gear drops (just for me)
+    if (startEl.isConnected) return; const nx = gearNext(); if (!nx) return;
     kitProg += w; if (kitProg < kitNeed || pickups.some(p => p.own)) return;
-    kitProg = 0; kitNeed = 7;
-    const miss = kit().filter(t => !abilities[t]);
-    spawnPickup(miss[0], tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
+    kitProg = 0; kitNeed = 5;
+    let px = x, pz = z;
+    if (Math.hypot(x - car.pos.x, z - car.pos.z) > 12) { px = car.pos.x + Math.sin(car.heading) * 6; pz = car.pos.z + Math.cos(car.heading) * 6; }      // killed far away: it drops in front of you instead
+    px = THREE.MathUtils.clamp(px, -ARENA + 4, ARENA - 4); pz = THREE.MathUtils.clamp(pz, -ARENA + 4, ARENA - 4);
+    spawnPickup(nx, tmp.set(px, 0, pz), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
   function spawnPickup(type, at, id, remote) {
@@ -4356,14 +4383,14 @@ laugh(r) {                                       // a big man's belly laugh: bre
       p.sprite.position.y = 2.4 + Math.sin(p.t * 3) * 0.3 + Math.max(0, 1 - p.t * 2) * 2;   // выпрыгивает и покачивается
       p.ring.rotation.y += dt * 2;
       p.ring.scale.setScalar(1 + Math.sin(p.t * 4) * 0.08);
-      if (p.t > 75 && (p.type.startsWith('w_') || p.type === 'heal' || p.type === 'upgrade')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
+      if (p.t > 75 && (p.type.startsWith('w_') || p.type.startsWith('x_') || p.type === 'heal' || p.type === 'upgrade')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
       const full = (p.type.startsWith('w_') && weapons[p.type.slice(2)] > 0) || (p.type === 'upgrade' && upGot >= UP_MAX);           // already have that gun (level it with upgrades) / enough upgrades: leave it for the others
       const can = !full && car.alive && car.depth < 0.3 && p.t > 0.4;
       let dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z), dK = cart.shown ? Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z) : 1e9;
       if (can) {                                           // loot drifts toward a passing ride (or its cart) so near misses still count
-        const pullR = p.own && p.t > 0.7 ? 1e4 : LOOT_PULL * (abilities.grab ? (abLv.grab >= 2 ? 2 : 1.3) : 1), d = Math.min(dB, dK);      // your own skill pops out of the kill and flies to you
+        const pullR = LOOT_PULL * (abilities.grab ? (abLv.grab >= 2 ? 2 : 1.3) : 1), d = Math.min(dB, dK);
         if (d < pullR && d > 0.05) {
-          const tx = dB <= dK ? car.pos.x : cart.pos.x, tz = dB <= dK ? car.pos.z : cart.pos.z, step = Math.min(d, (p.own ? 14 + 30 * Math.min(1, p.t - 0.7) : 4 + 10 * (1 - d / pullR)) * dt);
+          const tx = dB <= dK ? car.pos.x : cart.pos.x, tz = dB <= dK ? car.pos.z : cart.pos.z, step = Math.min(d, (4 + 10 * (1 - d / pullR)) * dt);
           p.x += (tx - p.x) / d * step; p.z += (tz - p.z) / d * step;
           p.sprite.position.x = p.x; p.sprite.position.z = p.z; p.ring.position.x = p.x; p.ring.position.z = p.z; p.beam.position.x = p.x; p.beam.position.z = p.z;
           dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z); if (cart.shown) dK = Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z);
@@ -4372,9 +4399,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (can && (dB < 2.6 || dK < 2.2)) {
         let extra = '';
         netEv({ t: 'pkx', id: p.id });
-        if (!p.type.startsWith('w_') && p.type !== 'heal' && p.type !== 'upgrade' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
+        if (!p.type.startsWith('w_') && !p.type.startsWith('x_') && p.type !== 'heal' && p.type !== 'upgrade' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
         if (p.type === 'heal') car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.4);
-        else if (p.type === 'upgrade') { upPts++; upGot++; extra = '(' + upPts + ' to spend)'; abSig = ''; }
+        else if (p.type === 'upgrade') { upPts++; upGot++; extra = upGot + '/' + UP_MAX; abSig = ''; }
+        else if (p.type.startsWith('x_')) fireToken(p.type);
         else if (p.type.startsWith('w_')) { gainWeapon(p.type); extra = '— level it up with upgrades'; }
         else { abilities[p.type] = true; applyAbilityVisuals(); crewSay('ability'); }
         toast(p.type, extra); SFX.play(p.type === 'heal' ? 'heal' : 'pickup', null);
@@ -4409,16 +4437,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
       toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + wLv(k)); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
     wBar.addEventListener('mousedown', spendW); wBar.addEventListener('touchstart', spendW, { passive: false }); }
   let wUpSeen = -1;
-  function dropWeapon(at) {
-    const onGround = pickups.filter(p => p.type.startsWith('w_') && Math.hypot(p.x - at.x, p.z - at.z) < 45).length;      // only chips lying around here count, not the whole map's
-    if (onGround >= 3) return;
-    const lobby = NET.on && NET.game;
-    const pool = [];
-    for (const k of W_ORDER) if (k !== 'mortar' && (!weapons[k] || lobby)) pool.push(k, k, k);      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
-    if (lobby || upGot < UP_MAX) pool.push('U', 'U');      // the mortar chip became the upgrade
-    if (!pool.length) { if (Math.random() < 0.3) spawnPickup('heal', at); return; }
-    const k = pool[Math.floor(Math.random() * pool.length)]; spawnPickup(k === 'U' ? 'upgrade' : 'w_' + k, at);
+  function dropWeapon(at) {                                 // after the warm-up: now and then a one-shot token (gear itself only drops for you, from your own kills)
+    const onGround = pickups.filter(p => p.type.startsWith('x_') && Math.hypot(p.x - at.x, p.z - at.z) < 45).length;
+    if (onGround >= 2) return;
+    const r = Math.random(), xs = Object.keys(X_TOKENS);
+    if (r < 0.3) spawnPickup(xs[Math.floor(Math.random() * xs.length)], at); else if (r < 0.42) spawnPickup('heal', at);
   }
+
   function crateDrop(o) {
     if (o.room || PH.i === 0) return;                     // the warm-up is fought with what the ride came with                                    // the boss's ammo doesn't pay out
     if (firstCrateDrop || Math.random() < Math.min(0.8, WEAPON_DROP * (1 + 0.5 * (NET.on && NET.game ? NET.remotes.size : 0)))) { firstCrateDrop = false; dropWeapon(o.mesh.position); }
@@ -5359,9 +5384,9 @@ const MONSTERS = [
     if (!NET.client && !startEl.isConnected) {          // the phase decides whether waves come at all; a wave is cleared once ~80% of it is down
       const P = PHASES[PH.i], thr = Math.max(2, Math.ceil(waves.size * 0.2));
       waves.since += dt; waves.gap -= dt;
-      if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = PH.i === 0 ? 2 : 4; if (PH.i > 0) dropWeapon(waves.lastKill); }
+      if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 2; }
       const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
-      const room = PH.i !== 0 || alive < 36;               // the warm-up stays a mow, not a pile-up: no new swarm while 36 are still around
+      const room = alive < P.max;                          // a mess, not a pile-up: no new wave while the field is full
       if (!calm && room && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
 
@@ -7015,7 +7040,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 19;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 20;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7355,7 +7380,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: kitDone() ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: gearDone() ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -7497,11 +7522,11 @@ const MONSTERS = [
   }
   // ---- phases: the run is a chain of phases, each a few waves with its own goals and a break before the next. The host runs it ----
   const PHASES = [
-    { key: 'roll',  name: 'ROLL OUT',          desc: 'Warm up: pick up your skills, mow the small fry',      waves: 99, brk: 8,  mul: 1.0, over: 0.5, cap: 13 },
-    { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 3,  brk: 18, mul: 1.1, over: 0.3, cap: 30 },
-    { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.4, over: 0.5, cap: 24 },
-    { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 5,  brk: 18, mul: 2.6, over: 0.65, cap: 15 },
-    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99 },
+    { key: 'roll',  name: 'ROLL OUT',          desc: 'Gear up: skills, guns and upgrades drop from your kills', waves: 99, brk: 8,  mul: 1.0, over: 0.6, cap: 10, max: 45 },
+    { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 99, brk: 18, mul: 1.2, over: 0.6, cap: 12, max: 50 },
+    { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.5, over: 0.6, cap: 12, max: 60 },
+    { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 99, brk: 18, mul: 2.6, over: 0.7, cap: 11, max: 75 },
+    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99, max: 0 },
   ];
   const NEST_GOAL = 4, FIND_R = 34;
   const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
@@ -7514,10 +7539,10 @@ const MONSTERS = [
   const foundN = () => ({ a: altars.filter(A => A.found).length, r: rocks.filter(R => R.found).length });
   function phDone() {
     const k = PHASES[PH.i].key, f = foundN();
-    if (k === 'roll') return kitDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every(R => R.ak));
-    if (k === 'scout') return PH.clr >= 3 && f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
+    if (k === 'roll') return gearDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every(R => R.ak));
+    if (k === 'scout') return f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
     if (k === 'save') return altarsDone >= 3;
-    if (k === 'hell') return PH.clr >= PHASES[PH.i].waves && PH.hellN >= hellTotal() && hellAlive() === 0;
+    if (k === 'hell') return PH.hellN >= hellTotal() && hellAlive() === 0;
     return false;
   }
   function phEnter(i, brk) {                           // everybody: a new phase (or the break before it) begins
@@ -7581,11 +7606,12 @@ const MONSTERS = [
     const tk = (txt, done, n) => { const just = done && !tkDone.has(txt); if (done) tkDone.add(txt); return `<div class="tk${done ? ' done' : ''}${just ? ' just' : ''}"><i></i><span>${txt}</span>${n != null && !done ? `<em>${n}</em>` : ''}</div>`; };
     const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
     let t = '';
-    if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length; t = tk('Pick up your skills', have >= K.length, have + '/' + K.length);
-      if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (kitDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
-    else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate) + tk('Survive 3 waves', PH.clr >= 3, PH.clr + '/3');
+    if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length, gw = W_GEAR.filter(k => weapons[k]).length;
+      t = tk('Pick up your skills', have >= K.length, have + '/' + K.length) + tk('Find your guns', gw >= 3, gw + '/3') + tk('Collect upgrades', upGot >= UP_MAX, upGot + '/' + UP_MAX);
+      if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (gearDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
+    else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate);
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
-    else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Survive ' + P.waves + ' waves', PH.clr >= P.waves, PH.clr + '/' + P.waves) + tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
+    else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
     else t = tk('Kill the Pyramidon', boss.state === 'dead');
     return `<div class="ph">${PH.brk > 0 ? 'NEXT: ' : ''}${P.name}</div><div class="sub${PH.brk > 0 ? '' : ' desc'}">${PH.brk > 0 ? 'break · ' + Math.ceil(PH.brk) + 's' : P.desc}</div>` + t;
   }
