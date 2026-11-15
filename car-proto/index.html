@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 103, buildEl = document.getElementById('build');
+  const BUILD = 104, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2818,7 +2818,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
   renderer.domElement.tabIndex = 0;
 
   function respawn() {
-    car.pos.set(0, 0, 0); car.vel.set(0, 0, 0); car.speed = 0; car.heading = 0;
+    { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
+    car.vel.set(0, 0, 0); car.speed = 0;
     car.hp = car.maxHp; car.alive = true; carGroup.visible = true;
     car.burrow = 'up'; car.depth = 0; car.y = 0; car.vy = 0; car.airborne = false;
     if (!(NET.on && NET.game)) resetBoss(); if (NET.on && NET.game) { cartFling(cart.riders.length, 0); cartReset(); } else clearSwarm(); clearEShots(); crewSay('respawn', 1, true);
@@ -4060,6 +4061,66 @@ laugh(r) {                                       // a big man's belly laugh: bre
     for (const T of trails.values()) for (const q of T.pts)
       for (const m of swarm) { if (m.dead || m.K.fly) continue; if (Math.abs(m.pos.x - q.x) < 1.5 && Math.abs(m.pos.z - q.z) < 1.5) { m.lost = 2; if (q.slow) m.slow = 2; } }
   }
+  // ----- the warm-up: weapon pedestals pour monsters until somebody takes the gun; then wandering bosses carry the skills -----
+  const pedestals = []; let pedStage = 0, pedT = 0, wbKilled = 0, wbSpawned = false;
+  const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({ color: 0x6f6458, roughness: 0.9 });
+  function addPedestal(k, x, z) {
+    if (pedestals.some(p => p.k === k)) return;
+    const g = new THREE.Group(), base = new THREE.Mesh(pedBaseGeo, pedMat); base.position.y = 0.7; base.castShadow = base.receiveShadow = true;
+    if (!pickupTex['w_' + k]) pickupTex['w_' + k] = srgbTex(ICONS['w_' + k]);
+    const icon = new THREE.Sprite(glow(new THREE.SpriteMaterial({ map: pickupTex['w_' + k], transparent: true }), 1.2)); icon.scale.set(2.8, 2.8, 1); icon.position.y = 3.4;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.1, 40), glow(new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.8, depthWrite: false }), 2.4)); ring.geometry.rotateX(-Math.PI / 2); ring.position.y = 0.05;
+    g.add(base, icon, ring); g.position.set(x, 0, z); scene.add(g);
+    pedestals.push({ k, x, z, g, icon, ring, done: false, mine: false });
+    burst(tmp.set(x, 1, z), 0xffd23a, 16, 3, 8, 0.6);
+  }
+  function pedSpot(avoid) {                                // somewhere far from the centre, clear of nests, altars and the other pedestals
+    for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, r = ARENA * (0.55 + Math.random() * 0.2), x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (obstacles.some(o => active(o) && Math.hypot(o.mesh.position.x - x, o.mesh.position.z - z) < 9)) continue;
+      if (pedestals.some(p => Math.hypot(p.x - x, p.z - z) < 110) || avoid.some(([ax, az]) => Math.hypot(ax - x, az - z) < 25)) continue;
+      return [Math.round(x), Math.round(z)]; }
+    return [Math.round(Math.random() * 200 - 100), Math.round(Math.random() * 200 - 100)];
+  }
+  function pedTaken(i) {                                   // host: somebody took this gun; the pedestal stops pouring, the next stage may open
+    const P = pedestals[i]; if (!P || P.done) return; P.done = true;
+    if (pedStage === 0 && P.k === 'spread') { pedStage = 1; const av = altars.map(A => [A.x, A.z]);
+      for (const k of ['nova', 'orbit']) { const [x, z] = pedSpot(av); addPedestal(k, x, z); netEv({ t: 'ped', k, x, z }); }
+      flashAlert('MORE GUNS ON THE MAP'); netEv({ t: 'alert', s: 'MORE GUNS ON THE MAP' }); }
+    else if (pedStage === 1 && pedestals.every(p => p.done)) { pedStage = 2; spawnWanderers(); }
+  }
+  function spawnWanderers() {                              // host: three big wandering bosses, each carries a skill for everyone
+    wbSpawned = true;
+    for (let i = 0; i < 3; i++) { const a = i * 2.094 + Math.random(), r = ARENA * (0.45 + Math.random() * 0.25);
+      const m = makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], Math.cos(a) * r, Math.sin(a) * r)); makeWanderer(m); }
+    flashAlert('WANDERING BOSSES!'); netEv({ t: 'alert', s: 'WANDERING BOSSES!' }); SFX.play('boss_roar', null, { vol: 0.6 });
+  }
+  function makeWanderer(m) {
+    if (m.wb) return; m.wb = true; m.K = { ...m.K, size: m.K.size * 1.4, r: Math.min(2.6, m.K.r * 1.3) }; m.r = m.K.r; m.hp *= 3; m.wp = null;
+    m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
+  }
+  function wbFar(m) {                                      // nobody close: the boss just roams
+    let d = Math.hypot(car.pos.x - m.pos.x, car.pos.z - m.pos.z);
+    for (const R of NET.remotes.values()) if (R.up) d = Math.min(d, Math.hypot(R.pos.x - m.pos.x, R.pos.z - m.pos.z));
+    return d > 24;
+  }
+  function updatePedestals(dt) {
+    if (startEl.isConnected) return;
+    if (!NET.client && PH.i === 0 && !pedestals.length) { addPedestal('spread', 0, 0); netEv({ t: 'ped', k: 'spread', x: 0, z: 0 }); }
+    for (let i = 0; i < pedestals.length; i++) {
+      const P = pedestals[i]; P.icon.position.y = 3.4 + Math.sin(elapsed * 2.5 + i) * 0.35; P.ring.rotation.y += dt;
+      const have = weapons[P.k] > 0; P.icon.material.opacity = have ? 0.25 : 1; P.ring.material.opacity = have ? 0.2 : 0.8;
+      if (!have && car.alive && Math.hypot(car.pos.x - P.x, car.pos.z - P.z) < 3.4) {
+        gainWeapon('w_' + P.k); P.mine = true; toast('w_' + P.k, '— level it up with upgrades'); SFX.play('pickup', null);
+        flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5);
+        if (NET.client) netEv({ t: 'pedtake', k: P.k }, NET.hostPeer); else { netEv({ t: 'pedtake', k: P.k }); pedTaken(i); }
+      }
+    }
+    if (!NET.client && PH.i === 0 && PH.brk <= 0 && pedStage < 2 && (pedT -= dt) <= 0) {       // live pedestals pour small fry
+      pedT = 6;
+      for (const P of pedestals) { if (P.done || waves.alive >= PHASES[0].max) continue;
+        for (let j = 0; j < 7; j++) { const a = Math.random() * 6.283, d = 6 + Math.random() * 6; digOut(spawnCritter(['gremlin', 'gremlin', 'maw', 'stilt'][j % 4], P.x + Math.cos(a) * d, P.z + Math.sin(a) * d)); } }
+    }
+  }
   // ---------- jump ----------
   const JUMP_V = 15, CAR_G = 32;                    // ~0.95 с в воздухе, высота ~3.5 — перелетает ящики и злюк
   function jump() {
@@ -4342,17 +4403,13 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function gearNext() {                                    // what I am still missing: my ride's skills, then the three guns, then upgrades
     const t = kit().find(t => !abilities[t]); if (t) return t;
     const w = W_GEAR.find(k => !weapons[k]); if (w) return 'w_' + w;
-    return upGot < UP_MAX ? 'upgrade' : null;
+    return null;
   }
   const gearDone = () => !gearNext();
-  function myKill(x, z, w) {                               // something I killed or smashed: every few of them, my next missing piece of gear drops (just for me)
-    if (startEl.isConnected) return; const nx = gearNext(); if (!nx) return;
-    kitProg += w; if (kitProg < kitNeed || pickups.some(p => p.own)) return;
-    kitProg = 0; kitNeed = 5;
-    let px = x, pz = z;
-    if (Math.hypot(x - car.pos.x, z - car.pos.z) > 12) { px = car.pos.x + Math.sin(car.heading) * 6; pz = car.pos.z + Math.cos(car.heading) * 6; }      // killed far away: it drops in front of you instead
-    px = THREE.MathUtils.clamp(px, -ARENA + 4, ARENA - 4); pz = THREE.MathUtils.clamp(pz, -ARENA + 4, ARENA - 4);
-    spawnPickup(nx, tmp.set(px, 0, pz), undefined, true); pickups[pickups.length - 1].own = true;
+  function myKill() {}                                     // ordinary kills drop nothing personal any more
+  function bossDrop(x, z) {                                // a wandering boss died: everybody gets their next skill right there (lying where it fell)
+    const t = kit().find(t => !abilities[t]) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
+    spawnPickup(t, tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
   function spawnPickup(type, at, id, remote) {
@@ -5224,7 +5281,8 @@ const MONSTERS = [
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
     if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
     waves.lastKill.copy(m.pos);
-    if (m.mini && !NET.client) { dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
+    if (m.wb) { wbKilled++; bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); shake = Math.max(shake, 0.6); }
+    else if (m.mini && !NET.client) { if ((NET.on && NET.game) || upGot < UP_MAX) spawnPickup('upgrade', m.pos); else dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
     if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
   function hitCritter(m, dmg, dir, push = 3) {
@@ -5387,7 +5445,7 @@ const MONSTERS = [
       if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 2; }
       const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
       const room = alive < P.max;                          // a mess, not a pile-up: no new wave while the field is full
-      if (!calm && room && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
+      if (!calm && room && !(PH.i === 0 && pedStage < 2) && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
@@ -5411,6 +5469,8 @@ const MONSTERS = [
         const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null, dec = decoys.length ? decoyNear(m) : null;
         if (m.lost > 0) m.lost -= dt;
         if (dec) { const ex = dec.x - m.pos.x, ez = dec.z - m.pos.z, ed = Math.hypot(ex, ez) || 1e-3; tx = ex / ed * K.speed * 1.15; tz = ez / ed * K.speed * 1.15; }      // squeak! everybody goes for the decoy
+        else if (m.wb && wbFar(m)) { if (!m.wp || Math.hypot(m.wp[0] - m.pos.x, m.wp[1] - m.pos.z) < 6) m.wp = [rand(-ARENA * 0.7, ARENA * 0.7), rand(-ARENA * 0.7, ARENA * 0.7)];
+          const ex = m.wp[0] - m.pos.x, ez = m.wp[1] - m.pos.z, ed = Math.hypot(ex, ez) || 1; tx = ex / ed * K.speed * 0.55; tz = ez / ed * K.speed * 0.55; }
         else if (m.lost > 0) { tx = Math.sin(m.phase * 0.7) * K.speed * 0.5; tz = Math.cos(m.phase * 0.9) * K.speed * 0.5; }      // stepped on the rainbow: wanders, lost
         else if (prey) {                                        // run a chubzik down and eat it
           const px = prey.pos.x - m.pos.x, pz = prey.pos.z - m.pos.z, pd = Math.hypot(px, pz) || 1e-4;
@@ -6963,7 +7023,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
+    updatePickups(dt); updatePedestals(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -7040,7 +7100,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 20;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 21;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7118,7 +7178,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible && !o.dormant) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pd: pedestals.map(P => [P.k, r1(P.x), r1(P.z), P.done ? 1 : 0]), pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -7161,7 +7221,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0)]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0) | (m.wb ? 32 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -7179,7 +7239,7 @@ const MONSTERS = [
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA - 50, ARENA + 50), z = num(e[3], -ARENA - 50, ARENA + 50);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 4) gateSpawned = true; }
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) makeWanderer(m); if (e[4] & 4) gateSpawned = true; }
         m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
@@ -7269,6 +7329,9 @@ const MONSTERS = [
       else if (d.t === 'aw') { const A = altars[d.k]; if (NET.client && A && !A.done) { A.awake = d.s === 1; if (d.n != null) A.spawnT = num(d.n, 0, 99); if (d.w === 1 || d.w === 2) altarWave(A, d.w); } }
       else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
+      else if (d.t === 'ped') { const k = W_GEAR.includes(d.k) ? d.k : null; if (k) addPedestal(k, num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
+      else if (d.t === 'pedtake') { const i = pedestals.findIndex(P => P.k === d.k); if (i >= 0) { if (!NET.client) { NET.applying = false; pedTaken(i); } else pedestals[i].done = true; } }
+      else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
       else if (d.t === 'cubes') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R) spawnCubes(Math.round(num(d.n, 1, 5)), R, Math.round(num(d.l, 0, 2))); }
       else if (d.t === 'dome') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), r = num(d.r, 3, 14), T = num(d.T, 0.5, 6); addDome(x, z, r, T); if (!NET.client) { NET.applying = false; blastAt(x, z, r, 1, 26, true); } }
@@ -7290,6 +7353,7 @@ const MONSTERS = [
         (Array.isArray(d.aw) ? d.aw : []).forEach((t, k) => { const A = altars[k]; if (A && typeof t === 'number' && t >= 0) { A.awake = true; A.spawnT = num(t, 0, 99); } });
         (Array.isArray(d.al) ? d.al : []).forEach((n, k) => { const A = altars[k]; if (A && Number.isInteger(n) && n > A.n) { A.n = Math.min(ALTAR_NEED, n); altarApply(A); } });
         if (NET.goPending) { NET.goPending = false; openGate(); }
+        if (Array.isArray(d.pd)) for (const q of d.pd) if (Array.isArray(q) && W_GEAR.includes(q[0])) { addPedestal(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA)); const P = pedestals.find(P => P.k === q[0]); if (P && q[3] === 1) P.done = true; }
         if (Array.isArray(d.ph) && Number.isInteger(d.ph[0]) && d.ph[0] >= 0 && d.ph[0] < PHASES.length) {
           if (d.ph[0] !== PH.i) phEnter(d.ph[0], num(d.ph[1], 0, 60)); else PH.brk = num(d.ph[1], 0, 60);
           PH.clr = num(d.ph[2], 0, 99) | 0; PH.wv = num(d.ph[3], 0, 99) | 0; PH.hellN = num(d.ph[4], 0, 99) | 0; PH.t = num(d.ph[5], 0, 9999);
@@ -7522,7 +7586,7 @@ const MONSTERS = [
   }
   // ---- phases: the run is a chain of phases, each a few waves with its own goals and a break before the next. The host runs it ----
   const PHASES = [
-    { key: 'roll',  name: 'ROLL OUT',          desc: 'Gear up: skills, guns and upgrades drop from your kills', waves: 99, brk: 8,  mul: 1.0, over: 0.6, cap: 10, max: 45 },
+    { key: 'roll',  name: 'ROLL OUT',          desc: 'Gear up: guns on the pedestals, skills on the wandering bosses', waves: 99, brk: 8,  mul: 1.0, over: 0.6, cap: 10, max: 45 },
     { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 99, brk: 18, mul: 1.2, over: 0.6, cap: 12, max: 50 },
     { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.5, over: 0.6, cap: 12, max: 60 },
     { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 99, brk: 18, mul: 2.6, over: 0.7, cap: 11, max: 75 },
@@ -7607,7 +7671,8 @@ const MONSTERS = [
     const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
     let t = '';
     if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length, gw = W_GEAR.filter(k => weapons[k]).length;
-      t = tk('Pick up your skills', have >= K.length, have + '/' + K.length) + tk('Find your guns', gw >= 3, gw + '/3') + tk('Collect upgrades', upGot >= UP_MAX, upGot + '/' + UP_MAX);
+      t = tk('Grab the spray gun', weapons.spread > 0) + (pedestals.length > 1 ? tk('Guns on the pedestals', weapons.nova > 0 && weapons.orbit > 0, (+(weapons.nova > 0) + +(weapons.orbit > 0)) + '/2') : '')
+        + (pedestals.length > 1 && pedestals.every(P => P.done) ? tk('Hunt the wandering bosses', have >= K.length, have + '/' + K.length + ' skills') : '');
       if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (gearDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate);
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
@@ -7641,6 +7706,8 @@ const MONSTERS = [
     for (const R of rocks) { if (!R.mesh.visible || !R.found) continue; const n = PH.i >= 2 ? nestCount(R) : 0, [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
     for (const A of altars) { if (!A.found) continue; const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
       if (!A.done && A.n) { x.beginPath(); x.arc(px, py, 5 * dpr, -1.571, -1.571 + 6.283 * A.n / ALTAR_NEED); x.strokeStyle = '#5fd0ff'; x.lineWidth = 2 * dpr; x.stroke(); } }
+    for (const P of pedestals) { const [px, py] = dot(P.x, P.z, 4.5, weapons[P.k] ? 'rgba(255,210,58,.35)' : '#ffd23a'); if (!weapons[P.k]) label(px, py - 9 * dpr, '⚙', '#ffd23a', 11); }
+    for (const m of swarm) if (m.wb && !m.dead) { const [px, py] = f(m.pos.x, m.pos.z); label(px, py, '☠', '#ff5a5a', 13); }
     for (const R of NET.remotes.values()) if (R.up) dot(R.pos.x, R.pos.z, 3.4, '#9cf59a');
     if (car.alive) {                                   // me: an arrow along the heading
       const [px, py] = f(car.pos.x, car.pos.z), hx = Math.sin(car.heading), hz = Math.cos(car.heading), du = (hx - hz), dv = (hx + hz), L = Math.hypot(du, dv) || 1, ux = du / L, uy = dv / L, s = 6 * dpr;
@@ -7659,6 +7726,8 @@ const MONSTERS = [
           if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' });
           else if (!R.found && PH.i <= 1) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '?', cap: 'chubzik nest' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
+        for (const P of pedestals) if (!weapons[P.k]) hintList.push({ x: P.x, z: P.z, d: Math.hypot(P.x - car.pos.x, P.z - car.pos.z), range: 999, col: '#ffd23a', text: '⚙', cap: AB_INFO['w_' + P.k].title });
+        for (const m of swarm) if (m.wb && !m.dead) hintList.push({ x: m.pos.x, z: m.pos.z, d: Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z), range: 999, col: '#ff5a5a', text: '☠', cap: 'wandering boss', live: m });
         for (const p of pickups) if (p.own) hintList.push({ x: p.x, z: p.z, d: Math.hypot(p.x - car.pos.x, p.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: AB_INFO[p.type].title });      // your gear drop: always pointed at
         if (worldUp) altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
         { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
@@ -7724,6 +7793,7 @@ const MONSTERS = [
     shot(cell('Unlock the boss', 5), ROOM_X1 - 2, 2.2, 0, 8.5);
   })();
   Math.random = trueRandom;                             // world is built: back to real randomness for the simulation
+  { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
   camFocus.copy(car.pos);
   function frame() {
     const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
