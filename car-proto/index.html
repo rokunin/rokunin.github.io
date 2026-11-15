@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 102, buildEl = document.getElementById('build');
+  const BUILD = 103, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -7659,6 +7659,7 @@ const MONSTERS = [
           if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' });
           else if (!R.found && PH.i <= 1) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '?', cap: 'chubzik nest' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
+        for (const p of pickups) if (p.own) hintList.push({ x: p.x, z: p.z, d: Math.hypot(p.x - car.pos.x, p.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: AB_INFO[p.type].title });      // your gear drop: always pointed at
         if (worldUp) altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
         { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
       }
