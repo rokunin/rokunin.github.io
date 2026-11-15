@@ -2779,7 +2779,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 100, buildEl = document.getElementById('build');
+  const BUILD = 101, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4118,7 +4118,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
   const kitDone = () => kit().every(t => abilities[t]);
   const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0, decoy: 0, cubes: 0, trail: 0 };      // upgrades spent on each, 0..AB_LV_MAX
-  const AB_LV_MAX = 2, UP_MAX = 5;                         // ~5 upgrades a run: enough for two or three skills, not all
+  const AB_LV_MAX = 2, UP_MAX = 6;                         // ~6 upgrades a run against 12 possible levels (3 skills + 3 guns, 2 each): you pick a build
   let upPts = 0, upGot = 0;
   const UP_TEXT = { drill: ['spins longer', 'wider and meaner'], burrow: ['harder to dig out', 'surfacing knocks everyone back'], grab: ['throws hit twice as hard', 'throws x3, loot flies to you'],
                     jump: ['bigger landing crush', 'landing shockwave stuns'], doubleJump: ['a third jump', 'air jumps blast below'], bomb: ['bigger dome, 3 s', 'huge dome, 4 s'],
@@ -4357,7 +4357,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       p.ring.rotation.y += dt * 2;
       p.ring.scale.setScalar(1 + Math.sin(p.t * 4) * 0.08);
       if (p.t > 75 && (p.type.startsWith('w_') || p.type === 'heal' || p.type === 'upgrade')) { scene.remove(p.sprite, p.ring, p.beam); pickups.splice(i, 1); continue; }      // nobody wanted it
-      const full = (NET.on && NET.game && p.type.startsWith('w_') && weapons[p.type.slice(2)] >= W_MAX) || (p.type === 'upgrade' && upGot >= UP_MAX);           // maxed out: leave it for the others
+      const full = (p.type.startsWith('w_') && weapons[p.type.slice(2)] > 0) || (p.type === 'upgrade' && upGot >= UP_MAX);           // already have that gun (level it with upgrades) / enough upgrades: leave it for the others
       const can = !full && car.alive && car.depth < 0.3 && p.t > 0.4;
       let dB = Math.hypot(car.pos.x - p.x, car.pos.z - p.z), dK = cart.shown ? Math.hypot(cart.pos.x - p.x, cart.pos.z - p.z) : 1e9;
       if (can) {                                           // loot drifts toward a passing ride (or its cart) so near misses still count
@@ -4375,7 +4375,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         if (!p.type.startsWith('w_') && p.type !== 'heal' && p.type !== 'upgrade' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
         if (p.type === 'heal') car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.4);
         else if (p.type === 'upgrade') { upPts++; upGot++; extra = '(' + upPts + ' to spend)'; abSig = ''; }
-        else if (p.type.startsWith('w_')) { const lv = gainWeapon(p.type); extra = lv >= W_MAX ? 'MAX' : 'Lv ' + lv; }
+        else if (p.type.startsWith('w_')) { gainWeapon(p.type); extra = '— level it up with upgrades'; }
         else { abilities[p.type] = true; applyAbilityVisuals(); crewSay('ability'); }
         toast(p.type, extra); SFX.play(p.type === 'heal' ? 'heal' : 'pickup', null);
         spawnParticles(tmp.set(p.x, 1.5, p.z), new THREE.Color(AB_INFO[p.type].bg).getHex(), 16, 8);
@@ -4402,11 +4402,11 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const wBar = document.getElementById('weapons');
   function updateWeaponHUD(fresh) {                      // fresh: the weapon that just changed pops
     wBar.innerHTML = W_ORDER.filter(k => weapons[k]).map(k =>
-      `<div class="wslot${k === fresh ? ' new' : ''}${upPts > 0 && weapons[k] < W_MAX ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + weapons[k]}</b></div>`).join('');
+      `<div class="wslot${k === fresh ? ' new' : ''}${upPts > 0 && weapons[k] < W_MAX ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + wLv(k)}</b></div>`).join('');
   }
   { const spendW = e => { const u = e.target.closest && e.target.closest('.up'); if (!u) return; e.preventDefault(); e.stopPropagation();
-      const k = u.dataset.k; if (upPts <= 0 || !weapons[k] || weapons[k] >= W_MAX) return; upPts--; const lv = gainWeapon('w_' + k);
-      toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + lv); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
+      const k = u.dataset.k; if (upPts <= 0 || !weapons[k] || weapons[k] >= W_MAX) return; upPts--; const lv = gainWeapon('w_' + k, true);
+      toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + wLv(k)); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
     wBar.addEventListener('mousedown', spendW); wBar.addEventListener('touchstart', spendW, { passive: false }); }
   let wUpSeen = -1;
   function dropWeapon(at) {
@@ -4414,7 +4414,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (onGround >= 3) return;
     const lobby = NET.on && NET.game;
     const pool = [];
-    for (const k of W_ORDER) if (k !== 'mortar' && (weapons[k] < W_MAX || lobby)) pool.push(...Array(weapons[k] ? 2 : 3).fill(k));      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
+    for (const k of W_ORDER) if (k !== 'mortar' && (!weapons[k] || lobby)) pool.push(k, k, k);      // in a lobby a chip I cannot use is still good for somebody   // new weapons a bit more likely
     if (lobby || upGot < UP_MAX) pool.push('U', 'U');      // the mortar chip became the upgrade
     if (!pool.length) { if (Math.random() < 0.3) spawnPickup('heal', at); return; }
     const k = pool[Math.floor(Math.random() * pool.length)]; spawnPickup(k === 'U' ? 'upgrade' : 'w_' + k, at);
@@ -4423,8 +4423,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (o.room || PH.i === 0) return;                     // the warm-up is fought with what the ride came with                                    // the boss's ammo doesn't pay out
     if (firstCrateDrop || Math.random() < Math.min(0.8, WEAPON_DROP * (1 + 0.5 * (NET.on && NET.game ? NET.remotes.size : 0)))) { firstCrateDrop = false; dropWeapon(o.mesh.position); }
   }
-  function gainWeapon(type) {
-    const k = type.slice(2); weapons[k] = Math.min(W_MAX, weapons[k] + 1);
+  const wLv = k => Math.ceil(weapons[k] / 2);                // shown level 1..3 (the stat tables keep 5 steps: 1, 3, 5)
+  function gainWeapon(type, up) {
+    const k = type.slice(2); weapons[k] = up ? Math.min(W_MAX, weapons[k] + 2) : Math.max(1, weapons[k]);
     updateWeaponHUD(k); crewSay('weapon');
     if (k === 'orbit') buildSaws();
     return weapons[k];
