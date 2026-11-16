@@ -2658,7 +2658,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       m.lookAt(tip.x + dir.x, tip.y + dir.y, tip.z + dir.z);
       scene.add(m);
       const holy = ride === 'halo';                      // the halo's own gun is the weakest of the lot: its strength is the swords
-      bullets.push({ m, v: dir.multiplyScalar(star ? 52 : holy ? 52.5 : 70), life: star ? 1.4 : 1.1, spin: star, dmg: holy ? 0.75 : 1 });
+      bullets.push({ m, v: dir.multiplyScalar(star ? 52 : holy ? 52.5 : 70), life: (star ? 1.4 : 1.1) * (lv ? (holy ? 0.8 : 0.85) : 1), spin: star, dmg: holy ? 0.75 : 1 });      // the fan gun reaches shorter
     }
     muzzleTimer = 0.04;
     muzzleLight.position.copy(tip); muzzleLight.intensity = Math.max(muzzleLight.intensity, 0.55);
@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 105, buildEl = document.getElementById('build');
+  const BUILD = 106, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -2973,7 +2973,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     SFX.play('clang', car.pos);
     car.vel.x += dir.x * 9; car.vel.z += dir.z * 9; car.speed *= 0.4;      // sideways shove only: a shot coming down at an angle must not push the ride into the ground
     if (car.hp <= 0) {
-      car.hp = 0; car.alive = false; car.deadTimer = 2.2; crewSay('dead', 1, true);
+      car.hp = 0; car.alive = false; car.deadTimer = 2.2; crewSay('dead', 1, true); deathToll();
       carGroup.visible = false;
       spawnParticles(tmp.copy(car.pos).setY(1), 0xc26a30, 22, 12);
       flash(tmp, 0xff9040, 14, 0.4, 4); burst(tmp, 0x3a3634, 10, 2.6, 5, 0.55);
@@ -4127,7 +4127,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         if (NET.client) netEv({ t: 'pedtake', k: P.k }, NET.hostPeer); else { netEv({ t: 'pedtake', k: P.k }); pedTaken(i); }
       }
     }
-    if (!NET.client && PH.i === 0 && pedStage === 2) wbTopUp(dt);
+    if (!NET.client && pedStage === 2 && !startEl.isConnected) wbTopUp(dt);
     if (!NET.client && PH.i === 0 && PH.brk <= 0 && pedStage < 2 && (pedT -= dt) <= 0) {       // live pedestals pour small fry
       pedT = 6;
       for (const P of pedestals) { if (P.done || waves.alive >= PHASES[0].max) continue;
@@ -4692,6 +4692,19 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const saws = []; let sawAngle = 0;
   const dodecaGeo = new THREE.DodecahedronGeometry(0.62, 0);
   const dodecaMats = RAINBOW.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.2, flatShading: true }));
+  function trimSaws() {                                     // a level or the whole saw gun lost: fewer saws
+    const n = weapons.orbit ? W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1) : 0;
+    while (saws.length > n) scene.remove(saws.pop().m);
+  }
+  function deathToll() {                                    // dying on the field costs a random upgrade level, or a random skill/gun when nothing is levelled
+    const lv = [...kit().filter(t => abilities[t] && abLv[t] > 0).map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k] > 1).map(k => ['w', k])];
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    let lost = null;
+    if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } upGot = Math.max(0, upGot - 1); lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
+    } else { const own = [...kit().filter(t => abilities[t]).map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
+      const [kind, k] = pick(own); if (kind === 'ab') { abilities[k] = false; applyAbilityVisuals(); } else { weapons[k] = 0; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'LOST']; }
+    abDirty = true; abSig = ''; toast(lost[0], lost[1]);
+  }
   function buildSaws() {
     const n = W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1);
     while (saws.length < n) {
@@ -5411,6 +5424,9 @@ const MONSTERS = [
     if (fly && first) return [first[0], first[1], false];       // a flier just comes in over the nearest edge, in plain sight
     return [best[0], best[1], false];                   // nowhere hidden (players spread over the whole arena): as far from everyone as it gets, dug in on screen
   }
+  function gateSpot() {                                     // a wave for somebody in the boss room: it gathers out on the plain in front of the gate and charges in
+    return [ARENA - 22 - Math.random() * 22, (Math.random() - 0.5) * 50, false];
+  }
   const DIG_T = 1.1;
   function digOut(m) { m.dig = DIG_T; burst(tmp.set(m.pos.x, 0.2, m.pos.z), 0x6f5f4c, 5, 1.6 + m.K.r, 2.5, 0.5); SFX.play('land', m.pos, { vol: 0.45, rate: 0.6 }); }
   function digTick(m, dt) {                              // still climbing out of the ground: dust, no moving, no biting
@@ -5430,13 +5446,13 @@ const MONSTERS = [
       const ang = base + gi * 6.283 / Math.max(2, groups) + (Math.random() - 0.5) * 0.8;      // groups come from different sides of the screen
       count = Math.round(count * waveMul());            // the phase sets the pressure
       for (let i = 0; i < count && swarm.length < SW_CAP; i++) { made++;
-        const fly = !!SW_KINDS[kind].fly, [x, z, hid] = offscreenSpot(wp, ang + (Math.random() - 0.5) * 0.9, 3 + Math.random() * 5, fly);
+        const fly = !!SW_KINDS[kind].fly, [x, z, hid] = inRoom(wp.x, wp.z) ? gateSpot() : offscreenSpot(wp, ang + (Math.random() - 0.5) * 0.9, 3 + Math.random() * 5, fly);
         const m = spawnCritter(kind, x, z);
         if (fly) m.inbound = Math.abs(x) > ARENA || Math.abs(z) > ARENA;      // flies in over the wall
         else if (!hid) digOut(m);
       }
     });
-    const [mx, mz, mhid] = offscreenSpot(wp, base + 3.14, 6), swN = swarm.length;
+    const [mx, mz, mhid] = inRoom(wp.x, wp.z) ? gateSpot() : offscreenSpot(wp, base + 3.14, 6), swN = swarm.length;
     if (hell) { const per = Math.ceil(hellTotal() / 3); if (PH.hellN < hellTotal()) { const k = Math.min(per, hellTotal() - PH.hellN); const before = swarm.length; spawnMinis(k, mx, mz); for (let i = before; i < swarm.length; i++) if (swarm[i].mini) swarm[i].hell = true; PH.hellN += k; } }
     else if (PH.i >= 1) spawnMinis(1, mx, mz);          // from the scouting phase on, every wave brings one mini-boss
     if (!mhid) for (let i = swN; i < swarm.length; i++) if (!swarm[i].K.fly) digOut(swarm[i]);
@@ -5447,7 +5463,7 @@ const MONSTERS = [
   const swA = new THREE.Vector3();
   function updateSwarm(dt) {
     // director: no waves during the boss fight, inside the boss room, or while dead
-    const calm = !waveTargets().length || boss.state === 'fight' || boss.state === 'emerging' || angel.on;      // nobody out in the open: no waves
+    const calm = !waveTargets().length || (!gateOpen && (boss.state === 'fight' || boss.state === 'emerging')) || angel.on;      // nobody out in the open: no waves
     let alive = 0, mob = 0;
     for (const m of swarm) if (!m.dead) { if (!m.home) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
@@ -5496,7 +5512,11 @@ const MONSTERS = [
           tx = lx / ld * K.speed * 0.45; tz = lz / ld * K.speed * 0.45;
         }
         else if (!seen) { tx = -nx * K.speed * 0.8; tz = -nz * K.speed * 0.8; }            // car went underground: scatter
-        else if (inRoom(T.pos.x, T.pos.z) !== inRoom(m.pos.x, m.pos.z)) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is off-limits: loiter
+        else if (inRoom(T.pos.x, T.pos.z) !== inRoom(m.pos.x, m.pos.z)) {
+          if (!gateOpen) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is sealed: loiter
+          else { const inside = inRoom(m.pos.x, m.pos.z), gz = THREE.MathUtils.clamp(m.pos.z, -GATE_HZ + 2.5, GATE_HZ - 2.5), lined = Math.abs(m.pos.z) < GATE_HZ - 1.5 && Math.abs(m.pos.x - ARENA) < 6;
+            const gx = lined ? (inside ? ARENA - 6 : ARENA + 6) : (inside ? ARENA + 4 : ARENA - 4), ex = gx - m.pos.x, ez = gz - m.pos.z, ed = Math.hypot(ex, ez) || 1;   // through the gate, not into the wall
+            tx = ex / ed * K.speed; tz = ez / ed * K.speed; } }
         else if (K.ranged && dist < 11) { tx = -nx * K.speed; tz = -nz * K.speed; }         // spitters keep their distance
         else if (K.ranged && dist < 15) { tx = -nz * K.speed * 0.6; tz = nx * K.speed * 0.6; }   // and strafe
         else if (m.cartFan && (mine ? cart.riders.length : T.R.cn)) {        // half of them go for the cart instead of the car
@@ -7226,8 +7246,8 @@ const MONSTERS = [
     return best;
   }
   function waveTargets() {                              // players a wave could be sent at: up and outside the boss room
-    const a = []; if (carSeen() && !inRoom(car.pos.x, car.pos.z)) a.push(car.pos);
-    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) if (R.up && !inRoom(R.pos.x, R.pos.z)) a.push(R.pos);
+    const a = []; if (carSeen() && (gateOpen || !inRoom(car.pos.x, car.pos.z))) a.push(car.pos);
+    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) if (R.up && (gateOpen || !inRoom(R.pos.x, R.pos.z))) a.push(R.pos);
     return a;
   }
   function netAnyPlayer() { const a = waveTargets(); return a.length ? a[Math.floor(Math.random() * a.length)] : car.pos; }
@@ -7603,7 +7623,7 @@ const MONSTERS = [
     { key: 'scout', name: 'SCOUT THE WASTES',  desc: 'Find the altars, the chubzik nests and the boss gate', waves: 99, brk: 18, mul: 1.2, over: 0.6, cap: 12, max: 50 },
     { key: 'save',  name: 'SAVE & SACRIFICE',  desc: 'The chubziks are hatching. Haul them to the altars',   waves: 99, brk: 18, mul: 1.5, over: 0.6, cap: 12, max: 60 },
     { key: 'hell',  name: 'HELL BREAKS LOOSE', desc: 'Mini-bosses everywhere. Hold the line',                waves: 99, brk: 18, mul: 2.6, over: 0.7, cap: 11, max: 75 },
-    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 0,  brk: 0,  mul: 1, over: 0, cap: 99, max: 0 },
+    { key: 'boss',  name: 'THE PYRAMIDON',     desc: 'The gate is open. Go punch it',                        waves: 99, brk: 0,  mul: 1.4, over: 0.6, cap: 14, max: 45 },
   ];
   const NEST_GOAL = 4, FIND_R = 34;
   const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
