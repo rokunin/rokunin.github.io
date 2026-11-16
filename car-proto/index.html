@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 108, buildEl = document.getElementById('build');
+  const BUILD = 109, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5382,8 +5382,9 @@ const MONSTERS = [
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
     if (m.net) { m.flash = 0.08; m.myHit = elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
+    if (m.rig && push <= 3 && !(dir && dir.x * Math.sin(m.rig.rh) + dir.z * Math.cos(m.rig.rh) > 0.3)) dmg *= 0.4;      // the booth walls soak bullets and beams; the back window doesn't
     m.hp -= dmg; if (m.flash < -0.12) m.flash = 0.08;      // blinks under constant fire instead of staying lit
-    if (dir) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
+    if (dir && !m.rig) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
     if (m.hp <= 0) killCritter(m, dir);
   }
   // ---- mini-bosses: the same monsters a fifth bigger with a hellfire on their heads; they shoot like the players do and throw bullet patterns ----
@@ -5407,6 +5408,96 @@ const MONSTERS = [
     const f = new THREE.Sprite(hellMat); f.center.set(0.5, 0.05); f.position.set(0, 0.86, 0); f.scale.set(0.5, 0.36, 1); m.sprite.add(f); m.fire = f;
     m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
     return m;
+  }
+  // ---- elite rigs: a spiked log rolled ahead of an armoured booth; the elite inside shoots back. Kill it and the rig falls apart ----
+  const RIG = { speed: 3.2, turn: 0.32, logF: 5.2, logHalf: 6.3, logR: 2.2, boothR: 2.7, n: { roll: 2, scout: 6, save: 6, hell: 10, boss: 0 } };
+  const rigWood = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.95, flatShading: true }), rigMetal = new THREE.MeshStandardMaterial({ color: 0x8c8478, roughness: 0.55, metalness: 0.4, flatShading: true }),
+        rigRust = new THREE.MeshStandardMaterial({ color: 0x8a5a3a, roughness: 0.9, flatShading: true }), rigDark = new THREE.MeshStandardMaterial({ color: 0x3a3028, roughness: 0.9, flatShading: true });
+  const rigLogGeo = new THREE.CylinderGeometry(1.45, 1.45, RIG.logHalf * 2, 14); rigLogGeo.rotateZ(Math.PI / 2);
+  const rigSpikeGeo = new THREE.ConeGeometry(0.32, 1.3, 5), rigCapGeo = new THREE.CylinderGeometry(1.65, 1.65, 0.3, 14); rigCapGeo.rotateZ(Math.PI / 2);
+  const RIG_OPS = MINI_KINDS.filter(k => !SW_KINDS[k].fly);
+  let rigT = 8;
+  function makeRig(m) {
+    if (m.rig) return m; makeMini(m); m.hp *= 1.6; m.K = { ...m.K, heavy: true };
+    const g = new THREE.Group(), log = new THREE.Group(), body = new THREE.Mesh(rigLogGeo, rigWood); body.castShadow = true; log.add(body);
+    for (let i = 0; i < 7; i++) for (let j = 0; j < 6; j++) {                     // rows of spikes, staggered
+      const sp = new THREE.Mesh(rigSpikeGeo, rigMetal), a = j / 6 * 6.283 + (i % 2) * 0.52, x = -RIG.logHalf + 0.9 + i * (RIG.logHalf * 2 - 1.8) / 6;
+      sp.position.set(x, Math.cos(a) * 1.95, Math.sin(a) * 1.95); sp.rotation.x = a; sp.castShadow = true; log.add(sp); }
+    for (const sd of [-1, 1]) { const c = new THREE.Mesh(rigCapGeo, rigMetal); c.position.x = sd * RIG.logHalf; log.add(c); }
+    log.position.set(0, 2.0, RIG.logF); g.add(log);
+    for (const sd of [-1, 1]) {                                                    // arms from the booth out to the axle
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, RIG.logF + 0.4), rigRust); arm.position.set(sd * (RIG.logHalf + 0.35), 2.0, RIG.logF / 2); arm.castShadow = true; g.add(arm);
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(sd * RIG.logHalf * 0 + RIG.logHalf - 2, 0.3, 0.3), rigRust); brace.position.set(sd * (RIG.logHalf / 2 + 1), 1.2, 1.9); g.add(brace); }
+    const wall = (w, h, d, x, z, mat) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); b.position.set(x, h / 2, z); b.castShadow = b.receiveShadow = true; g.add(b); return b; };
+    wall(4.8, 2.3, 0.3, 0, 2.2, rigRust); wall(0.3, 2.3, 4.6, -2.3, 0, rigRust); wall(0.3, 2.3, 4.6, 2.3, 0, rigRust); wall(4.8, 0.9, 0.3, 0, -2.2, rigRust);   // the back wall is low: that's the window
+    wall(4.9, 0.18, 0.4, 0, -2.2, rigDark).position.y = 0.95;
+    for (const [x, z] of [[-2.3, 2.2], [2.3, 2.2], [-2.3, -2.2], [2.3, -2.2]]) { const post = wall(0.4, 2.7, 0.4, x, z, rigDark); }
+    g.position.copy(m.pos); scene.add(g);
+    m.rig = { g, log, rh: Math.random() * 6.283, roll: 0, fall: 1.0, hitCd: 0 };
+    m.atkT = 2.5;
+    return m;
+  }
+  function spawnRig() {                                    // host: a rig drops out of the sky somewhere just off a player's screen
+    const views = lobbyViews(), V = views[Math.floor(Math.random() * views.length)], wp = V.r ? V.r.pos : car.pos;
+    let [x, z] = offscreenSpot(wp, Math.random() * 6.283, 8, false);
+    x = THREE.MathUtils.clamp(x, -ARENA + 12, ARENA - 12); z = THREE.MathUtils.clamp(z, -ARENA + 12, ARENA - 12);
+    if (obstacles.some(o => active(o) && Math.hypot(o.mesh.position.x - x, o.mesh.position.z - z) < 6)) return false;
+    const m = makeRig(spawnCritter(RIG_OPS[Math.floor(Math.random() * RIG_OPS.length)], x, z));
+    m.rig.rh = Math.atan2(wp.x - x, wp.z - z); return true;
+  }
+  function rigDirector(dt) {
+    if (NET.client || startEl.isConnected || PH.brk > 0) return;
+    const want = RIG.n[PHASES[PH.i].key] || 0, have = swarm.filter(m => m.rig && !m.dead).length;
+    if (have >= want) { rigT = Math.max(rigT, 6); return; }
+    if ((rigT -= dt) <= 0) rigT = spawnRig() ? (have < want / 2 ? 9 : 16) : 1;
+  }
+  const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+  function rigAI(m, dt, T) {                                // host: crawl forward, slowly turning toward the nearest player; stay on the plain
+    const R = m.rig; if (m.stun > 0) m.stun -= dt; if (m.slow > 0) m.slow -= dt; if (R.fall > 0) { m.vel.set(0, 0, 0); return; }
+    let want = Math.atan2(T.pos.x - m.pos.x, T.pos.z - m.pos.z);
+    const lim = ARENA - 12; if (Math.abs(m.pos.x) > lim || Math.abs(m.pos.z) > lim) want = Math.atan2(-m.pos.x, -m.pos.z);
+    R.rh += THREE.MathUtils.clamp(angTo(R.rh, want), -RIG.turn * dt, RIG.turn * dt);
+    const sp = m.stun > 0 ? 0 : RIG.speed * (m.slow > 0 ? 0.5 : 1);
+    m.vel.set(Math.sin(R.rh) * sp, 0, Math.cos(R.rh) * sp);
+    const ox = m.pos.x, oz = m.pos.z; m.pos.addScaledVector(m.vel, dt);
+    for (const o of obstacles) if (active(o)) pushOutOfBox(m.pos, RIG.boothR, o);
+    if (Math.hypot(m.pos.x - ox, m.pos.z - oz) < sp * dt * 0.3) R.rh += 1.2 * dt;       // stuck on a rock: swing round
+    m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 4, ARENA - 4); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 4, ARENA - 4);
+    const f = rigLog(m);                                      // the log mows monsters down too
+    for (const o of swarm) { if (o === m || o.dead || o.rig || o.wb || o.K.fly) continue; if (rigDist(f, o.pos) < RIG.logR + o.r) { hitCritter(o, o.mini ? 2 : 6, tmp.set(Math.sin(R.rh), 0, Math.cos(R.rh)).clone(), 16); o.stun = Math.max(o.stun || 0, 0.4); } }
+  }
+  function rigLog(m) { const h = m.rig.rh, fx = Math.sin(h), fz = Math.cos(h); return { cx: m.pos.x + fx * RIG.logF, cz: m.pos.z + fz * RIG.logF, rx: Math.cos(h), rz: -Math.sin(h), fx, fz }; }
+  function rigDist(f, p) { const dx = p.x - f.cx, dz = p.z - f.cz, t = THREE.MathUtils.clamp(dx * f.rx + dz * f.rz, -RIG.logHalf, RIG.logHalf); return Math.hypot(dx - f.rx * t, dz - f.rz * t); }
+  function rigTick(m, dt) {                                 // everybody: draw it, and let it toss my own car
+    const R = m.rig;
+    if (m.net && Math.hypot(m.vel.x, m.vel.z) > 0.6) R.rh += angTo(R.rh, Math.atan2(m.vel.x, m.vel.z)) * Math.min(1, 3 * dt);
+    if (R.fall > 0) { R.fall -= dt; const y = Math.max(0, R.fall) * 26; R.g.position.set(m.pos.x, y, m.pos.z);
+      if (R.fall <= 0) { shake = Math.max(shake, Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40 ? 0.9 : 0.2); burst(tmp.set(m.pos.x, 0.5, m.pos.z), 0x8a7a64, 26, 4.5, 9, 0.6); SFX.play('tent_slam', m.pos);
+        if (car.alive && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 6) rigToss(m, rigLog(m), 1); }
+      return; }
+    R.g.position.set(m.pos.x, 0, m.pos.z); R.g.rotation.y = R.rh;
+    R.roll += Math.hypot(m.vel.x, m.vel.z) * dt / 1.4; R.log.rotation.x = R.roll;
+    if ((R.hitCd -= dt) > 0 || !car.alive || car.burrow !== 'up' || car.y > 3.2) return;
+    const f = rigLog(m), d = rigDist(f, car.pos);
+    if (d < RIG.logR + car.radius) { rigToss(m, f, 1); return; }
+    const bx = car.pos.x - m.pos.x, bz = car.pos.z - m.pos.z, bd = Math.hypot(bx, bz) || 1e-3;      // the booth is solid
+    if (bd < RIG.boothR + car.radius) { const push = RIG.boothR + car.radius - bd; car.pos.x += bx / bd * push; car.pos.z += bz / bd * push;
+      const vn = (car.vel.x * bx + car.vel.z * bz) / bd; if (vn < 0) { car.vel.x -= bx / bd * vn * 1.4; car.vel.z -= bz / bd * vn * 1.4; } }
+  }
+  function rigToss(m, f, k) {                               // whack! up and away the way the log rolls, a little to the side you were on
+    const side = Math.sign((car.pos.x - f.cx) * f.rx + (car.pos.z - f.cz) * f.rz) || 1;
+    car.vel.x = f.fx * 15 + f.rx * side * 5; car.vel.z = f.fz * 15 + f.rz * side * 5; car.speed = 0;
+    car.vy = 15 * k; car.airborne = true; m.rig.hitCd = 0.9;
+    hurtCar(car.maxHp * 0.08, tmp.set(f.fx, 0, f.fz).clone());
+    shake = Math.max(shake, 0.6); SFX.play('clang', car.pos, { rate: 0.8 }); spawnParticles(tmp.copy(car.pos).setY(1), 0xd8cfc0, 10, 8);
+  }
+  function rigBreak(m) {                                    // the elite is dead: the rig falls apart
+    const R = m.rig; if (!R || R.gone) return; R.gone = true; scene.remove(R.g);
+    const p = tmp.set(m.pos.x, 1.2, m.pos.z);
+    spawnParticles(p, 0x6b4a2a, 26, 13); spawnParticles(p, 0x8c8478, 14, 10); burst(p, 0x5a4a3a, 18, 4, 9, 0.6); flash(p, 0xffb060, 7, 0.3, 3, false);
+    const f = rigLog(m); spawnParticles(tmp.set(f.cx, 1.4, f.cz), 0x6b4a2a, 20, 11);
+    if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 50) shake = Math.max(shake, 0.6);
+    SFX.play('crate_break', m.pos, { rate: 0.6 }); SFX.play('clang', m.pos, { rate: 0.5 });
   }
   function spawnMinis(n, x, z, gate) {
     for (let i = 0; i < n; i++) { const a = i / n * 6.283 + Math.random(), d = 3 + Math.random() * 3 + (n > 3 ? 4 : 0);
@@ -5533,7 +5624,7 @@ const MONSTERS = [
     // director: no waves during the boss fight, inside the boss room, or while dead
     const calm = !waveTargets().length || (!gateOpen && (boss.state === 'fight' || boss.state === 'emerging')) || angel.on;      // nobody out in the open: no waves
     let alive = 0, mob = 0;
-    for (const m of swarm) if (!m.dead) { if (!m.home) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
+    for (const m of swarm) if (!m.dead) { if (!m.home && !m.rig) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
     if (!car.alive || threatNear(45)) crew.calm = 0; else if ((crew.calm += dt) > 24) { crew.calm = 0; crewSay('idle'); }
     if (!NET.client && !startEl.isConnected) {          // the phase decides whether waves come at all; a wave is cleared once ~80% of it is down
@@ -5542,12 +5633,13 @@ const MONSTERS = [
       if (waves.pending && alive <= thr && waves.since > 6) { waves.pending = false; PH.clr = PH.wv; waves.gap = 2; }
       const press = waves.pending && waves.since > 8 && alive <= waves.size * P.over;      // later phases do not wait for the last wave to be cleared
       const room = alive < P.max;                          // a mess, not a pile-up: no new wave while the field is full
+      rigDirector(dt);
       if (!calm && room && PH.brk <= 0 && PH.wv < P.waves && ((!waves.pending && waves.gap <= 0) || press || waves.since >= P.cap)) spawnWave();
     }
 
     for (let i = swarm.length - 1; i >= 0; i--) {
       const m = swarm[i];
-      if (m.dead) { swarm.splice(i, 1); if (swById.get(m.id) === m) swById.delete(m.id); if (m.stars) scene.remove(m.stars); continue; }
+      if (m.dead) { swarm.splice(i, 1); if (swById.get(m.id) === m) swById.delete(m.id); if (m.stars) scene.remove(m.stars); if (m.rig) rigBreak(m); continue; }
       const K = m.K; m.born += dt; m.cd -= dt; m.flash -= dt;
       ai: {
         if (m.net) {                                     // mirrored from the lobby host: glide to the last reported spot
@@ -5562,6 +5654,7 @@ const MONSTERS = [
         const dx = T.pos.x - m.pos.x, dz = T.pos.z - m.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist;
         // steering
         let tx = 0, tz = 0;
+        if (m.rig) rigAI(m, dt, T); else {
         if ((m.think -= dt) <= 0) { m.think = 0.3 + Math.random() * 0.25; m.prey = pickPrey(m, dist); m.tgt = netPick(m); }
         const prey = m.prey && chubVulnerable(m.prey) ? m.prey : null, dec = decoys.length ? decoyNear(m) : null;
         if (m.lost > 0) m.lost -= dt;
@@ -5619,19 +5712,21 @@ const MONSTERS = [
         if (!mine && T.R.cn > 0 && m.cd <= 0 && Math.hypot(m.pos.x - T.R.cpos.x, m.pos.z - T.R.cpos.z) < 1.7 + m.r) {      // snatch a passenger off another player's cart
           m.cd = 1; T.R.cn--; netEv({ t: 'lose' }, T.R.peer); SFX.play('chomp', m.pos, { rate: 1.4, vol: 0.7 });
         }
+        }
         // spitters lob acid
-        if (m.mini && !dazed && !m.seq && seen && dist < 34 && (m.atkT -= dt) <= 0) {
+        const dazed = m.stun > 0 && !m.rig;
+        if (m.mini && !dazed && !(m.rig && m.rig.fall > 0) && !m.seq && seen && dist < 34 && (m.atkT -= dt) <= 0) {
           m.atkT = 2.4 + Math.random() * 1.8; const pat = Math.floor(Math.random() * MINI_SEQ.length), a = r2(Math.atan2(nx, nz));
           miniStart(m, pat, a); netEv({ t: 'fx', k: 'mb', i: m.id, p: pat, a });
         }
-        if (!dazed && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
+        if (!dazed && !m.rig && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
           if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
           else { m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
           mobThrow(m, nx, nz, dist, pat); netEv({ t: 'fx', k: 'th', i: m.id, x: r2(nx), z: r2(nz), d: r1(dist), p: pat }); }
 
         }
-        if (K.ranged) {                                    // the car if it is in range, otherwise whoever sits on a rock
+        if (K.ranged && !m.rig) {                                    // the car if it is in range, otherwise whoever sits on a rock
           if (!dazed) m.spitT -= dt;
           if (m.spitT <= 0 && !dazed) {
             if (seen && dist < 17) { m.spitT = 2.6 + Math.random(); spit(m, null, T); }
@@ -5640,6 +5735,7 @@ const MONSTERS = [
         }
   
       }
+      if (m.rig) rigTick(m, dt);
       if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
       if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.5 * (2 - fl), 0.36 * fl, 1); }
       { const st = m.net ? (m.stunVis = Math.max(0, (m.stunVis || 0) - dt)) > 0 : m.stun > 0;      // stars circle a stunned head
@@ -5654,7 +5750,7 @@ const MONSTERS = [
       const grow = Math.min(1, m.born / 0.35), sz = K.size * grow;
       m.sprite.scale.set(sz * m.facing, sz, 1);
       const hop = K.fly ? K.fly + Math.sin(m.phase * 1.6) * 0.25 : Math.abs(Math.sin(m.phase * Math.PI)) * (K.heavy ? 0.05 : 0.18);
-      m.sprite.position.set(m.pos.x, hop - (m.dig > 0 ? m.dig / DIG_T * K.size * 1.05 : 0), m.pos.z);
+      m.sprite.position.set(m.pos.x, hop - (m.dig > 0 ? m.dig / DIG_T * K.size * 1.05 : 0) + (m.rig ? m.rig.g.position.y : 0), m.pos.z);
       m.shadow.position.set(m.pos.x, 0.03, m.pos.z);
       m.shadow.material.opacity = 1;
     }
@@ -7202,7 +7298,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 23;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 24;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7324,7 +7420,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0) | (m.wb ? 32 : 0)]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0) | (m.wb ? 32 : 0) | (m.rig ? 64 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -7342,7 +7438,7 @@ const MONSTERS = [
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA - 50, ARENA + 50), z = num(e[3], -ARENA - 50, ARENA + 50);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) makeWanderer(m); if (e[4] & 4) gateSpawned = true; }
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) makeWanderer(m); if (e[4] & 64) makeRig(m); if (e[4] & 4) gateSpawned = true; }
         m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
