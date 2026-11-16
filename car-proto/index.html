@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 116, buildEl = document.getElementById('build');
+  const BUILD = 117, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4107,22 +4107,24 @@ laugh(r) {                                       // a big man's belly laugh: bre
     wbCheckT = 0; wbTopUp(0);                              // as many as the crew still lacks skills
     flashAlert('WANDERING BOSSES!'); netEv({ t: 'alert', s: 'WANDERING BOSSES!' }); SFX.play('boss_roar', null, { vol: 0.6 });
   }
-  function spawnWanderer(a) {
-    const r = ARENA * (0.45 + Math.random() * 0.25);
-    makeWanderer(makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], Math.cos(a) * r, Math.sin(a) * r)));
+  function spawnWanderer(a, loot) {
+    const r = ARENA * (0.3 + Math.random() * 0.45);
+    const m = makeWanderer(makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], Math.cos(a) * r, Math.sin(a) * r))); m.wbLoot = !!loot; return m;
   }
+  const WB_CROWD = 7;                                      // plenty of bosses roam; only some of them carry a skill
   let wbCheckT = 0;
   function wbTopUp(dt) {                                   // host: as many wandering bosses alive as the neediest player still lacks skills (a death wipe or anything else can't stall the warm-up)
     if ((wbCheckT -= dt) > 0) return; wbCheckT = 3;
     const lying = pickups.filter(p => p.own && kit().includes(p.type)).length;
     let need = Math.max(0, kit().filter(t => !abilities[t] && t !== 'jump').length - lying);      // the jump comes with the spray gun, not from a boss
     for (const R of NET.remotes.values()) if (R.up && !R.ks) need = Math.max(need, 1);
-    const alive = swarm.filter(m => m.wb && !m.dead).length;
-    for (let i = alive; i < need; i++) spawnWanderer(Math.random() * 6.283);
+    const wb = swarm.filter(m => m.wb && !m.dead), loot = wb.filter(m => m.wbLoot).length;
+    for (let i = loot; i < need; i++) spawnWanderer(Math.random() * 6.283, true);                    // never fewer skill carriers than skills missing
+    if (need > 0) for (let i = wb.length + Math.max(0, need - loot); i < WB_CROWD; i++) spawnWanderer(Math.random() * 6.283, false);      // and a crowd around them
   }
   function makeWanderer(m) {
-    if (m.wb) return; m.wb = true; m.K = { ...m.K, size: m.K.size * 1.4, r: Math.min(2.6, m.K.r * 1.3) }; m.r = m.K.r; m.hp *= 3; m.wp = null;
-    m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
+    if (m.wb) return m; m.wb = true; m.K = { ...m.K, size: m.K.size * 1.4, r: Math.min(2.6, m.K.r * 1.3) }; m.r = m.K.r; m.hp *= 3; m.wp = null;
+    m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2); return m;
   }
   function wbFar(m) {                                      // nobody close: the boss just roams
     let d = car.alive ? Math.hypot(car.pos.x - m.pos.x, car.pos.z - m.pos.z) : 1e9;
@@ -5381,7 +5383,7 @@ const MONSTERS = [
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
     if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
     waves.lastKill.copy(m.pos);
-    if (m.wb) { wbKilled++; bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); shake = Math.max(shake, 0.6); }
+    if (m.wb) { wbKilled++; if (m.wbLoot) { bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); } shake = Math.max(shake, 0.6); }
     else if (m.mini && !NET.client) { if ((NET.on && NET.game) || upGot < UP_MAX) spawnPickup('upgrade', m.pos); else dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
     if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
