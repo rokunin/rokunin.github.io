@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 110, buildEl = document.getElementById('build');
+  const BUILD = 111, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5381,6 +5381,7 @@ const MONSTERS = [
   }
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
+    if (m.rig && RIG.tame) return;                         // for now the rigs can't be hurt
     if (m.net) { m.flash = 0.08; m.myHit = elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
     if (m.rig && push <= 3 && !(dir && dir.x * Math.sin(m.rig.rh) + dir.z * Math.cos(m.rig.rh) > 0.3)) dmg *= 0.4;      // the booth walls soak bullets and beams; the back window doesn't
     m.hp -= dmg; if (m.flash < -0.12) m.flash = 0.08;      // blinks under constant fire instead of staying lit
@@ -5411,7 +5412,7 @@ const MONSTERS = [
   }
   // ---- elite rigs: a mast on a crawling base sweeps a long spiked log round and round at car height; the elite sits in a booth on top and shoots down.
   //      Kill it and the rig falls apart ----
-  const RIG = { speed: 2.6, turn: 0.3, half: 7.5, logR: 1.5, mastR: 1.6, spin: 1.5, top: 5.4, n: { roll: 2, scout: 6, save: 6, hell: 10, boss: 0 } };
+  const RIG = { speed: 2.6, turn: 0.3, half: 18.75, logR: 1.5, mastR: 1.6, spin: 0.85, top: 5.4, tame: true, n: { roll: 2, scout: 6, save: 6, hell: 10, boss: 0 } };
   const rigWood = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.95, flatShading: true }), rigMetal = new THREE.MeshStandardMaterial({ color: 0x8c8478, roughness: 0.55, metalness: 0.4, flatShading: true }),
         rigRust = new THREE.MeshStandardMaterial({ color: 0x8a5a3a, roughness: 0.9, flatShading: true }), rigDark = new THREE.MeshStandardMaterial({ color: 0x3a3028, roughness: 0.9, flatShading: true });
   const rigLogGeo = new THREE.CylinderGeometry(0.8, 0.8, RIG.half * 2, 12); rigLogGeo.rotateZ(Math.PI / 2);
@@ -5427,22 +5428,29 @@ const MONSTERS = [
     const sweep = new THREE.Group(); sweep.position.y = 1.55; g.add(sweep);         // the log spins around the mast
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 1.1, 10), rigDark); sweep.add(hub);
     const log = new THREE.Mesh(rigLogGeo, rigWood); log.castShadow = true; sweep.add(log);
-    for (let i = 0; i < 12; i++) { const x = (i < 6 ? -1 : 1) * (1.6 + (i % 6) * (RIG.half - 2.1) / 5); for (let j = 0; j < 5; j++) {
+    for (let i = 0; i < 28; i++) { const x = (i < 14 ? -1 : 1) * (1.6 + (i % 14) * (RIG.half - 2.1) / 13); for (let j = 0; j < 5; j++) {
       const sp = new THREE.Mesh(rigSpikeGeo, rigMetal), a = j / 5 * 6.283 + (i % 2) * 0.63; sp.position.set(x, Math.cos(a) * 1.15, Math.sin(a) * 1.15); sp.rotation.x = a; sp.castShadow = true; sweep.add(sp); } }
     for (const sd of [-1, 1]) { const c = new THREE.Mesh(rigCapGeo, rigMetal); c.position.x = sd * RIG.half; sweep.add(c); }
     const booth = new THREE.Group(); booth.position.y = RIG.top; g.add(booth);        // the elite's nest on top; the low side is the window
     const bb = (w, h, d, x, y, z, mat) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); b.position.set(x, y, z); b.castShadow = true; booth.add(b); };
     bb(3.6, 0.3, 3.6, 0, 0, 0, rigDark); bb(3.6, 1.5, 0.25, 0, 0.9, 1.7, rigRust); bb(0.25, 1.5, 3.6, -1.7, 0.9, 0, rigRust); bb(0.25, 1.5, 3.6, 1.7, 0.9, 0, rigRust); bb(3.6, 0.5, 0.25, 0, 0.4, -1.7, rigRust);
     for (const [x, z] of [[-1.7, 1.7], [1.7, 1.7], [-1.7, -1.7], [1.7, -1.7]]) bb(0.3, 1.9, 0.3, x, 1.1, z, rigDark);
+    const levers = [];                                                               // a row of levers the elite keeps yanking
+    for (let i = 0; i < 3; i++) { const lv = new THREE.Group(); lv.position.set(-0.9 + i * 0.9, 0.15, 1.15);
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.3, 6), rigMetal); stick.position.y = 0.65; lv.add(stick);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), new THREE.MeshStandardMaterial({ color: [0xe03a2a, 0xf0c020, 0x3aa0e0][i], roughness: 0.5 })); knob.position.y = 1.32; lv.add(knob);
+      booth.add(lv); levers.push(lv); }
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2.4, 8), rigDark); pipe.position.set(-1.5, 1.6, -1.4); pipe.castShadow = true; g.add(pipe);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 8), rigDark); cap.position.set(-1.5, 2.85, -1.4); g.add(cap);
     g.position.copy(m.pos); scene.add(g);
-    m.rig = { g, sweep, booth, rh: Math.random() * 6.283, a: Math.random() * 6.283, fall: 1.0, hitCd: 0 };
+    m.rig = { g, sweep, booth, levers, rh: Math.random() * 6.283, a: Math.random() * 6.283, fall: 1.0, hitCd: 0, puff: 0, bob: 0 };
     m.atkT = 2.5; m.shadow.scale.set(5, 1, 4.4);
     return m;
   }
   function spawnRig() {                                    // host: a rig drops out of the sky somewhere just off a player's screen
     const views = lobbyViews(), V = views[Math.floor(Math.random() * views.length)], wp = V.r ? V.r.pos : car.pos;
     let [x, z] = offscreenSpot(wp, Math.random() * 6.283, 8, false);
-    x = THREE.MathUtils.clamp(x, -ARENA + 12, ARENA - 12); z = THREE.MathUtils.clamp(z, -ARENA + 12, ARENA - 12);
+    x = THREE.MathUtils.clamp(x, -ARENA + 22, ARENA - 22); z = THREE.MathUtils.clamp(z, -ARENA + 22, ARENA - 22);
     if (obstacles.some(o => active(o) && Math.hypot(o.mesh.position.x - x, o.mesh.position.z - z) < 6)) return false;
     const m = makeRig(spawnCritter(RIG_OPS[Math.floor(Math.random() * RIG_OPS.length)], x, z));
     m.rig.rh = Math.atan2(wp.x - x, wp.z - z); return true;
@@ -5457,7 +5465,7 @@ const MONSTERS = [
   function rigAI(m, dt, T) {                                // host: crawl forward, slowly turning toward the nearest player; stay on the plain
     const R = m.rig; if (m.stun > 0) m.stun -= dt; if (m.slow > 0) m.slow -= dt; if (R.fall > 0) { m.vel.set(0, 0, 0); return; }
     let want = Math.atan2(T.pos.x - m.pos.x, T.pos.z - m.pos.z);
-    const lim = ARENA - 12; if (Math.abs(m.pos.x) > lim || Math.abs(m.pos.z) > lim) want = Math.atan2(-m.pos.x, -m.pos.z);
+    const lim = ARENA - 22; if (Math.abs(m.pos.x) > lim || Math.abs(m.pos.z) > lim) want = Math.atan2(-m.pos.x, -m.pos.z);
     R.rh += THREE.MathUtils.clamp(angTo(R.rh, want), -RIG.turn * dt, RIG.turn * dt);
     const sp = m.stun > 0 ? 0 : RIG.speed * (m.slow > 0 ? 0.5 : 1);
     m.vel.set(Math.sin(R.rh) * sp, 0, Math.cos(R.rh) * sp);
@@ -5483,8 +5491,16 @@ const MONSTERS = [
         if (car.alive && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < RIG.half + 1) rigToss(m, rigLog(m)); }
       return; }
     R.a = (elapsed * RIG.spin + m.id * 1.7) % 6.283;        // spins on its own; each player is judged against what they see
-    R.g.position.set(m.pos.x, 0, m.pos.z); R.sweep.rotation.y = R.a; R.booth.rotation.y = R.rh;
-    if (Math.random() < dt * 2) burst(tmp.set(m.pos.x + rand(-2, 2), 0.2, m.pos.z + rand(-2, 2)), 0x8a7a64, 2, 1.2, 2, 0.3);
+    const t = elapsed + m.id;                                                    // cartoon excavator: everything rattles, the cab bounces, the elite yanks levers
+    R.bob = Math.abs(Math.sin(t * 10)) * 0.14 + Math.abs(Math.sin(t * 23)) * 0.05;
+    R.g.position.set(m.pos.x + Math.sin(t * 31) * 0.05, Math.abs(Math.sin(t * 13)) * 0.07, m.pos.z + Math.cos(t * 27) * 0.05);
+    R.g.rotation.z = Math.sin(t * 8.3) * 0.025; R.g.rotation.x = Math.sin(t * 6.7) * 0.02;
+    R.sweep.rotation.y = R.a; R.sweep.position.y = 1.55 + Math.sin(t * 17) * 0.05;
+    R.booth.rotation.y = R.rh; R.booth.position.y = RIG.top + R.bob; R.booth.rotation.z = Math.sin(t * 7.1) * 0.07; R.booth.rotation.x = Math.sin(t * 5.3) * 0.05;
+    R.levers.forEach((lv, i) => { const ph = Math.sin(t * (3.1 + i * 1.3) + i * 2); lv.rotation.x = Math.sign(ph) * Math.min(1, Math.abs(ph) * 4) * 0.55; });      // jerky yanks, not smooth swings
+    if ((R.puff -= dt) <= 0) { R.puff = 0.22 + Math.random() * 0.15;
+      burst(tmp.set(m.pos.x - 1.5, 3.1, m.pos.z - 1.4), Math.random() < 0.3 ? 0x1a1a1a : 0x555049, 2, 0.9, 1.8, 0.55); }
+    if (Math.random() < dt * 3) burst(tmp.set(m.pos.x + rand(-2, 2), 0.2, m.pos.z + rand(-2, 2)), 0x8a7a64, 2, 1.2, 2, 0.3);
     if ((R.hitCd -= dt) > 0 || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
     const f = rigLog(m);
     if (rigDist(f, car.pos) < RIG.logR + car.radius) { rigToss(m, f); return; }
@@ -5723,7 +5739,7 @@ const MONSTERS = [
         }
         // spitters lob acid
         const dazed = m.stun > 0 && !m.rig;
-        if (m.mini && !dazed && !(m.rig && m.rig.fall > 0) && !m.seq && seen && dist < 34 && (m.atkT -= dt) <= 0) {
+        if (m.mini && !dazed && !(m.rig && (m.rig.fall > 0 || RIG.tame)) && !m.seq && seen && dist < 34 && (m.atkT -= dt) <= 0) {
           m.atkT = 2.4 + Math.random() * 1.8; const pat = Math.floor(Math.random() * MINI_SEQ.length), a = r2(Math.atan2(nx, nz));
           miniStart(m, pat, a); netEv({ t: 'fx', k: 'mb', i: m.id, p: pat, a });
         }
@@ -5758,7 +5774,7 @@ const MONSTERS = [
       const grow = Math.min(1, m.born / 0.35), sz = K.size * grow;
       m.sprite.scale.set(sz * m.facing, sz, 1);
       const hop = K.fly ? K.fly + Math.sin(m.phase * 1.6) * 0.25 : Math.abs(Math.sin(m.phase * Math.PI)) * (K.heavy ? 0.05 : 0.18);
-      m.sprite.position.set(m.pos.x, hop - (m.dig > 0 ? m.dig / DIG_T * K.size * 1.05 : 0) + (m.rig ? m.rig.g.position.y + RIG.top + 0.15 : 0), m.pos.z);
+      m.sprite.position.set(m.pos.x, hop - (m.dig > 0 ? m.dig / DIG_T * K.size * 1.05 : 0) + (m.rig ? m.rig.g.position.y + RIG.top + 0.15 + (m.rig.bob || 0) : 0), m.pos.z);
       m.shadow.position.set(m.pos.x, 0.03, m.pos.z);
       m.shadow.material.opacity = 1;
     }
@@ -7178,7 +7194,7 @@ const MONSTERS = [
         }
       }
       if (!hit) for (const m of swarm) {
-        if (m.dead || Math.hypot(bp.x - m.pos.x, bp.z - m.pos.z) > m.r + 0.35 || bp.y > critterTop(m) + 0.6) continue;
+        if (m.dead || (m.rig && RIG.tame) || Math.hypot(bp.x - m.pos.x, bp.z - m.pos.z) > m.r + 0.35 || bp.y > critterTop(m) + 0.6) continue;
         hit = true;
         spawnParticles(bp, m.art.color, 3, 5); SFX.play('hit_flesh', bp, { vol: 0.5, rate: 1.2 });
         hitCritter(m, b.dmg || 1, tmp.copy(b.v).setY(0).normalize(), 2.5);
