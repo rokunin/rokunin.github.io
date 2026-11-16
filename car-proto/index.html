@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 113, buildEl = document.getElementById('build');
+  const BUILD = 114, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4167,6 +4167,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   // ---------- jump ----------
   const JUMP_V = 15, CAR_G = 32;                    // ~0.95 с в воздухе, высота ~3.5 — перелетает ящики и злюк
   function jump() {
+    if (myTow && car.alive && car.burrow === 'up') { throwBomb(); return; }      // with the bomb aboard the jump throws it
     if (!car.alive || car.burrow !== 'up') return;
     if (!car.airborne) {
       if (!abilities.jump) return;
@@ -5473,9 +5474,12 @@ const MONSTERS = [
     if ((rigT -= dt) <= 0) rigT = spawnRig() ? (have < want / 2 ? 9 : 16) : 1;
   }
   const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
-  function rigAI(m, dt, T) {                                // host: crawl forward, slowly turning toward the nearest player; stay on the plain
+  function rigAI(m, dt, T) {                                // host: crawl about its own patch, away from other rigs; stay on the plain
     const R = m.rig; if (m.stun > 0) m.stun -= dt; if (m.slow > 0) m.slow -= dt; if (R.fall > 0) { m.vel.set(0, 0, 0); return; }
-    let want = Math.atan2(T.pos.x - m.pos.x, T.pos.z - m.pos.z);
+    if (!R.home) R.home = [m.pos.x, m.pos.z];
+    if (!R.wp || Math.hypot(R.wp[0] - m.pos.x, R.wp[1] - m.pos.z) < 4) { const a = Math.random() * 6.283, d = Math.random() * 22; R.wp = [R.home[0] + Math.cos(a) * d, R.home[1] + Math.sin(a) * d]; }
+    let want = Math.atan2(R.wp[0] - m.pos.x, R.wp[1] - m.pos.z);      // it patrols its own patch: it does not chase players, so rigs never pile up
+    for (const o of swarm) if (o !== m && o.rig && !o.dead && Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) < RIG.half * 2 * 2.4) { want = Math.atan2(m.pos.x - o.pos.x, m.pos.z - o.pos.z); R.wp = null; break; }
     const lim = ARENA - 22; if (Math.abs(m.pos.x) > lim || Math.abs(m.pos.z) > lim) want = Math.atan2(-m.pos.x, -m.pos.z);
     R.rh += THREE.MathUtils.clamp(angTo(R.rh, want), -RIG.turn * dt, RIG.turn * dt);
     const sp = m.stun > 0 ? 0 : RIG.speed * (m.slow > 0 ? 0.5 : 1);
@@ -5512,7 +5516,7 @@ const MONSTERS = [
     if ((R.puff -= dt) <= 0) { R.puff = 0.22 + Math.random() * 0.15;
       burst(tmp.set(m.pos.x - 1.5, 3.1, m.pos.z - 1.4), Math.random() < 0.3 ? 0x1a1a1a : 0x555049, 2, 0.9, 1.8, 0.55); }
     if (Math.random() < dt * 3) burst(tmp.set(m.pos.x + rand(-2, 2), 0.2, m.pos.z + rand(-2, 2)), 0x8a7a64, 2, 1.2, 2, 0.3);
-    if ((R.hitCd -= dt) > 0 || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
+    if ((R.hitCd -= dt) > 0 || elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
     const f = rigLog(m);
     if (rigDist(f, car.pos) < RIG.logR + car.radius) { rigToss(m, f); return; }
     const bx = car.pos.x - m.pos.x, bz = car.pos.z - m.pos.z, bd = Math.hypot(bx, bz) || 1e-3;      // the base is solid
@@ -5522,7 +5526,7 @@ const MONSTERS = [
   function rigToss(m, f) {                                  // whack! up and away along the sweep
     const d = rigFling(f, car.pos);
     car.vel.x = d.x * 17; car.vel.z = d.z * 17; car.speed = 0;
-    car.vy = 15; car.airborne = true; m.rig.hitCd = 1.0;
+    car.vy = 15; car.airborne = true; m.rig.hitCd = 1.0; car.rigCd = elapsed + 1.4;      // no chain of tosses from two logs
     if (myTow) bombOff(bombs.find(B => B.id === myTow));      // the jolt throws the bomb off the cart
     hurtCar(car.maxHp * 0.08, d.clone());
     shake = Math.max(shake, 0.6); SFX.play('clang', car.pos, { rate: 0.8 }); spawnParticles(tmp.copy(car.pos).setY(1), 0xd8cfc0, 10, 8);
@@ -5537,7 +5541,7 @@ const MONSTERS = [
   }
   // ---- BOMBS: the only thing that breaks a rig. Drive into one and it pops onto your cart (half speed, full while a friend drives right next to you);
   //      bring it next to a rig and keep it there 5 s; it jumps onto the elite and goes off ----
-  const TNT = { hold: 5, R: 13, grab: 3.4, help: 8 };
+  const TNT = { grab: 3.4, help: 8, g: 32, vy: 20, near: 6, far: 17, aim: 0.6 };
   const bombs = []; let bombId = 0, bombNetT = 0, myTow = 0, towCd = 0, bombSpawnT = 4;
   const bombGeo = new THREE.SphereGeometry(1.1, 16, 12), bombMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.35, metalness: 0.3 });
   const sparkMat = glow(new THREE.SpriteMaterial({ color: 0xffc040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 3);
@@ -5551,7 +5555,7 @@ const MONSTERS = [
     const spark = new THREE.Sprite(sparkMat); spark.position.set(0.32, 3.1, 0); spark.scale.setScalar(0.7); g.add(spark);
     const num = new THREE.Sprite(new THREE.SpriteMaterial({ map: bombNums[4], transparent: true, depthTest: false })); num.renderOrder = 21; num.position.y = 4.6; num.scale.setScalar(2.6); num.visible = false; g.add(num);
     g.position.set(x, 0, z); scene.add(g);
-    const B = { id, x, z, tx: x, tz: z, g, spark, num, n: 0, t: 0, gone: false };
+    const B = { id, x, z, tx: x, tz: z, g, spark, num, n: 0, gone: false, fly: null };
     bombs.push(B); burst(tmp.set(x, 0.6, z), 0x8a7a64, 12, 2.5, 6, 0.5); return B;
   }
   function dropBomb(B) { if (B.gone) return; B.gone = true; scene.remove(B.g); bombs.splice(bombs.indexOf(B), 1); if (myTow === B.id) myTow = 0; }
@@ -5582,15 +5586,12 @@ const MONSTERS = [
     if (!NET.client) {                                     // host: a bomb for every rig; drag physics; the hold count; the bang
       if (rigs.length > bombs.filter(B => !B.leap).length && (bombSpawnT -= dt) <= 0) { bombSpawnT = 3;
         const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++bombId, sp[0], sp[1]); }
-      for (const B of bombs.slice()) { if (B.leap) continue;
+      for (const B of bombs.slice()) { if (B.leap || B.fly) continue;
         const C = carrierOf(B); B.n = C ? 1 : 0; if (C) { B.x = C.x; B.z = C.z; }
-        let near = null, nd = 1e9; for (const m of rigs) { const d = Math.hypot(m.pos.x - B.x, m.pos.z - B.z); if (d < nd) { nd = d; near = m; } }
-        if (C && near && nd < TNT.R) B.t += dt; else B.t = Math.max(0, B.t - dt * 0.6);
-        if (B.t >= TNT.hold && near) { netEv({ t: 'bmx', i: B.id, m: near.id }); bombBoom(B, near); B.rigM = near; }
         if (!rigs.length && !C) dropBomb(B);
       }
-      if ((bombNetT -= dt) <= 0 && NET.on && NET.game) { bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), Math.round(B.t * 10), B.n]) }); }
-    } else for (const B of bombs) if (!B.leap && !B.n) { const k = 1 - Math.exp(-10 * dt); B.x += (B.tx - B.x) * k; B.z += (B.tz - B.z) * k; }
+      if ((bombNetT -= dt) <= 0 && NET.on && NET.game) { bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), B.fly ? 1 : 0, B.n]) }); }
+    } else for (const B of bombs) if (!B.leap && !B.n && !B.fly) { const k = 1 - Math.exp(-10 * dt); B.x += (B.tx - B.x) * k; B.z += (B.tz - B.z) * k; }
     // everybody: grab, draw, ropes
     for (const B of bombs.slice()) {
       if (B.leap) { const L = B.leap; L.t += dt; const k = Math.min(1, L.t / 0.7);
@@ -5601,21 +5602,44 @@ const MONSTERS = [
           if (!NET.client) { if (B.rigM && !B.rigM.dead) killCritter(B.rigM); blastAt(L.tx, L.tz, 10, 6, 24, true); }
           dropBomb(B); }
         continue; }
+      if (B.fly) { const F = B.fly; F.vy -= TNT.g * dt; F.x += F.vx * dt; F.y += F.vy * dt; F.z += F.vz * dt;
+        B.g.position.set(F.x, F.y - 1.1, F.z); B.g.scale.setScalar(0.9); B.g.rotation.x += dt * 8; B.g.rotation.z += dt * 5; B.spark.scale.setScalar(0.6 + Math.random() * 0.6);
+        if (Math.random() < dt * 30) puff(tmp.set(F.x, F.y + 1.5, F.z), 0xb0a898, 0.6, 0.5, 0, 1, 0);
+        if (F.own) for (const m of rigs) if (F.vy < 0 && F.y > RIG.top - 0.3 && F.y < RIG.top + 2.4 && Math.hypot(m.pos.x - F.x, m.pos.z - F.z) < 2.6) {      // in the booth!
+          B.fly = null; B.leap = { t: 0.62, sx: F.x, sz: F.z, tx: m.pos.x, tz: m.pos.z }; B.rigM = m;
+          if (NET.client) netEv({ t: 'bmhit', i: B.id, m: m.id }, NET.hostPeer); else netEv({ t: 'bmx', i: B.id, m: m.id, q: 1 });
+          break; }
+        if (B.fly && F.y <= 1.1) { B.fly = null; B.x = B.tx = F.x; B.z = B.tz = F.z;      // missed: it thuds down and lies there
+          burst(tmp.set(F.x, 0.4, F.z), 0x8a7a64, 10, 2.5, 6, 0.5); SFX.play('land', tmp, { vol: 0.6 }); if (F.own && NET.client) netEv({ t: 'bml', i: B.id, x: r1(F.x), z: r1(F.z) }, NET.hostPeer); }
+        continue; }
       let ride_ = null; if (myTow === B.id) ride_ = [cart.pos, (ride === 'spider' ? 0 : car.y * 0.8)]; else for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) ride_ = [R.cpos, R.pos.y || 0];
       if (ride_) { B.x = ride_[0].x; B.z = ride_[0].z; B.g.position.set(B.x, 1.0 + ride_[1] + Math.abs(Math.sin(elapsed * 11 + B.id)) * 0.12, B.z); B.g.scale.setScalar(0.8); B.g.rotation.set(Math.sin(elapsed * 9) * 0.15, 0, Math.sin(elapsed * 7) * 0.15); }
       else { B.g.position.set(B.x, 0, B.z); B.g.scale.setScalar(1); B.g.rotation.set(0, 0, 0); }
       B.spark.scale.setScalar(0.5 + Math.random() * 0.5);
-      const left = Math.ceil(TNT.hold - B.t - 1e-6); B.num.visible = B.t > 0.05; if (B.num.visible && left >= 1 && left <= 5) B.num.material.map = bombNums[left - 1];
-      if (B.t > 0.05 && Math.floor(B.t * 4) !== B.beep) { B.beep = Math.floor(B.t * 4); if (B.beep % 2 === 0) SFX.play('pickup', tmp.set(B.x, 1, B.z), { rate: 1.6 + B.t * 0.15, vol: 0.5 }); }
       if (!myTow && !towCd && !B.n && car.alive && car.burrow === 'up' && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || (cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab))) {
         myTow = B.id; B.n = 1; if (!cart.shown) { cart.shown = true; cartReset(); }
         for (let i = 0; i < 7; i++) puff(tmp.set(B.x + rand(-1.2, 1.2), 0.8 + Math.random(), B.z + rand(-1.2, 1.2)), 0xf0ead8, 1.6, 0.7, rand(-2.5, 2.5), 2.5, rand(-2.5, 2.5));
-        SFX.play('clang', car.pos, { rate: 1.4 }); SFX.play('pickup', car.pos, { vol: 0.6 }); flashAlert('BOMB ON BOARD!'); }
+        SFX.play('clang', car.pos, { rate: 1.4 }); SFX.play('pickup', car.pos, { vol: 0.6 }); flashAlert('BOMB! JUMP TO THROW'); }
     }
     if (myTow && (!car.alive || car.burrow !== 'up')) bombOff(bombs.find(B => B.id === myTow));      // wrecked or gone underground: the bomb rolls off
     if (myTow && !bombs.some(B => B.id === myTow && !B.leap)) myTow = 0;
-    for (const m of rigs) { const R = m.rig; if (!R.zone) { R.zone = new THREE.Mesh(new THREE.RingGeometry(TNT.R - 0.5, TNT.R, 72), new THREE.MeshBasicMaterial({ color: 0xff5a3a, transparent: true, opacity: 0, depthWrite: false })); R.zone.geometry.rotateX(-Math.PI / 2); scene.add(R.zone); }
-      const towed = bombs.some(B => B.n && !B.leap); R.zone.visible = towed; if (towed) { R.zone.position.set(m.pos.x, 0.06, m.pos.z); R.zone.material.opacity = 0.35 + Math.sin(elapsed * 8) * 0.2; } }
+    for (const m of rigs) { const R = m.rig; if (!R.zone) { R.zone = new THREE.Mesh(new THREE.RingGeometry(TNT.near + 1, TNT.far - 1, 72), new THREE.MeshBasicMaterial({ color: 0xff5a3a, transparent: true, opacity: 0, depthWrite: false })); R.zone.geometry.rotateX(-Math.PI / 2); scene.add(R.zone); }
+      R.zone.visible = !!myTow; if (myTow) { R.zone.position.set(m.pos.x, 0.06, m.pos.z); R.zone.material.opacity = 0.16 + Math.sin(elapsed * 6) * 0.08; } }      // throw from inside this band
+  }
+  function throwBomb() {                                    // jump with the bomb aboard: the cart flings it forward in a high lob; drop it into a booth and it goes off
+    const B = bombs.find(B => B.id === myTow); if (!B) { myTow = 0; return; }
+    const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), x = cart.pos.x, z = cart.pos.z, y = 1.4 + car.y * 0.8;
+    const tUp = TNT.vy / TNT.g, tHit = tUp + Math.sqrt(Math.max(0, 2 * (y + TNT.vy * TNT.vy / (2 * TNT.g) - RIG.top - 0.8) / TNT.g));      // when the lob comes down through booth height
+    let vh = 13, dx = fx, dz = fz;
+    for (const m of swarm) if (m.rig && !m.dead && !m.rig.gone) {                // aim assist: a booth roughly ahead and in range gets the lob dropped right into it
+      const ex = m.pos.x - x, ez = m.pos.z - z, d = Math.hypot(ex, ez); if (d < TNT.near || d > TNT.far) continue;
+      if ((ex * fx + ez * fz) / d < Math.cos(TNT.aim)) continue; dx = ex / d; dz = ez / d; vh = d / tHit; break; }
+    const vx = dx * vh + car.vel.x * 0.3, vz = dz * vh + car.vel.z * 0.3;
+    myTow = 0; towCd = 1; B.n = 0; B.fly = { x, y, z, vx, vy: TNT.vy, vz, own: true };
+    netEv({ t: 'bmt', i: B.id, x: r1(x), y: r1(y), z: r1(z), vx: r2(vx), vy: TNT.vy, vz: r2(vz) });
+    if (!car.airborne) { car.vy = JUMP_V * 0.75; car.airborne = true; }
+    for (let i = 0; i < 5; i++) puff(tmp.set(x + rand(-1, 1), 1, z + rand(-1, 1)), 0xf0ead8, 1.4, 0.6, rand(-2, 2), 3, rand(-2, 2));
+    SFX.play('jump', car.pos, { rate: 0.8 }); SFX.play('clang', cart.pos, { rate: 1.2 });
   }
   const towK = () => { if (!myTow) return 1; for (const R of NET.remotes.values()) if (R.up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < TNT.help) return 1; return 0.5; };      // a friend right alongside helps push
   function spawnMinis(n, x, z, gate) {
@@ -7417,7 +7441,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 25;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 26;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7650,9 +7674,13 @@ const MONSTERS = [
       else if (d.t === 'ambush') { if (!NET.client) { NET.applying = false; ambush(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), d.b === 1); } }
       else if (d.t === 'bm') { if (NET.client && Array.isArray(d.b)) { const seen = new Set();
           for (const q of d.b) { if (!Array.isArray(q) || !Number.isInteger(q[0])) continue; seen.add(q[0]); let B = bombs.find(B => B.id === q[0]);
-            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA)); if (B.leap) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.t = num(q[3], 0, 60) / 10; B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
+            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA)); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
           for (const B of bombs.slice()) if (!B.leap && !seen.has(B.id)) dropBomb(B); } }
-      else if (d.t === 'bmx') { if (NET.client) { const B = bombs.find(B => B.id === d.i), m = swById.get(d.m); if (B && !B.leap) bombBoom(B, m); } }
+      else if (d.t === 'bmx') { if (NET.client) { const B = bombs.find(B => B.id === d.i), m = swById.get(d.m); if (B && !B.leap) { if (B.fly && m) { B.leap = { t: 0.62, sx: B.fly.x, sz: B.fly.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; } else bombBoom(B, m); } } }
+      else if (d.t === 'bmt') { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.n = 0; B.fly = { x: num(d.x, -ARENA, ARENA), y: num(d.y, 0, 20), z: num(d.z, -ARENA, ARENA), vx: num(d.vx, -40, 40), vy: num(d.vy, 0, 40), vz: num(d.vz, -40, 40), own: false }; } }
+      else if (d.t === 'bmhit') { if (!NET.client) { NET.applying = false; const B = bombs.find(B => B.id === d.i), m = swById.get(d.m);
+          if (B && m && m.rig && !m.dead && Math.hypot(m.pos.x - (B.fly ? B.fly.x : B.x), m.pos.z - (B.fly ? B.fly.z : B.z)) < 25) { B.rigM = m; B.leap = { t: 0.62, sx: B.fly ? B.fly.x : B.x, sz: B.fly ? B.fly.z : B.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; netEv({ t: 'bmx', i: B.id, m: m.id }); } } }
+      else if (d.t === 'bml') { if (!NET.client) { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.fly = null; B.x = num(d.x, -ARENA, ARENA); B.z = num(d.z, -ARENA, ARENA); } } }
       else if (d.t === 'armed') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R && W_GEAR.includes(d.k)) armedFx(R, d.k); }
       else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
