@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 106, buildEl = document.getElementById('build');
+  const BUILD = 107, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4102,7 +4102,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if ((wbCheckT -= dt) > 0) return; wbCheckT = 3;
     const lying = pickups.filter(p => p.own && kit().includes(p.type)).length;
     let need = Math.max(0, kit().filter(t => !abilities[t]).length - lying);
-    for (const R of NET.remotes.values()) if (R.up && !R.ak) need = Math.max(need, 1);
+    for (const R of NET.remotes.values()) if (R.up && !R.ks) need = Math.max(need, 1);
     const alive = swarm.filter(m => m.wb && !m.dead).length;
     for (let i = alive; i < need; i++) spawnWanderer(Math.random() * 6.283);
   }
@@ -4111,7 +4111,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     m.shadow.scale.set(m.K.r * 2.6, 1, m.K.r * 2.2);
   }
   function wbFar(m) {                                      // nobody close: the boss just roams
-    let d = Math.hypot(car.pos.x - m.pos.x, car.pos.z - m.pos.z);
+    let d = car.alive ? Math.hypot(car.pos.x - m.pos.x, car.pos.z - m.pos.z) : 1e9;
     for (const R of NET.remotes.values()) if (R.up) d = Math.min(d, Math.hypot(R.pos.x - m.pos.x, R.pos.z - m.pos.z));
     return d > 24;
   }
@@ -4421,7 +4421,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const gearDone = () => !gearNext();
   function myKill() {}                                     // ordinary kills drop nothing personal any more
   function bossDrop(x, z) {                                // a wandering boss died: everybody gets their next skill right there (lying where it fell)
-    const t = kit().find(t => !abilities[t]) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
+    const t = kit().find(t => !abilities[t] && !pickups.some(p => p.own && p.type === t)) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
     spawnPickup(t, tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
@@ -4703,7 +4703,45 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } upGot = Math.max(0, upGot - 1); lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
     } else { const own = [...kit().filter(t => abilities[t]).map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
       const [kind, k] = pick(own); if (kind === 'ab') { abilities[k] = false; applyAbilityVisuals(); } else { weapons[k] = 0; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'LOST']; }
-    abDirty = true; abSig = ''; toast(lost[0], lost[1]);
+    abDirty = true; abSig = ''; toast(lost[0], lost[1]); lossFxStart(lost[0], lost[1] !== 'LOST');
+  }
+  // what you lost pops out of the wreck, smoulders and breaks apart: whole icon for a skill or gun, a half-size one for a level
+  const lossFx = [];
+  function lossFxStart(type, small) {
+    if (!pickupTex[type]) pickupTex[type] = srgbTex(ICONS[type]);
+    const mat = new THREE.SpriteMaterial({ map: pickupTex[type], transparent: true, depthTest: false }), spr = new THREE.Sprite(mat);
+    spr.renderOrder = 20; spr.position.set(car.pos.x, 1.5, car.pos.z); spr.scale.setScalar(0.01); scene.add(spr);
+    lossFx.push({ type, spr, mat, t: 0, S: small ? 3 : 5, x: car.pos.x, z: car.pos.z, shards: null });
+    SFX.play('clang', car.pos, { rate: 0.6 });
+  }
+  function lossShatter(F) {
+    const y = F.spr.position.y; scene.remove(F.spr); F.shards = [];
+    for (let i = 0; i < 4; i++) {                            // the icon cracks into its four quarters, which tumble away
+      const tx = pickupTex[F.type].clone(); tx.repeat.set(0.5, 0.5); tx.offset.set((i & 1) * 0.5, (i >> 1) * 0.5); tx.needsUpdate = true;
+      const m = new THREE.SpriteMaterial({ map: tx, transparent: true, depthTest: false, color: 0xc89070 }), sp = new THREE.Sprite(m);
+      sp.renderOrder = 20; sp.scale.setScalar(F.S * 0.5); sp.position.set(F.x + ((i & 1) - 0.5) * F.S * 0.5 * 0.7071, y - ((i >> 1) - 0.5) * F.S * 0.5, F.z - ((i & 1) - 0.5) * F.S * 0.5 * 0.7071);
+      const a = Math.atan2((i >> 1) - 0.5, (i & 1) - 0.5) + rand(-0.4, 0.4);
+      F.shards.push({ sp, m, v: new THREE.Vector3(Math.cos(a) * 5 + rand(-1, 1), 6 + Math.random() * 3, -Math.cos(a) * 5 + rand(-1, 1)), spin: rand(-8, 8) });
+      scene.add(sp);
+    }
+    const p = tmp.set(F.x, y, F.z);
+    spawnParticles(p, 0xff7a2a, 16, 9); spawnParticles(p, 0x3a3230, 10, 6); flash(p, 0xff8a3c, 6, 0.25, 2.5, false); burst(p, 0x2e2826, 8, 2.2, 4, 0.5);
+    SFX.play('pop', p, { rate: 0.55 });
+  }
+  function updateLossFx(dt) {
+    for (let i = lossFx.length - 1; i >= 0; i--) { const F = lossFx[i]; F.t += dt;
+      if (!F.shards) {
+        const k = Math.min(1, F.t / 0.35), e = 1 - (1 - k) * (1 - k);                       // pops up out of the wreck
+        F.spr.position.y = 1.5 + e * 2.5; F.spr.scale.setScalar(F.S * (e + (F.t > 0.35 ? Math.sin((F.t - 0.35) * 40) * 0.04 : 0)));
+        if (F.t > 0.45) { const b = Math.min(1, (F.t - 0.45) / 0.7); F.mat.color.setRGB(1 - b * 0.55, 1 - b * 0.75, 1 - b * 0.85);      // smoulders: reddens and darkens
+          F.spr.position.x = F.x + rand(-0.06, 0.06) * b * 2;
+          if (Math.random() < dt * 30) spawnParticles(tmp.set(F.x + rand(-1, 1) * F.S * 0.4, F.spr.position.y - F.S * 0.3, F.z + rand(-0.5, 0.5)), Math.random() < 0.6 ? 0xff9a3c : 0x2a2422, 1, 3); }
+        if (F.t > 1.15) lossShatter(F);
+        continue; }
+      const ft = F.t - 1.15;
+      for (const s of F.shards) { s.v.y -= 22 * dt; s.sp.position.addScaledVector(s.v, dt); s.m.rotation += s.spin * dt; s.m.opacity = Math.min(1, Math.max(0, 1.6 - ft / 0.55)); }
+      if (ft > 0.9) { for (const s of F.shards) { scene.remove(s.sp); s.m.map.dispose(); s.m.dispose(); } F.mat.dispose(); lossFx.splice(i, 1); }
+    }
   }
   function buildSaws() {
     const n = W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1);
@@ -5623,6 +5661,7 @@ const MONSTERS = [
   }
 
   function clearSwarm() {
+    if (PHASES[PH.i].key === 'hell') PH.hellN = Math.max(0, PH.hellN - hellAlive());      // wiped, not killed: they come back with the next waves
     for (const m of swarm) { m.dead = true; scene.remove(m.sprite, m.shadow); }
     for (const g of globs) scene.remove(g.g, g.ring);
     swarm.length = 0; globs.length = 0; waves.t = 14; waves.pending = false; waves.since = 0;
@@ -7056,7 +7095,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt); updatePedestals(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
+    updatePickups(dt); updatePedestals(dt); updateLossFx(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -7133,7 +7172,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 21;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 22;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7238,6 +7277,7 @@ const MONSTERS = [
     for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
       if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = 'perch'; else { c.pos.y = 0; c.state = 'roam'; c.goal.copy(c.pos); c.t = 0; } }
     NET.client = false; NET.isHost = true; NET.hostPeer = null; NET.chMir = new Map(); waves.t = Math.max(waves.t, 10);
+    pedStage = pedestals.length > 1 ? (pedestals.every(P => P.done) ? 2 : 1) : 0;      // the warm-up stage was the old host's: work it out from the pedestals
   }
   function netPick(m) {                                  // host: each monster goes for the nearest player
     if (NET.client || !NET.remotes.size) return null;
@@ -7363,12 +7403,12 @@ const MONSTERS = [
       else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
       else if (d.t === 'ped') { const k = W_GEAR.includes(d.k) ? d.k : null; if (k) addPedestal(k, num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
-      else if (d.t === 'pedtake') { const i = pedestals.findIndex(P => P.k === d.k); if (i >= 0) { if (!NET.client) { NET.applying = false; pedTaken(i); } else pedestals[i].done = true; } }
+      else if (d.t === 'pedtake') { const i = pedestals.findIndex(P => P.k === d.k); if (i >= 0) { if (!NET.client) { NET.applying = false; if (!pedestals[i].done) netEv({ t: 'pedtake', k: d.k }); pedTaken(i); } else pedestals[i].done = true; } }
       else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
       else if (d.t === 'cubes') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R) spawnCubes(Math.round(num(d.n, 1, 5)), R, Math.round(num(d.l, 0, 2))); }
       else if (d.t === 'dome') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), r = num(d.r, 3, 14), T = num(d.T, 0.5, 6); addDome(x, z, r, T); if (!NET.client) { NET.applying = false; blastAt(x, z, r, 1, 26, true); } }
-      else if (d.t === 'blast') { if (!NET.client) { NET.applying = false; blastAt(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), num(d.r, 1, 9), num(d.d, 0, 4), num(d.p, 0, 20), d.s === 1); } }
+      else if (d.t === 'blast') { if (!NET.client) { NET.applying = false; blastAt(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), num(d.r, 1, 9), num(d.d, 0, 5), num(d.p, 0, 20), d.s === 1); } }
       else if (d.t === 'alert') { if (NET.client && typeof d.s === 'string') { flashAlert(d.s.slice(0, 24)); SFX.play('wave', null); } }
       else if (d.t === 'fx') { const m = swById.get(d.i); if (NET.client && m && !m.dead && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 70) {
         if (d.k === 'mb') miniStart(m, Math.min(MINI_SEQ.length - 1, Math.round(num(d.p, 0, 9))), num(d.a, -9, 9));
@@ -7477,7 +7517,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: gearDone() ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, ak: gearDone() ? 1 : 0, ks: kit().every(t => abilities[t]) ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -7558,7 +7598,7 @@ const MONSTERS = [
       if (R.pos.distanceTo(tmp) > 25) R.pos.copy(tmp); else { R.pos.lerp(tmp, k); R.vel.lerp(tmp.set((R.pos.x - ox) / Math.max(dt, 1e-3), 0, (R.pos.z - oz) / Math.max(dt, 1e-3)), 0.25); }
       const th = num(pr.h, -99, 99); R.h += Math.atan2(Math.sin(th - R.h), Math.cos(th - R.h)) * k;
       const up = pr.a === 1; R.up = up; R.peer = p.peer; R.tc.alive = up; R.tc.y = R.pos.y;
-      R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22; R.ak = pr.ak === 1; R.tl = Math.round(num(pr.tl, 0, 3));      // their screen size (waves stay off it) and whether their kit is complete
+      R.vw = num(pr.vw, 8, 80) || 34; R.vh = num(pr.vh, 8, 80) || 22; R.ak = pr.ak === 1; R.ks = pr.ks === 1; R.tl = Math.round(num(pr.tl, 0, 3));      // their screen size (waves stay off it) and whether their kit is complete
       if (pr !== R.posePr) { R.posePr = pr; if (typeof pr.ph === 'number') { const d = num(pr.ph, -1e4, 1e4) * 2.4 - R.ph; R.ph += Math.abs(d) > 6 ? d : d * 0.3; } }
       const feet = R.ride === 'spider' && Array.isArray(pr.ft) && pr.ft.length === 24 ? pr.ft : null;
       if (R.anim.length && !feet) { const spd = Math.hypot(R.vel.x, R.vel.z), kk = Math.min(1, spd / 5); R.ph += spd * dt * (R.ride === 'spider' ? 0.9 : 1.08) * (R.ride === 'unicorn' ? 2.4 * 0.45 / 1.08 : 1);
