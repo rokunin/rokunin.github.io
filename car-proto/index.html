@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 114, buildEl = document.getElementById('build');
+  const BUILD = 115, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4113,7 +4113,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function wbTopUp(dt) {                                   // host: as many wandering bosses alive as the neediest player still lacks skills (a death wipe or anything else can't stall the warm-up)
     if ((wbCheckT -= dt) > 0) return; wbCheckT = 3;
     const lying = pickups.filter(p => p.own && kit().includes(p.type)).length;
-    let need = Math.max(0, kit().filter(t => !abilities[t]).length - lying);
+    let need = Math.max(0, kit().filter(t => !abilities[t] && t !== 'jump').length - lying);      // the jump comes with the spray gun, not from a boss
     for (const R of NET.remotes.values()) if (R.up && !R.ks) need = Math.max(need, 1);
     const alive = swarm.filter(m => m.wb && !m.dead).length;
     for (let i = alive; i < need; i++) spawnWanderer(Math.random() * 6.283);
@@ -4156,6 +4156,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         if (P.t > 2 && guards === 0) { P.state = 'open'; P.dome.visible = false; flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); SFX.play('pickup', null, { rate: 0.7 }); } }
       if (P.state === 'open' && car.alive && d < 3.4) {
         gainWeapon('w_' + P.k); toast('w_' + P.k, '— level it up with upgrades'); SFX.play('pickup', null);
+        if (P.k === 'spread' && !abilities.jump) { abilities.jump = true; applyAbilityVisuals(); abDirty = true; abSig = ''; flashAlert('JUMP UNLOCKED! SPACE'); }      // everybody gets the basic jump with the spray gun
         flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); burst(tmp.set(P.x, 0.5, P.z), 0xffd23a, 16, 3, 8, 0.6);
         P.state = 'gone'; P.g.visible = false;
         if (NET.on && NET.game) netEv({ t: 'armed', k: P.k });
@@ -4452,7 +4453,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const gearDone = () => !gearNext();
   function myKill() {}                                     // ordinary kills drop nothing personal any more
   function bossDrop(x, z) {                                // a wandering boss died: everybody gets their next skill right there (lying where it fell)
-    const t = kit().find(t => !abilities[t] && !pickups.some(p => p.own && p.type === t)) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
+    const t = kit().find(t => !abilities[t] && t !== 'jump' && !pickups.some(p => p.own && p.type === t)) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
     spawnPickup(t, tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
@@ -4732,7 +4733,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const pick = a => a[Math.floor(Math.random() * a.length)];
     let lost = null;
     if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } upGot = Math.max(0, upGot - 1); lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
-    } else { const own = [...kit().filter(t => abilities[t]).map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
+    } else { const own = [...kit().filter(t => abilities[t] && t !== 'jump').map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
       const [kind, k] = pick(own); if (kind === 'ab') { abilities[k] = false; applyAbilityVisuals(); } else { weapons[k] = 0; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'LOST']; }
     abDirty = true; abSig = ''; toast(lost[0], lost[1]); lossFxStart(lost[0], lost[1] !== 'LOST');
   }
