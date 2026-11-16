@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 115, buildEl = document.getElementById('build');
+  const BUILD = 116, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4066,10 +4066,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const pedestals = []; let wbKilled = 0, wbSpawned = false;
   const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({ color: 0x6f6458, roughness: 0.9 });
   const PED_RISE_R = 25, PED_GUARD_R = 13;
+  const pedIcon = k => k === 'jump' ? 'jump' : 'w_' + k;
+  const pedHave = k => k === 'jump' ? !!abilities.jump : weapons[k] > 0;
   function addPedestal(k, x, z) {
     const g = new THREE.Group(), base = new THREE.Mesh(pedBaseGeo, pedMat); base.position.y = -0.8; base.castShadow = base.receiveShadow = true;
-    if (!pickupTex['w_' + k]) pickupTex['w_' + k] = srgbTex(ICONS['w_' + k]);
-    const icon = new THREE.Sprite(glow(new THREE.SpriteMaterial({ map: pickupTex['w_' + k], transparent: true }), 1.2)); icon.scale.set(2.8, 2.8, 1); icon.position.y = 3.4; icon.visible = false;
+    const ik = pedIcon(k); if (!pickupTex[ik]) pickupTex[ik] = srgbTex(ICONS[ik]);
+    const icon = new THREE.Sprite(glow(new THREE.SpriteMaterial({ map: pickupTex[ik], transparent: true }), 1.2)); icon.scale.set(2.8, 2.8, 1); icon.position.y = 3.4; icon.visible = false;
     const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.1, 40), glow(new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.8, depthWrite: false }), 2.4)); ring.geometry.rotateX(-Math.PI / 2); ring.position.y = 0.05;
     const hatch = new THREE.Mesh(new THREE.CircleGeometry(2.5, 32), new THREE.MeshBasicMaterial({ color: 0x1a1410, transparent: true, opacity: 0.75, depthWrite: false })); hatch.geometry.rotateX(-Math.PI / 2); hatch.position.y = 0.04;
     const dome = new THREE.Mesh(new THREE.SphereGeometry(4.2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), glow(new THREE.MeshBasicMaterial({ color: 0xffb03a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }), 1.6)); dome.visible = false;
@@ -4091,18 +4093,18 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const a = Math.random() * 6.283; digOut(makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], x + Math.cos(a) * 11, z + Math.sin(a) * 11)));
   }
   const guardsNear = P => { let n = 0; for (const m of swarm) if (!m.dead && Math.hypot(m.pos.x - P.x, m.pos.z - P.z) < PED_GUARD_R) n++; return n; };
-  const crewArmed = () => W_GEAR.every(k => weapons[k]) && [...NET.remotes.values()].every(R => !R.up || R.gd);
+  const crewArmed = () => W_GEAR.every(k => weapons[k]) && abilities.jump && [...NET.remotes.values()].every(R => !R.up || R.gd);
   function armedFx(R, k) {                                 // somebody else took a gun: a pillar of light and the gun's icon over their ride
     flash(tmp.set(R.pos.x, 2, R.pos.z), 0xffd23a, 10, 0.5, 4); burst(tmp.set(R.pos.x, 0.5, R.pos.z), 0xffd23a, 14, 3, 7, 0.5);
-    if (!pickupTex['w_' + k]) pickupTex['w_' + k] = srgbTex(ICONS['w_' + k]);
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: pickupTex['w_' + k], transparent: true, depthTest: false })); spr.renderOrder = 20; spr.scale.setScalar(3);
+    const ik = pedIcon(k); if (!pickupTex[ik]) pickupTex[ik] = srgbTex(ICONS[ik]);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: pickupTex[ik], transparent: true, depthTest: false })); spr.renderOrder = 20; spr.scale.setScalar(3);
     scene.add(spr); armFx.push({ spr, R, t: 0 });
-    toast('w_' + k, '— ' + (R.nick || R.ride || 'friend') + ' is armed');
+    toast(pedIcon(k), '— ' + (R.nick || R.ride || 'friend') + ' got it');
   }
   const armFx = [];
   function spawnWanderers() {                              // host: three big wandering bosses, each carries a skill for everyone
     wbSpawned = true;
-    for (let i = 0; i < 3; i++) spawnWanderer(i * 2.094 + Math.random());
+    wbCheckT = 0; wbTopUp(0);                              // as many as the crew still lacks skills
     flashAlert('WANDERING BOSSES!'); netEv({ t: 'alert', s: 'WANDERING BOSSES!' }); SFX.play('boss_roar', null, { vol: 0.6 });
   }
   function spawnWanderer(a) {
@@ -4132,17 +4134,18 @@ laugh(r) {                                       // a big man's belly laugh: bre
     for (let i = armFx.length - 1; i >= 0; i--) { const F = armFx[i]; F.t += dt; F.spr.position.set(F.R.pos.x, 4.5 + F.t * 1.5, F.R.pos.z); F.spr.material.opacity = Math.min(1, 2.5 - F.t * 1.6);
       if (F.t > 1.6) { scene.remove(F.spr); F.spr.material.dispose(); armFx.splice(i, 1); } }
     if (!pedestals.length) { const [x, z] = pedSpot(true); addPedestal('spread', x, z); }
-    if (weapons.spread && pedestals.length === 1) for (const k of ['nova', 'orbit']) { const [x, z] = pedSpot(false); addPedestal(k, x, z); }
+    if (weapons.spread && !pedestals.some(P => P.k === 'jump')) { const [x, z] = pedSpot(true); addPedestal('jump', x, z); }      // the jump comes next, close to the centre too
+    if (abilities.jump && weapons.spread && !pedestals.some(P => P.k === 'nova')) for (const k of ['nova', 'orbit']) { const [x, z] = pedSpot(false); addPedestal(k, x, z); }
     for (let i = 0; i < pedestals.length; i++) {
       const P = pedestals[i];
-      if (P.state === 'gone') { if (!weapons[P.k]) pedReset(P); else continue; }          // the gun was lost: its pedestal is waiting again
-      if (weapons[P.k] && P.state !== 'gone') { P.state = 'gone'; P.g.visible = false; continue; }
+      if (P.state === 'gone') { if (!pedHave(P.k)) pedReset(P); else continue; }          // the gun was lost: its pedestal is waiting again
+      if (pedHave(P.k) && P.state !== 'gone') { P.state = 'gone'; P.g.visible = false; continue; }
       const d = Math.hypot(car.pos.x - P.x, car.pos.z - P.z); P.t += dt; P.ring.rotation.y += dt;
       if (P.state === 'dormant') {
         P.ring.material.opacity = 0.45 + Math.sin(elapsed * 4 + i) * 0.3;
         if (car.alive && d < PED_RISE_R) { P.state = 'rising'; P.t = 0; P.icon.visible = true; P.dome.visible = true; shake = Math.max(shake, 0.5);
           SFX.play('tent_slam', tmp.set(P.x, 0, P.z), { vol: 0.6 }); burst(tmp.set(P.x, 0.5, P.z), 0x8a7a64, 22, 3.5, 7, 0.6);
-          const big = P.k !== 'spread'; if (NET.client) netEv({ t: 'ambush', x: P.x, z: P.z, b: big ? 1 : 0 }, NET.hostPeer); else ambush(P.x, P.z, big);
+          const big = P.k !== 'spread' && P.k !== 'jump'; if (NET.client) netEv({ t: 'ambush', x: P.x, z: P.z, b: big ? 1 : 0 }, NET.hostPeer); else ambush(P.x, P.z, big);
           flashAlert('GUARDED! CLEAR IT OUT'); }
         continue; }
       if (P.state === 'rising') {
@@ -4155,8 +4158,9 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (P.state === 'sealed') { P.dome.material.opacity = 0.18 + Math.sin(elapsed * 6) * 0.06; P.ring.material.opacity = 0.9;
         if (P.t > 2 && guards === 0) { P.state = 'open'; P.dome.visible = false; flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); SFX.play('pickup', null, { rate: 0.7 }); } }
       if (P.state === 'open' && car.alive && d < 3.4) {
-        gainWeapon('w_' + P.k); toast('w_' + P.k, '— level it up with upgrades'); SFX.play('pickup', null);
-        if (P.k === 'spread' && !abilities.jump) { abilities.jump = true; applyAbilityVisuals(); abDirty = true; abSig = ''; flashAlert('JUMP UNLOCKED! SPACE'); }      // everybody gets the basic jump with the spray gun
+        if (P.k === 'jump') { abilities.jump = true; applyAbilityVisuals(); abDirty = true; abSig = ''; toast('jump'); }
+        else { gainWeapon('w_' + P.k); toast('w_' + P.k, '— level it up with upgrades'); }
+        SFX.play('pickup', null);
         flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); burst(tmp.set(P.x, 0.5, P.z), 0xffd23a, 16, 3, 8, 0.6);
         P.state = 'gone'; P.g.visible = false;
         if (NET.on && NET.game) netEv({ t: 'armed', k: P.k });
@@ -7442,7 +7446,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 26;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 27;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7682,7 +7686,7 @@ const MONSTERS = [
       else if (d.t === 'bmhit') { if (!NET.client) { NET.applying = false; const B = bombs.find(B => B.id === d.i), m = swById.get(d.m);
           if (B && m && m.rig && !m.dead && Math.hypot(m.pos.x - (B.fly ? B.fly.x : B.x), m.pos.z - (B.fly ? B.fly.z : B.z)) < 25) { B.rigM = m; B.leap = { t: 0.62, sx: B.fly ? B.fly.x : B.x, sz: B.fly ? B.fly.z : B.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; netEv({ t: 'bmx', i: B.id, m: m.id }); } } }
       else if (d.t === 'bml') { if (!NET.client) { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.fly = null; B.x = num(d.x, -ARENA, ARENA); B.z = num(d.z, -ARENA, ARENA); } } }
-      else if (d.t === 'armed') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R && W_GEAR.includes(d.k)) armedFx(R, d.k); }
+      else if (d.t === 'armed') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R && (W_GEAR.includes(d.k) || d.k === 'jump')) armedFx(R, d.k); }
       else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
       else if (d.t === 'cubes') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R) spawnCubes(Math.round(num(d.n, 1, 5)), R, Math.round(num(d.l, 0, 2))); }
@@ -7795,7 +7799,7 @@ const MONSTERS = [
   function netSend() {
     NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
       cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, tw: myTow, pp: pedestals.filter(P => P.state !== 'gone').map(P => [P.x, P.z]), ak: gearDone() ? 1 : 0, ks: kit().every(t => abilities[t]) ? 1 : 0, gd: W_GEAR.every(k => weapons[k]) ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, tw: myTow, pp: pedestals.filter(P => P.state !== 'gone').map(P => [P.x, P.z]), ak: gearDone() ? 1 : 0, ks: kit().every(t => abilities[t]) ? 1 : 0, gd: W_GEAR.every(k => weapons[k]) && abilities.jump ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -8022,9 +8026,9 @@ const MONSTERS = [
     const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
     let t = '';
     if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length, gw = W_GEAR.filter(k => weapons[k]).length;
-      t = tk('Grab the spray gun', weapons.spread > 0) + (pedestals.length > 1 ? tk('Guns on your pedestals', weapons.nova > 0 && weapons.orbit > 0, (+(weapons.nova > 0) + +(weapons.orbit > 0)) + '/2') : '');
-      if (NET.on && NET.game && gw >= 3) { const rs = [...NET.remotes.values()].filter(R => R.up), n = rs.filter(R => R.gd).length + 1; t += tk('Everybody got their guns?', n >= rs.length + 1, n + '/' + (rs.length + 1)); }
-      if (crewArmed()) t += tk('Hunt the wandering bosses', have >= K.length, have + '/' + K.length + ' skills');
+      t = tk('Grab the spray gun', weapons.spread > 0) + (pedestals.some(P => P.k === 'jump') ? tk('Grab the jump', !!abilities.jump) : '') + (pedestals.some(P => P.k === 'nova') ? tk('Guns on your pedestals', weapons.nova > 0 && weapons.orbit > 0, (+(weapons.nova > 0) + +(weapons.orbit > 0)) + '/2') : '');
+      if (NET.on && NET.game && gw >= 3 && abilities.jump) { const rs = [...NET.remotes.values()].filter(R => R.up), n = rs.filter(R => R.gd).length + 1; t += tk('Everybody got their guns?', n >= rs.length + 1, n + '/' + (rs.length + 1)); }
+      if (crewArmed()) { const KB = K.filter(t => t !== 'jump'), hb = KB.filter(t => abilities[t]).length; t += tk('Hunt the wandering bosses', hb >= KB.length, hb + '/' + KB.length + ' skills'); }
       if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (gearDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate);
     else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
@@ -8080,7 +8084,7 @@ const MONSTERS = [
           if (n) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '☻' + n, cap: 'save chubziks' });
           else if (!R.found && PH.i <= 1) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '?', cap: 'chubzik nest' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
-        for (const P of pedestals) if (P.state !== 'gone') hintList.push({ x: P.x, z: P.z, d: Math.hypot(P.x - car.pos.x, P.z - car.pos.z), range: 999, col: '#ffd23a', text: '⚙', cap: P.state === 'sealed' || P.state === 'rising' ? 'guards: ' + (P.guards || 0) : AB_INFO['w_' + P.k].title });
+        for (const P of pedestals) if (P.state !== 'gone') hintList.push({ x: P.x, z: P.z, d: Math.hypot(P.x - car.pos.x, P.z - car.pos.z), range: 999, col: '#ffd23a', text: '⚙', cap: P.state === 'sealed' || P.state === 'rising' ? 'guards: ' + (P.guards || 0) : AB_INFO[pedIcon(P.k)].title });
         for (const m of swarm) if (m.wb && !m.dead) hintList.push({ x: m.pos.x, z: m.pos.z, d: Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z), range: 999, col: '#ff5a5a', text: '☠', cap: 'wandering boss', live: m });
         if (!myTow) { let nb = null, nd = 1e9; for (const B of bombs) if (!B.leap) { const d = Math.hypot(B.x - car.pos.x, B.z - car.pos.z); if (d < nd) { nd = d; nb = B; } }
           if (nb && nd < 140) hintList.push({ x: nb.x, z: nb.z, d: nd, range: 999, col: '#ff6a3a', text: '●', cap: 'bomb' }); }
