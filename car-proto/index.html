@@ -1161,7 +1161,89 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (document.hidden) ctx.suspend().catch(() => {}); else ctx.resume().catch(() => {});
     });
     return { init, play, loop, setRoom, toggleMute, setVolume, get volume() { return vol; }, get muted() { return muted; }, get ready() { return ready; },
-             get ctx() { return ctx; }, DEFS, LOOPS, buildMs: 0, worker: false };
+             get ctx() { return ctx; }, get master() { return master; }, DEFS, LOOPS, buildMs: 0, worker: false };
+  })();
+
+  // ---------- MUSIC: a written score (Grieg, "In the Hall of the Mountain King") played live by synths; the arrangement thickens with the action ----------
+  //   level 0 plucked theme · 1 synthwave (arp, soft kick) · 2 full synthwave (lead, snare) · 3 metal (power-chord chug, double kick) · 4 dubstep (halftime, wobble bass)
+  const MUSIC = (() => {
+    const BPM = [132, 144, 156, 168, 172], VOL = 0.5;
+    // the score: [midi note, length in eighths], 0 = rest. Theme A in B minor, theme B a fifth up
+    const A = [[59,1],[61,1],[62,1],[64,1],[66,1],[62,1],[66,2], [65,1],[61,1],[65,2],[64,1],[60,1],[64,2], [59,1],[61,1],[62,1],[64,1],[66,1],[62,1],[66,1],[71,1], [69,1],[66,1],[62,1],[66,1],[69,2],[0,2]];
+    const B = [[66,1],[68,1],[70,1],[71,1],[73,1],[70,1],[73,2], [74,1],[70,1],[74,2],[73,1],[70,1],[73,2], [66,1],[68,1],[70,1],[71,1],[73,1],[70,1],[73,2], [74,1],[70,1],[74,2],[73,2],[0,2]];
+    const lay = th => { const a = new Array(64).fill(null); let st = 0; for (const [m, l] of th) { if (m) a[st] = { m, len: l * 2 }; st += l * 2; } return a; };      // onto a grid of 16ths, 4 bars
+    const SEC = { A: { th: lay(A), root: [47,47,49,48,47,47,50,50], ch: [[59,62,66],[59,62,66],[61,65,68],[60,64,67],[59,62,66],[59,62,66],[62,66,69],[62,66,69]] },
+                  B: { th: lay(B), root: [54,54,50,54,54,54,50,54], ch: [[66,70,73],[66,70,73],[62,66,70],[66,70,73],[66,70,73],[66,70,73],[62,66,70],[66,70,73]] } };
+    const FORM = ['A', 'A', 'B', 'B'];
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    function build(ctx, out) {
+      const bus = ctx.createGain(); bus.gain.value = VOL; bus.connect(out);
+      const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), nd = nb.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      const curve = k => { const c = new Float32Array(1024); for (let i = 0; i < 1024; i++) c[i] = Math.tanh((i / 512 - 1) * k); return c; };
+      const chain = (...n) => { for (let i = 0; i < n.length - 1; i++) n[i].connect(n[i + 1]); return n[0]; };
+      const G = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
+      const F = (type, f, q) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q) b.Q.value = q; return b; };
+      const SH = k => { const w = ctx.createWaveShaper(); w.curve = curve(k); w.oversample = '2x'; return w; };
+      const gtr = chain(G(5), SH(6), F('lowpass', 3400), F('highpass', 110), F('peaking', 1400, 1), G(0.16), bus);      // guitar amp: drive, cab roll-off
+      const wobOut = chain(SH(3), F('lowpass', 6000), G(0.3), bus);
+      const dly = ctx.createDelay(1), fb = G(0.35), dlyIn = G(1); dlyIn.connect(dly); dly.connect(fb); fb.connect(dly); chain(dly, G(0.5), bus);      // synthwave echo
+      const env = (g, t, v, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+      const osc = (type, f, t, dur, det) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); if (det) o.detune.value = det; o.start(t); o.stop(t + dur + 0.05); return o; };
+      const noise = (t, dur) => { const n = ctx.createBufferSource(); n.buffer = nb; n.loop = true; n.start(t, Math.random() * 0.5); n.stop(t + dur + 0.05); return n; };
+      function kick(t, v) { const o = osc('sine', 150, t, 0.3), g = G(0); o.frequency.exponentialRampToValueAtTime(42, t + 0.12); env(g, t, v, 0.002, 0.26); chain(o, g, bus);
+        const c = noise(t, 0.02), cg = G(0); env(cg, t, v * 0.3, 0.001, 0.015); chain(c, F('highpass', 2500), cg, bus); }
+      function snare(t, v) { const n = noise(t, 0.2), g = G(0); env(g, t, v, 0.001, 0.17); chain(n, F('highpass', 1400), g, bus);
+        const o = osc('triangle', 190, t, 0.12), og = G(0); o.frequency.exponentialRampToValueAtTime(120, t + 0.1); env(og, t, v * 0.7, 0.001, 0.1); chain(o, og, bus); }
+      function hat(t, v, open) { const n = noise(t, open ? 0.3 : 0.05), g = G(0); env(g, t, v, 0.001, open ? 0.28 : 0.04); chain(n, F('highpass', 7500), g, bus); }
+      function pluck(t, m, dur, v) { const g = G(0), f = F('lowpass', 900, 2); f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(260, t + 0.18); env(g, t, v, 0.004, Math.max(0.12, dur));
+        osc('triangle', hz(m), t, dur + 0.1).connect(f); osc('sawtooth', hz(m), t, dur + 0.1, 6).connect(f); chain(f, g, bus); }
+      function arp(t, m, v) { const g = G(0), f = F('lowpass', 2600, 4); f.frequency.setValueAtTime(3200, t); f.frequency.exponentialRampToValueAtTime(700, t + 0.12); env(g, t, v, 0.003, 0.13);
+        osc('sawtooth', hz(m), t, 0.16, -7).connect(f); osc('sawtooth', hz(m), t, 0.16, 7).connect(f); f.connect(g); g.connect(bus); g.connect(dlyIn); }
+      function lead(t, m, dur, v, scream) { const g = G(0), f = F('lowpass', scream ? 5200 : 3000, scream ? 6 : 1); env(g, t, v, 0.01, dur);
+        for (const d of [-9, 9]) { const o = osc(scream ? 'sawtooth' : 'square', hz(m), t, dur, d); if (scream) { o.frequency.setValueAtTime(hz(m) * 0.94, t); o.frequency.exponentialRampToValueAtTime(hz(m), t + 0.05); } o.connect(f); }
+        f.connect(g); g.connect(bus); g.connect(dlyIn); }
+      function chug(t, m, dur, v, mute) { const g = G(0), f = F('lowpass', mute ? 900 : 5000); env(g, t, v, 0.002, mute ? 0.07 : dur);      // power chord: root, fifth, octave into the amp
+        for (const [st, d] of [[0, -6], [0, 6], [7, 0], [12, 0]]) osc('sawtooth', hz(m + st), t, mute ? 0.1 : dur, d).connect(f); chain(f, g, gtr); }
+      function wob(t, m, dur, n, v) { const g = G(0), f = F('lowpass', 200, 9); g.gain.setValueAtTime(v, t); g.gain.setValueAtTime(v, t + dur - 0.02); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        const w = dur / n; for (let i = 0; i < n; i++) { f.frequency.setValueAtTime(140, t + i * w); f.frequency.exponentialRampToValueAtTime(2600, t + (i + 0.45) * w); f.frequency.exponentialRampToValueAtTime(140, t + (i + 1) * w - 0.001); }
+        osc('sawtooth', hz(m), t, dur, -12).connect(f); osc('square', hz(m), t, dur, 12).connect(f); osc('sawtooth', hz(m + 12), t, dur).connect(f); chain(f, g, wobOut);
+        const sg = G(0); env(sg, t, v * 0.9, 0.01, dur); chain(osc('sine', hz(m - 12), t, dur), sg, bus); }
+      dly.delayTime.value = 0.3;
+      function step(i, t, L, s16) {                         // one sixteenth of the arrangement at level L
+        const S = SEC[FORM[Math.floor(i / 64) % FORM.length]], st = i % 64, b = st % 16, hb = Math.floor(st / 8), n = S.th[st], root = S.root[hb], ch = S.ch[hb], e8 = s16 * 2;
+        dly.delayTime.setValueAtTime(s16 * 3, t);
+        if (L === 0) { if (n) pluck(t, n.m - 12, n.len * s16 * 0.8, 0.5); return; }
+        if (L === 1) { if (n) pluck(t, n.m - 12, n.len * s16 * 0.8, 0.45); if (b % 8 === 0) kick(t, 0.5); if (b % 4 === 2) hat(t, 0.12);
+          if (b % 2 === 0) arp(t, ch[(b / 2) % 3] + 12, 0.07); return; }
+        if (L === 2) { if (n) lead(t, n.m, n.len * s16 * 0.85, 0.11); if (b % 2 === 0) pluck(t, root, e8 * 0.7, 0.4);
+          if (b % 4 === 0) kick(t, 0.6); if (b === 4 || b === 12) snare(t, 0.3); if (b % 2 === 0) hat(t, b % 4 === 2 ? 0.16 : 0.08);
+          arp(t, ch[[0, 1, 2, 1][b % 4]] + 12, 0.055); return; }
+        if (L === 3) { if (n) chug(t, n.m - 12, Math.min(n.len, 3) * s16 * 0.9, 0.5, false); else if (b % 2 === 1) chug(t, root, s16, 0.45, true);
+          if (n) lead(t, n.m + 12, n.len * s16 * 0.8, 0.06); if (b % 2 === 0) pluck(t, root - 12, e8 * 0.8, 0.4);
+          kick(t, b % 4 === 0 ? 0.6 : b % 2 === 0 ? 0.45 : 0.3); if (b === 4 || b === 12) snare(t, 0.38); if (b % 2 === 0) hat(t, 0.09); if (st === 0) hat(t, 0.25, true); return; }
+        // level 4: the drop. Halftime drums, wobble bass on the roots, the theme screaming on top
+        if (b === 0 || b === 10 || (st >= 48 && b === 6)) kick(t, 0.75); if (b === 8) snare(t, 0.5); if (b % 4 === 2) hat(t, 0.1); if (st === 0) hat(t, 0.28, true);
+        if (b % 4 === 0) wob(t, root - 12, s16 * 4, st >= 56 ? 8 : [1, 2, 4, 3][(b / 4 + Math.floor(st / 16)) % 4], 0.5);
+        if (n) lead(t, n.m + 12, n.len * s16 * 0.8, 0.07, true);
+      }
+      return { bus, step };
+    }
+    let eng = null, next = 0, idx = 0, lvl = 0, on = true, applied = null;
+    try { on = localStorage.getItem('carproto.music') !== '0'; } catch (e) {}
+    const M = { level: 0, build, BPM,
+      get on() { return on; },
+      toggle() { on = !on; try { localStorage.setItem('carproto.music', on ? '1' : '0'); } catch (e) {} return on; },
+      tick() {
+        const ctx = SFX.ctx; if (!ctx || !SFX.master || ctx.state !== 'running') return;
+        if (!eng) { eng = build(ctx, SFX.master); next = ctx.currentTime + 0.1; }
+        if (applied !== on) { applied = on; eng.bus.gain.setTargetAtTime(on ? VOL : 0, ctx.currentTime, 0.08); }
+        if (!on) { next = ctx.currentTime + 0.1; return; }
+        if (next < ctx.currentTime) next = ctx.currentTime + 0.05;       // fell behind (tab was asleep): pick up from now
+        while (next < ctx.currentTime + 0.3) { if (idx % 16 === 0) lvl = THREE.MathUtils.clamp(M.level | 0, 0, 4);      // the arrangement changes on the bar line
+          const s16 = 60 / BPM[lvl] / 4; eng.step(idx, next, lvl, s16); next += s16; idx++; }
+      } };
+    setInterval(() => M.tick(), 120);
+    return M;
   })();
 
   // ---------- procedural textures, baked on the GPU ----------
@@ -2674,6 +2756,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     keys[e.code] = true;
     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
     if (e.code === 'KeyR') respawn();
+    if (e.code === 'KeyM') flashAlert(MUSIC.toggle() ? 'MUSIC ON' : 'MUSIC OFF');
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
     if (e.code === 'KeyE' && !e.repeat && unloadAltar) doUnload();     // E sacrifices inside an altar's ring
@@ -2782,7 +2865,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 118, buildEl = document.getElementById('build');
+  const BUILD = 119, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -8159,7 +8242,13 @@ const MONSTERS = [
   Math.random = trueRandom;                             // world is built: back to real randomness for the simulation
   { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
   camFocus.copy(car.pos);
+  function musicLevel() {                               // how hard the band plays: by phase, one notch up when the crowd is on you
+    if (startEl.isConnected || !car.alive) return 0; if (PH.brk > 0) return 1;
+    const l = { roll: 1, scout: 2, save: 2, hell: 3, boss: 3 }[PHASES[PH.i].key] || 1;
+    return Math.min(4, l + (waves.alive >= 14 || boss.state === 'fight' ? 1 : 0));
+  }
   function frame() {
+    MUSIC.level = MUSIC.force ?? musicLevel(); MUSIC.tick();
     const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
     adaptQuality(raw);
     update(dt);
