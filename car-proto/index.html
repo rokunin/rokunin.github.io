@@ -2782,7 +2782,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 117, buildEl = document.getElementById('build');
+  const BUILD = 118, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4111,7 +4111,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const r = ARENA * (0.3 + Math.random() * 0.45);
     const m = makeWanderer(makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], Math.cos(a) * r, Math.sin(a) * r))); m.wbLoot = !!loot; return m;
   }
-  const WB_CROWD = 7;                                      // plenty of bosses roam; only some of them carry a skill
+  const WB_CROWD = 21;                                     // plenty of bosses roam; only some of them carry a skill
   let wbCheckT = 0;
   function wbTopUp(dt) {                                   // host: as many wandering bosses alive as the neediest player still lacks skills (a death wipe or anything else can't stall the warm-up)
     if ((wbCheckT -= dt) > 0) return; wbCheckT = 3;
