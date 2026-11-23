@@ -2884,7 +2884,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 123, buildEl = document.getElementById('build');
+  const BUILD = 124, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -5722,28 +5722,37 @@ const MONSTERS = [
   function numTex(n) { const c = mkCanvas(96, 96), x = c.getContext('2d'); x.font = '900 72px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.lineWidth = 10; x.strokeStyle = '#1a0e08'; x.strokeText(String(n), 48, 52); x.fillStyle = n <= 2 ? '#ff4a2a' : '#ffd23a'; x.fillText(String(n), 48, 52); return srgbTex(c); }
   const bombNums = [1, 2, 3, 4, 5].map(numTex);
-  // The delivery hand: a big white four-fingered cartoon glove on a black rubber-hose arm. It slides in from the top right of the screen,
+  // The delivery hand: a big white four-fingered cartoon glove, 1930s rubber-hose style, just the hand. It slides in from the top right of the screen,
   // sets the bomb down gently, lets go and pulls back the same way.
-  const HAND = { arrive: 1.5, hold: 0.45, leave: 1.0, far: 62, S: 1.7 };
-  const handAxis = new THREE.Vector3(1, 1.25, -1).normalize();                    // toward the top right of the screen, and up
+  const HAND = { arrive: 1.5, hold: 0.45, leave: 1.0, far: 62, S: 1.7, ink: 0.2 };
+  const handAxis = new THREE.Vector3(0.26, 0.63, -0.74).normalize();                // toward the top right of the screen, nearly flat to the camera: we see the glove side-on, like a drawing
   const handQuat = (() => { const cam = new THREE.Vector3(1, 1.1, 1).normalize(), Z = cam.clone().addScaledVector(handAxis, -cam.dot(handAxis)).normalize(), X = handAxis.clone().cross(Z);
     return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, handAxis, Z)); })();
-  const gloveMat = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.85 }), inkMat = new THREE.MeshBasicMaterial({ color: 0x15101a }), inkBack = new THREE.MeshBasicMaterial({ color: 0x15101a, side: THREE.BackSide });
-  const gSph = new THREE.SphereGeometry(1, 18, 14), gCyl = new THREE.CylinderGeometry(1, 1, 1, 14), gTor = new THREE.TorusGeometry(1, 0.26, 10, 22);
+  const gloveMat = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.85 }), inkMat = new THREE.MeshBasicMaterial({ color: 0x15101a }), inkBack = new THREE.MeshBasicMaterial({ color: 0x15101a, side: THREE.BackSide });      
+  const gSph = new THREE.SphereGeometry(1, 20, 16), gCyl = new THREE.CylinderGeometry(1, 1, 1, 16), gTap = new THREE.CylinderGeometry(1, 0.82, 1, 16), gRoll = new THREE.TorusGeometry(1.05, 0.42, 12, 26), gRollInk = new THREE.TorusGeometry(1.05, 0.42 + HAND.ink, 12, 26);
+  // three fat fingers and a thumb, two joints each: [x, y, z, radius, len1, len2, carrying [z1, x1, z2, x2], sprung open [z1, x1, z2, x2]]. Carrying, the index hooks round to pinch against the thumb.
+  const HAND_F = [
+    [0.78, -0.72, 0.12, 0.5, 0.9, 0.75, [0.25, 0.1, 0.95, 0], [0.22, -0.55, 0.1, -0.25]],
+    [0, -0.8, 0.2, 0.5, 1.05, 0.85, [-0.12, -0.1, -0.1, 0.25], [-0.08, -0.6, 0, -0.25]],
+    [-0.78, -0.72, 0.12, 0.47, 0.95, 0.8, [-0.42, -0.2, -0.15, 0.3], [-0.5, -0.55, -0.1, -0.25]],
+    [1.3, -0.05, 0.1, 0.5, 0.9, 1.0, [0.9, 0.1, -1.2, 0], [1.4, -0.3, 0.25, -0.2]] ];
   function makeHand() {
-    const H = new THREE.Group(), inked = (geo, sx, sy, sz, par, x, y, z) => { const m = new THREE.Mesh(geo, gloveMat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; par.add(m);
-      const o = new THREE.Mesh(geo, inkBack); o.scale.set(sx + 0.09, sy + 0.09, sz + 0.09); o.position.copy(m.position); par.add(o); return m; };      // every white part gets a black ink outline
-    inked(gSph, 1.55, 1.0, 1.35, H, 0, 0, 0);                                         // palm
-    inked(gCyl, 1.2, 0.8, 1.2, H, 0, 1.25, 0); const roll = new THREE.Mesh(gTor, gloveMat); roll.rotation.x = Math.PI / 2; roll.scale.setScalar(1.22); roll.position.y = 1.7; H.add(roll);      // cuff with its rolled rim
-    const rollInk = new THREE.Mesh(gTor, inkBack); rollInk.rotation.x = Math.PI / 2; rollInk.scale.setScalar(1.3); rollInk.position.y = 1.7; H.add(rollInk);
-    const cap = new THREE.Mesh(gSph, inkMat); cap.scale.set(1.12, 0.3, 1.12); cap.position.y = 1.72; H.add(cap);      // just the hand: the cuff is closed off, no sleeve
-    for (const x of [-0.5, 0, 0.5]) { const d = new THREE.Mesh(gCyl, inkMat); d.scale.set(0.06, 0.95, 0.06); d.position.set(x, 0.25, 1.33 - Math.abs(x) * 0.28); d.rotation.x = 0.25; H.add(d); }      // three darts on the back of the hand
+    const H = new THREE.Group(), k = HAND.ink, inked = (geo, sx, sy, sz, par, x, y, z) => { const m = new THREE.Mesh(geo, gloveMat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; par.add(m);
+      const o = new THREE.Mesh(geo, inkBack); o.scale.set(sx + k, sy + k, sz + k); o.position.copy(m.position); par.add(o); return m; };      // every white part gets a bold black ink outline
+    inked(gSph, 1.5, 1.2, 1.0, H, 0, 0, 0);                                           // palm
+    const roll = new THREE.Mesh(gRoll, gloveMat); roll.rotation.x = Math.PI / 2; roll.position.y = 1.22; roll.castShadow = true; H.add(roll);      // the puffy rolled cuff
+    const rollInk = new THREE.Mesh(gRollInk, inkBack); rollInk.rotation.x = Math.PI / 2; rollInk.position.y = 1.22; H.add(rollInk);
+    inked(gSph, 1.05, 0.55, 1.05, H, 0, 1.36, 0);                                      // just the hand: a white puffed top closes the cuff
+    for (const x of [-0.5, 0, 0.5]) { const d = new THREE.Mesh(gSph, inkMat); d.scale.set(0.085, 0.5, 0.05); d.position.set(x, 0.2, 0.99 - x * x * 0.24); d.rotation.x = 0.1; H.add(d); }      // three brush strokes on the back of the hand
     H.fingers = [];
-    for (const [x, z, th] of [[-1.05, 0.55, 0], [-0.35, 0.95, 0], [0.35, 0.95, 0], [1.05, 0.55, 0], [-1.0, -0.8, 1]]) {      // three fingers and a pinky in front, the thumb behind
-      const f = new THREE.Group(); f.position.set(x, -0.35, z); f.dir = th ? -1 : 1; inked(gCyl, 0.4, 1.7, 0.4, f, 0, -0.85, 0); inked(gSph, 0.42, 0.42, 0.42, f, 0, -1.7, 0); H.add(f); H.fingers.push(f); }
+    for (const [x, y, z, r, l1, l2, carry, open] of HAND_F) {
+      const f = new THREE.Group(), t = new THREE.Group(), r2 = r * 0.84; f.position.set(x, y, z); t.position.y = -l1; f.add(t);
+      inked(gSph, r, r, r, f, 0, 0, 0); inked(gTap, r, l1, r, f, 0, -l1 / 2, 0);
+      inked(gSph, r2, r2, r2, t, 0, 0, 0); inked(gTap, r2, l2, r2, t, 0, -l2 / 2, 0); inked(gSph, r2 * 0.82, r2 * 0.82, r2 * 0.82, t, 0, -l2, 0);
+      f.tip = t; f.carry = carry; f.open = open; H.add(f); H.fingers.push(f); }
     H.scale.setScalar(HAND.S); H.quaternion.copy(handQuat); return H;
   }
-  const handGrip = 1.4 + 1.75 * HAND.S + 0.9 * HAND.S;                               // the bomb dangles from the fingertips by its neck, in plain view under the hand
+  const handOff = new THREE.Vector3(1.72, -1.78, 0.1).multiplyScalar(HAND.S).applyQuaternion(handQuat);      // where the pinch sits: the hand holds the bomb by its fuse
   function handTick(B, dt) {                                                         // returns true while the bomb is still in the hand
     const D = B.drop; D.t += dt; const H = D.hand, a = HAND.arrive, h = HAND.hold;
     let dist, curl;
@@ -5752,8 +5761,9 @@ const MONSTERS = [
     else { const k = (D.t - a - h) / HAND.leave; dist = HAND.far * k * k; curl = 0; }
     if (D.t >= a && !D.set) { D.set = true; burst(tmp.set(B.x, 0.3, B.z), 0x8a7a64, 10, 2, 5, 0.5); SFX.play('land', tmp.set(B.x, 0, B.z), { vol: 0.5, rate: 1.3 }); }
     const wob = D.t < a ? Math.sin(D.t * 9) * 0.25 * (1 - D.t / a) : 0;
-    H.position.set(B.x, 1.1, B.z).addScaledVector(handAxis, handGrip + dist); H.position.y += wob;
-    for (const f of H.fingers) f.rotation.x = f.dir * (0.3 * curl - 0.8 * (1 - curl));
+    H.position.set(B.x, 2.8, B.z).sub(handOff).addScaledVector(handAxis, dist); H.position.y += wob;
+    const o = 1 - curl, e = o <= 0 ? 0 : 1 + 2.70158 * Math.pow(o - 1, 3) + 1.70158 * Math.pow(o - 1, 2);      // the fingers spring open with a little overshoot
+    for (const f of H.fingers) { const a = f.carry, b = f.open; f.rotation.set(a[1] + (b[1] - a[1]) * e, 0, a[0] + (b[0] - a[0]) * e); f.tip.rotation.set(a[3] + (b[3] - a[3]) * e, 0, a[2] + (b[2] - a[2]) * e); }
     if (D.t < a) B.g.position.set(B.x, wob, B.z).addScaledVector(handAxis, dist);
     if (D.t >= a + h + HAND.leave) { scene.remove(H); B.drop = null; }
     return D.t < a;
