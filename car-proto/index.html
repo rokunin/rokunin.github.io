@@ -83,7 +83,12 @@
   @keyframes upPulse { 50% { transform: translateY(-3px) scale(1.08); } }
   .ab .lv { position: absolute; right: 2px; top: 1px; color: #ffd23a; font: 900 11px/1 system-ui, sans-serif; text-shadow: 0 1px 0 #000; font-style: normal; }
   .ab .cdv { position: absolute; left: 6px; right: 6px; top: 5px; height: calc(var(--cd, 0) * 44px); background: rgba(10,10,14,.65); border-radius: 0 0 8px 8px; pointer-events: none; }
+  #wallet { display: flex; gap: 10px; align-self: center; padding: 6px 10px; border-radius: 8px; background: rgba(27,20,33,.82); font: 900 16px/1 'Londrina', system-ui, sans-serif; letter-spacing: .04em; white-space: nowrap; }
+  #wallet .c { color: #ffc62e; } #wallet .g { color: #5cecff; }
+  .ab .cost, .wslot .cost { position: absolute; left: 50%; bottom: -15px; transform: translateX(-50%); font: 900 12px/1 'Londrina', system-ui, sans-serif; font-style: normal; white-space: nowrap; color: #9a8f86; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  .ab .cost.ok { color: #ffc62e; } .wslot .cost { color: #6f8a92; } .wslot .cost.ok { color: #5cecff; }
   #upTag { display: none; align-self: center; padding: 6px 10px; border-radius: 8px; background: #e8b417; color: #2a1d05; font: 900 14px/1 'Londrina', system-ui, sans-serif; letter-spacing: .04em; }
+  body.touch #wallet { position: absolute; right: 250px; bottom: 64px; }
   body.touch #upTag { position: absolute; right: 250px; bottom: 64px; white-space: nowrap; }
   body.touch .ab .cdv { left: 0; right: 0; top: 0; height: calc(var(--cd, 0) * 100%); border-radius: 29px 29px 0 0; }
   .ab.fresh { animation: pop .6s ease-out; }
@@ -2744,7 +2749,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const hd = Math.hypot(ap.x - tip.x, ap.z - tip.z);
     const pitch = THREE.MathUtils.clamp(Math.atan2(ap.y - tip.y, Math.max(hd, 3)), -0.5, 0.1);
     const fwd = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-    const lv = weapons.spread, n = lv ? W_STATS.spread.n[lv - 1] : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
+    const lv = weapons.spread, n = lv ? (ride === 'halo' ? Math.max(1, Math.round(W_STATS.spread.n[lv - 1] * 0.7)) : W_STATS.spread.n[lv - 1]) : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
     for (let i = 0; i < n; i++) {                       // fan gun: n tracers spread evenly across the arc
       const spread = (n > 1 ? (i / (n - 1) - 0.5) * arc : 0) + rand(-0.02, 0.02);
       const dir = fwd.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), spread);
@@ -2879,7 +2884,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 122, buildEl = document.getElementById('build');
+  const BUILD = 123, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -3372,7 +3377,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       if (e.carried) { releaseIfHeld(e); e.carried = false; }
       e.dead = true; e.root.visible = false;
       enemyDieFx(e);
-      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); }
+      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); lootFrom(e.elite ? 'mini' : 'enemy', e.pos.x, e.pos.z); }
       if (e.elite) { dropLoot(e.pos); shake = Math.max(shake, 0.5); }
       enemyQueue.push({ e, t: e.elite ? 8 : 5 });
     }
@@ -3534,7 +3539,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
       o.mesh.visible = false;
       spawnParticles(o.mesh.position, 0xd2873c, 16, 9); SFX.play('crate_break', o.mesh.position);
       flash(o.mesh.position, 0xffb060, 4.5, 0.18, 1.6, false); burst(o.mesh.position, 0xa08a6a, 5, 1.6, 3.5, 0.35);
-      kills++; killsEl.textContent = kills; crateDrop(o); if (!NET.applying) myKill(o.mesh.position.x, o.mesh.position.z, 3);
+      kills++; killsEl.textContent = kills; crateDrop(o); if (!NET.applying) { myKill(o.mesh.position.x, o.mesh.position.z, 3); if (!o.room) lootFrom('crate', o.mesh.position.x, o.mesh.position.z); }
       respawnQueue.push({ o, t: 4 });
       if (!o.room) netEv({ t: 'crate', i: obstacles.indexOf(o) });
     }
@@ -4333,6 +4338,56 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
   const kitDone = () => kit().every(t => abilities[t]);
   const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0, decoy: 0, cubes: 0, trail: 0 };      // upgrades spent on each, 0..AB_LV_MAX
+  // Loot: coins level the ride's skills, crystals level the guns. Each phase puts a fixed amount per player into the bank the drops are paid from,
+  // so a whole run holds 50 coins and 16 crystals a head: never enough to max everything (see LOOT.abCost / wCost).
+  const LOOT = { coins: [14, 10, 10, 10, 6], gems: [4, 4, 3, 3, 2], abCost: [10, 20], wCost: [3, 6] };
+  let coins = 0, gems = 0, lootPhase = -1, lootId = 0, lootN = 0; const lootBank = { c: 0, g: 0 }, loot = [];
+  const coinGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.16, 18); coinGeo.rotateX(Math.PI / 2);
+  const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc62e, metalness: 0.85, roughness: 0.28, emissive: 0x7a4a00 });
+  const gemGeo = new THREE.OctahedronGeometry(0.62); gemGeo.scale(1, 1.5, 1);
+  const gemMat = new THREE.MeshStandardMaterial({ color: 0x5cecff, metalness: 0.2, roughness: 0.15, emissive: 0x1a8fb5, flatShading: true });
+  function addLoot(id, gem, x, z, vx, vy, vz) {
+    const m = new THREE.Mesh(gem ? gemGeo : coinGeo, gem ? gemMat : coinMat); m.castShadow = true; m.position.set(x, 0.8, z); scene.add(m);
+    loot.push({ id, gem, x, y: 0.8, z, vx, vy, vz, m, t: 0, spin: Math.random() * 6 });
+  }
+  function dropCoins(at, nc, ng) {                           // host: pay out of the bank; whatever the bank can't cover doesn't drop
+    if (NET.client || (inRoom(at.x, at.z) && !gateOpen)) return;
+    nc = Math.min(nc, lootBank.c); ng = Math.min(ng, lootBank.g); lootBank.c -= nc; lootBank.g -= ng; const a = [];
+    for (let i = 0; i < nc + ng; i++) { const an = Math.random() * 6.283, sp = 2.5 + Math.random() * 3.5, id = ++lootId, q = [id, i < nc ? 0 : 1, r1(at.x), r1(at.z), r1(Math.cos(an) * sp), r1(7 + Math.random() * 4), r1(Math.sin(an) * sp)];
+      addLoot(id, q[1], q[2], q[3], q[4], q[5], q[6]); a.push(q); }
+    if (a.length) { netEv({ t: 'loot', a }); SFX.play('loot', at, { vol: 0.5, rate: 1.4 }); }
+  }
+  function lootFrom(kind, x, z) {                            // what each source is worth; a client's own crate or brute asks the host
+    if (NET.client) { netEv({ t: 'lootreq', k: kind, x: r1(x), z: r1(z) }, NET.hostPeer); return; }
+    const at = tmp.set(x, 0, z).clone(), r = Math.random();
+    if (kind === 'mob') { if (r < 0.05) dropCoins(at, 1, 0); }
+    else if (kind === 'crate') dropCoins(at, r < 0.4 ? 1 : 0, Math.random() < 0.04 ? 1 : 0);
+    else if (kind === 'enemy') dropCoins(at, r < 0.35 ? 1 : 0, 0);
+    else if (kind === 'mini') dropCoins(at, 2, r < 0.3 ? 1 : 0);
+    else if (kind === 'wb') dropCoins(at, r < 0.6 ? 1 : 0, Math.random() < 0.12 ? 1 : 0);
+    else if (kind === 'rig') dropCoins(at, 3, 2);
+    else if (kind === 'boss') dropCoins(at, 5, 2);
+  }
+  function updateLoot(dt) {
+    if (startEl.isConnected) return;
+    if (!NET.client) { const n = 1 + [...NET.remotes.values()].filter(R => R.up).length;      // the bank: every phase pays one share per player; a late joiner brings the shares of the phases already begun
+      while (lootPhase < PH.i) { lootPhase++; lootBank.c += (LOOT.coins[lootPhase] || 0) * lootN; lootBank.g += (LOOT.gems[lootPhase] || 0) * lootN; }
+      if (n > lootN) { for (let i = 0; i <= lootPhase; i++) { lootBank.c += (LOOT.coins[i] || 0) * (n - lootN); lootBank.g += (LOOT.gems[i] || 0) * (n - lootN); } lootN = n; } }
+    for (let i = loot.length - 1; i >= 0; i--) { const L = loot[i]; L.t += dt;
+      if (L.y > 0.8 || L.vy > 0) { L.vy -= 26 * dt; L.x += L.vx * dt; L.z += L.vz * dt; L.y += L.vy * dt;
+        if (L.y <= 0.8) { L.y = 0.8; if (L.vy < -4) { L.vy = -L.vy * 0.4; L.vx *= 0.6; L.vz *= 0.6; } else { L.vy = 0; L.vx = L.vz = 0; } }
+        const q = tmp.set(L.x, 0, L.z); for (const o of obstacles) if (active(o)) pushOutOfBox(q, 0.9, o);                      // never lands inside a rock: every piece can be reached
+        if (inRoom(q.x, q.z)) { L.x = q.x; L.z = q.z; } else { L.x = THREE.MathUtils.clamp(q.x, -ARENA + 2, ARENA - 2); L.z = THREE.MathUtils.clamp(q.z, -ARENA + 2, ARENA - 2); } }
+      const d = Math.hypot(car.pos.x - L.x, car.pos.z - L.z);
+      if (car.alive && L.t > 0.45 && d < 4.2 && d > 0.01) { const k = Math.min(1, 11 * dt / d); L.x += (car.pos.x - L.x) * k; L.z += (car.pos.z - L.z) * k; }      // a short magnet, only from right next to you
+      L.m.position.set(L.x, L.y + (L.vy === 0 ? Math.sin(elapsed * 3 + L.id) * 0.15 : 0), L.z); L.m.rotation.y = L.spin + elapsed * (L.gem ? 2.2 : 4.5);
+      if (car.alive && L.t > 0.45 && d < 1.9) {
+        spawnParticles(tmp.set(L.x, 1, L.z), L.gem ? 0x8ff4ff : 0xffd65a, 5, 5); scene.remove(L.m); loot.splice(i, 1);
+        if (NET.client) netEv({ t: 'lootget', i: L.id }, NET.hostPeer); else { lootGain(L.gem); netEv({ t: 'lootx', i: L.id }); } }      // the host decides who got it: one piece, one owner
+    }
+  }
+  function lootGain(gem) { if (gem) gems++; else coins++; abSig = ''; SFX.play('pickup', null, { vol: 0.35, rate: gem ? 1.9 : 1.55 + Math.random() * 0.2 }); }
+  const abPrice = t => LOOT.abCost[abLv[t]], wPrice = k => LOOT.wCost[(weapons[k] - 1) >> 1];
   const AB_LV_MAX = 2, UP_MAX = 6;                         // ~6 upgrades a run against 12 possible levels (3 skills + 3 guns, 2 each): you pick a build
   let upPts = 0, upGot = 0;
   const UP_TEXT = { drill: ['spins longer', 'wider and meaner'], burrow: ['harder to dig out', 'surfacing knocks everyone back'], grab: ['throws hit twice as hard', 'throws x3, loot flies to you'],
@@ -4481,12 +4536,12 @@ laugh(r) {                                       // a big man's belly laugh: bre
     abDirty = false; abSig = ''; abBar.innerHTML = '';
     for (const t of kit()) {
       const d = document.createElement('div'); d.className = 'ab locked'; d.id = 'ab-' + t;
-      d.innerHTML = `<b class="up">+</b><img src="${ICON_URLS[t]}" draggable="false"><span>${AB_INFO[t].key}</span><i class="lv"></i><i class="cdv"></i>`;
+      d.innerHTML = `<b class="up">+</b><img src="${ICON_URLS[t]}" draggable="false"><span>${AB_INFO[t].key}</span><i class="lv"></i><i class="cdv"></i><i class="cost"></i>`;
       abBar.appendChild(d);
       const upB = d.querySelector('.up'), spend = e => { e.preventDefault(); e.stopPropagation(); upgradeAb(t); };
       upB.addEventListener('mousedown', spend); upB.addEventListener('touchstart', spend, { passive: false });
     }
-    const tag = document.createElement('div'); tag.id = 'upTag'; abBar.appendChild(tag);
+    const tag = document.createElement('div'); tag.id = 'wallet'; abBar.appendChild(tag);
     bindAb('jump', () => jump());
     bindAb('burrow', () => toggleBurrow());
     bindAb('bomb', () => bombDome());
@@ -4495,8 +4550,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     layoutTouch(); updateAbHud();
   }
   function upgradeAb(t) {
-    if (upPts <= 0 || !abilities[t] || abLv[t] >= AB_LV_MAX) return;
-    upPts--; abLv[t]++;
+    if (!abilities[t] || abLv[t] >= AB_LV_MAX || coins < abPrice(t)) return;
+    coins -= abPrice(t); abLv[t]++;
     toast(t, 'Lv ' + (abLv[t] + 1), UP_TEXT[t][abLv[t] - 1]); SFX.play('pickup', null, { rate: 1.3 });
     const el = document.getElementById('ab-' + t); if (el) { el.classList.remove('fresh'); void el.offsetWidth; el.classList.add('fresh'); }
     updateAbHud();
@@ -4504,18 +4559,19 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function updateAbHud() {
     if (abDirty) { buildAbBar(); return; }
     const act = RIDE_ACTIVE[ride], bk = act && abilities[act] ? activeCdK() : 0;
-    const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + upPts + '|' + bk.toFixed(2);
+    const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + coins + '|' + gems + '|' + bk.toFixed(2);
     if (sig === abSig) return; abSig = sig;
-    if (wUpSeen !== upPts) { wUpSeen = upPts; updateWeaponHUD(); }      // weapons take upgrades too
+    if (wUpSeen !== gems) { wUpSeen = gems; updateWeaponHUD(); }      // guns are levelled with crystals
     for (const t of kit()) {
       const el = document.getElementById('ab-' + t); if (!el) continue;
       if (abilities[t] && el.classList.contains('locked')) { el.classList.remove('locked'); el.classList.add('fresh'); }
-      el.classList.toggle('can', upPts > 0 && abilities[t] && abLv[t] < AB_LV_MAX);
+      const open = abilities[t] && abLv[t] < AB_LV_MAX; el.classList.toggle('can', open && coins >= abPrice(t));
+      const ce = el.querySelector('.cost'); ce.textContent = open ? abPrice(t) + '●' : ''; ce.classList.toggle('ok', open && coins >= abPrice(t));
       el.querySelector('.lv').textContent = abLv[t] ? '★'.repeat(abLv[t]) : '';
       if (t === act) el.style.setProperty('--cd', bk.toFixed(2));
     }
-    const tag = document.getElementById('upTag');
-    if (tag) { tag.style.display = upPts > 0 ? 'block' : 'none'; tag.textContent = 'UPGRADES ' + upGot + '/' + UP_MAX; }
+    const tag = document.getElementById('wallet');
+    if (tag) tag.innerHTML = '<b class="c">● ' + coins + '</b><b class="g">◆ ' + gems + '</b>';
   }
   const toastEl = document.getElementById('toast'); let toastTimer = 0;
   function toast(type, extra, hint) {
@@ -4559,7 +4615,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const gearDone = () => !gearNext();
   function myKill() {}                                     // ordinary kills drop nothing personal any more
   function bossDrop(x, z) {                                // a wandering boss died: everybody gets their next skill right there (lying where it fell)
-    const t = kit().find(t => !abilities[t] && t !== 'jump' && !pickups.some(p => p.own && p.type === t)) || (upGot < UP_MAX ? 'upgrade' : null); if (!t) return;
+    const t = kit().find(t => !abilities[t] && t !== 'jump' && !pickups.some(p => p.own && p.type === t)); if (!t) return;
     spawnPickup(t, tmp.set(THREE.MathUtils.clamp(x, -ARENA + 4, ARENA - 4), 0, THREE.MathUtils.clamp(z, -ARENA + 4, ARENA - 4)), undefined, true); pickups[pickups.length - 1].own = true;
   }
   let pkN = 0;
@@ -4638,10 +4694,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const wBar = document.getElementById('weapons');
   function updateWeaponHUD(fresh) {                      // fresh: the weapon that just changed pops
     wBar.innerHTML = W_ORDER.filter(k => weapons[k]).map(k =>
-      `<div class="wslot${k === fresh ? ' new' : ''}${upPts > 0 && weapons[k] < W_MAX ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + wLv(k)}</b></div>`).join('');
+      `<div class="wslot${k === fresh ? ' new' : ''}${weapons[k] < W_MAX && gems >= wPrice(k) ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + wLv(k)}</b>${weapons[k] < W_MAX ? `<i class="cost${gems >= wPrice(k) ? ' ok' : ''}">${wPrice(k)}◆</i>` : ''}</div>`).join('');
   }
   { const spendW = e => { const u = e.target.closest && e.target.closest('.up'); if (!u) return; e.preventDefault(); e.stopPropagation();
-      const k = u.dataset.k; if (upPts <= 0 || !weapons[k] || weapons[k] >= W_MAX) return; upPts--; const lv = gainWeapon('w_' + k, true);
+      const k = u.dataset.k; if (!weapons[k] || weapons[k] >= W_MAX || gems < wPrice(k)) return; gems -= wPrice(k); const lv = gainWeapon('w_' + k, true);
       toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + wLv(k)); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
     wBar.addEventListener('mousedown', spendW); wBar.addEventListener('touchstart', spendW, { passive: false }); }
   let wUpSeen = -1;
@@ -4838,7 +4894,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     const lv = [...kit().filter(t => abilities[t] && abLv[t] > 0).map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k] > 1).map(k => ['w', k])];
     const pick = a => a[Math.floor(Math.random() * a.length)];
     let lost = null;
-    if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } upGot = Math.max(0, upGot - 1); lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
+    if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
     } else { const own = [...kit().filter(t => abilities[t] && t !== 'jump').map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
       const [kind, k] = pick(own); if (kind === 'ab') { abilities[k] = false; applyAbilityVisuals(); } else { weapons[k] = 0; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'LOST']; }
     abDirty = true; abSig = ''; toast(lost[0], lost[1]); lossFxStart(lost[0], lost[1] !== 'LOST');
@@ -5484,7 +5540,8 @@ const MONSTERS = [
     if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
     waves.lastKill.copy(m.pos);
     if (m.wb) { wbKilled++; if (m.wbLoot) { bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); } shake = Math.max(shake, 0.6); }
-    else if (m.mini && !NET.client) { if ((NET.on && NET.game) || upGot < UP_MAX) spawnPickup('upgrade', m.pos); else dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
+    else if (m.mini && !NET.client) { if (PH.i > 0) dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
+    if (!NET.client) lootFrom(m.rig ? 'rig' : m.wb ? 'wb' : m.mini ? 'mini' : 'mob', m.pos.x, m.pos.z);
     if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
   function hitCritter(m, dmg, dir, push = 3) {
@@ -5679,7 +5736,7 @@ const MONSTERS = [
     inked(gSph, 1.55, 1.0, 1.35, H, 0, 0, 0);                                         // palm
     inked(gCyl, 1.2, 0.8, 1.2, H, 0, 1.25, 0); const roll = new THREE.Mesh(gTor, gloveMat); roll.rotation.x = Math.PI / 2; roll.scale.setScalar(1.22); roll.position.y = 1.7; H.add(roll);      // cuff with its rolled rim
     const rollInk = new THREE.Mesh(gTor, inkBack); rollInk.rotation.x = Math.PI / 2; rollInk.scale.setScalar(1.3); rollInk.position.y = 1.7; H.add(rollInk);
-    const arm = new THREE.Mesh(gCyl, inkMat); arm.scale.set(0.5, 90, 0.5); arm.position.y = 46.5; H.add(arm);         // the rubber-hose arm runs off screen
+    const cap = new THREE.Mesh(gSph, inkMat); cap.scale.set(1.12, 0.3, 1.12); cap.position.y = 1.72; H.add(cap);      // just the hand: the cuff is closed off, no sleeve
     for (const x of [-0.5, 0, 0.5]) { const d = new THREE.Mesh(gCyl, inkMat); d.scale.set(0.06, 0.95, 0.06); d.position.set(x, 0.25, 1.33 - Math.abs(x) * 0.28); d.rotation.x = 0.25; H.add(d); }      // three darts on the back of the hand
     H.fingers = [];
     for (const [x, z, th] of [[-1.05, 0.55, 0], [-0.35, 0.95, 0], [0.35, 0.95, 0], [1.05, 0.55, 0], [-1.0, -0.8, 1]]) {      // three fingers and a pinky in front, the thumb behind
@@ -5719,6 +5776,11 @@ const MONSTERS = [
       return [Math.round(x), Math.round(z)]; }
     return null;
   }
+  function bombRefill(by, m) {                              // host: a hit! the glove brings the next bomb right to the thrower, just outside the log's reach
+    const bx = by ? by[0] : m.pos.x + 20, bz = by ? by[1] : m.pos.z; let dx = bx - m.pos.x, dz = bz - m.pos.z; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    const r = Math.max(d + 9, RIG.half + 3.5), x = THREE.MathUtils.clamp(m.pos.x + dx * r, -ARENA + 6, ARENA - 6), z = THREE.MathUtils.clamp(m.pos.z + dz * r, -ARENA + 6, ARENA - 6);
+    addBomb(++bombId, Math.round(x), Math.round(z), true); bombSpawnT = 8;
+  }
   function carrierOf(B) {                                   // whose cart this bomb rides on: where that cart is
     if (myTow === B.id && car.alive) return cart.pos;
     for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) return R.cpos;
@@ -5738,7 +5800,7 @@ const MONSTERS = [
     if ((towCd -= dt) < 0) towCd = 0;
     const rigs = swarm.filter(m => m.rig && !m.dead && !m.rig.gone);
     if (!NET.client) {                                     // host: a bomb for every rig; drag physics; the hold count; the bang
-      if (rigs.length > bombs.filter(B => !B.leap).length && (bombSpawnT -= dt) <= 0) { bombSpawnT = 3;
+      if (rigs.length > bombs.length && (bombSpawnT -= dt) <= 0) { bombSpawnT = 3;
         const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++bombId, sp[0], sp[1], true); }
       for (const B of bombs.slice()) { if (B.leap || B.fly) continue;
         const C = carrierOf(B); B.n = C ? 1 : 0; if (C) { B.x = C.x; B.z = C.z; }
@@ -5753,7 +5815,7 @@ const MONSTERS = [
         if (k >= 1) { const p = tmp.set(L.tx, RIG.top, L.tz);
           flash(p, 0xffa040, 22, 0.6, 9, false); spawnParticles(p, 0xff7a2a, 40, 18); spawnParticles(p, 0x2a2420, 24, 12); burst(tmp.set(L.tx, 0.6, L.tz), 0x4a3a2a, 30, 6, 12, 0.7);
           SFX.play('boss_roar', p, { rate: 1.6, vol: 0.5 }); SFX.play('crate_break', p, { rate: 0.4 }); if (Math.hypot(L.tx - car.pos.x, L.tz - car.pos.z) < 70) shake = Math.max(shake, 1.2);
-          if (!NET.client) { const m = B.rigM; if (m && !m.dead) { m.rig.hits = (m.rig.hits || 0) + 1; netEv({ t: 'righit', m: m.id, n: m.rig.hits }); flashAlert(m.rig.hits >= 3 ? 'LOG MACHINE DOWN!' : 'HIT ' + m.rig.hits + '/3'); if (m.rig.hits >= 3) killCritter(m); }
+          if (!NET.client) { const m = B.rigM; if (m && !m.dead) { m.rig.hits = (m.rig.hits || 0) + 1; netEv({ t: 'righit', m: m.id, n: m.rig.hits }); flashAlert(m.rig.hits >= 3 ? 'LOG MACHINE DOWN!' : 'HIT ' + m.rig.hits + '/3'); if (m.rig.hits >= 3) killCritter(m); else bombRefill(B.by, m); }
             blastAt(L.tx, L.tz, 10, 6, 24, true); }
           dropBomb(B); }
         continue; }
@@ -5761,7 +5823,7 @@ const MONSTERS = [
         B.g.position.set(F.x, F.y - 1.1, F.z); B.g.scale.setScalar(0.9); B.g.rotation.x += dt * 8; B.g.rotation.z += dt * 5; B.spark.scale.setScalar(0.6 + Math.random() * 0.6);
         if (Math.random() < dt * 30) puff(tmp.set(F.x, F.y + 1.5, F.z), 0xb0a898, 0.6, 0.5, 0, 1, 0);
         if (F.own) for (const m of rigs) if (F.vy < 0 && F.y > RIG.top - 0.3 && F.y < RIG.top + 2.4 && Math.hypot(m.pos.x - F.x, m.pos.z - F.z) < 2.6) {      // in the booth!
-          B.fly = null; B.leap = { t: 0.62, sx: F.x, sz: F.z, tx: m.pos.x, tz: m.pos.z }; B.rigM = m;
+          B.fly = null; B.leap = { t: 0.62, sx: F.x, sz: F.z, tx: m.pos.x, tz: m.pos.z }; B.rigM = m; B.by = [car.pos.x, car.pos.z];
           if (NET.client) netEv({ t: 'bmhit', i: B.id, m: m.id }, NET.hostPeer); else netEv({ t: 'bmx', i: B.id, m: m.id, q: 1 });
           break; }
         if (B.fly && F.y <= 1.1) { B.fly = null; B.x = B.tx = F.x; B.z = B.tz = F.z;      // missed: it thuds down and lies there
@@ -7085,7 +7147,7 @@ const MONSTERS = [
     spawnParticles(tmp.set(BOSS_POS.x, 5, BOSS_POS.z), 0xff2255, 20, 12);
     shake = 1.2;
     flashAlert('PYRAMIDON DEFEATED'); SFX.play('boss_die', BOSS_POS);
-    if (!NET.client) { dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z - 3)); dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z + 3)); }
+    if (!NET.client) { dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z - 3)); dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z + 3)); lootFrom('boss', BOSS_POS.x - 10, BOSS_POS.z); }
     angelStart();
     setDoor(false);
   }
@@ -7520,7 +7582,7 @@ const MONSTERS = [
     updateHeadlight();
     updateBoss(dt);
     updateShieldBar();
-    updatePickups(dt); updatePedestals(dt); updateBombs(dt); updateLossFx(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
+    updatePickups(dt); updateLoot(dt); updatePedestals(dt); updateBombs(dt); updateLossFx(dt); updateDomes(dt); updateDecoys(dt); updateCubes(dt); updateTrails(dt); updateAbHud();
     updateDrill(dt);
     updateWeapons(dt);
     updateGrab(dt);
@@ -7597,7 +7659,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 30;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 31;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7675,7 +7737,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible && !o.dormant) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), lt: loot.slice(0, 120).map(L => [L.id, L.gem ? 1 : 0, r1(L.x), r1(L.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -7702,6 +7764,7 @@ const MONSTERS = [
     for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
       if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = 'perch'; else { c.pos.y = 0; c.state = 'roam'; c.goal.copy(c.pos); c.t = 0; } }
     NET.client = false; NET.isHost = true; NET.hostPeer = null; NET.chMir = new Map(); waves.t = Math.max(waves.t, 10);
+    lootPhase = PH.i; lootN = 1 + [...NET.remotes.values()].filter(R => R.up).length;      // the old host already paid these phases into the bank
     wbSpawned = swarm.some(m => m.wb && !m.dead);      // the bosses were the old host's: carry on topping them up
   }
   function netPick(m) {                                  // host: each monster goes for the nearest player
@@ -7833,10 +7896,15 @@ const MONSTERS = [
             if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA), q[3] === 2); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
           for (const B of bombs.slice()) if (!B.leap && !seen.has(B.id)) dropBomb(B); } }
       else if (d.t === 'bmx') { if (NET.client) { const B = bombs.find(B => B.id === d.i), m = swById.get(d.m); if (B && !B.leap) { if (B.fly && m) { B.leap = { t: 0.62, sx: B.fly.x, sz: B.fly.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; } else bombBoom(B, m); } } }
+      else if (d.t === 'loot') { if (NET.client && Array.isArray(d.a)) for (const q of d.a.slice(0, 40)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), num(q[4], -8, 8), num(q[5], 0, 14), num(q[6], -8, 8)); lootId = Math.max(lootId, q[0]); } }
+      else if (d.t === 'lootget') { if (!NET.client) { const i = loot.findIndex(L => L.id === d.i); if (i >= 0) { const L = loot[i]; scene.remove(L.m); loot.splice(i, 1); netEv({ t: 'lootx', i: L.id }); netEv({ t: 'lootok', gm: L.gem ? 1 : 0 }, from); } } }
+      else if (d.t === 'lootok') { if (NET.client) lootGain(d.gm === 1); }
+      else if (d.t === 'lootx') { const i = loot.findIndex(L => L.id === d.i); if (i >= 0) { scene.remove(loot[i].m); loot.splice(i, 1); } }
+      else if (d.t === 'lootreq') { if (!NET.client && (d.k === 'crate' || d.k === 'enemy' || d.k === 'mini')) { NET.applying = false; lootFrom(d.k, num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'righit') { if (NET.client) { const m = swById.get(d.m), n = num(d.n, 0, 3); if (m && m.rig) m.rig.hits = n; flashAlert(n >= 3 ? 'LOG MACHINE DOWN!' : 'HIT ' + n + '/3'); } }
       else if (d.t === 'bmt') { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.n = 0; B.fly = { x: num(d.x, -ARENA, ARENA), y: num(d.y, 0, 20), z: num(d.z, -ARENA, ARENA), vx: num(d.vx, -40, 40), vy: num(d.vy, 0, 40), vz: num(d.vz, -40, 40), own: false }; } }
       else if (d.t === 'bmhit') { if (!NET.client) { NET.applying = false; const B = bombs.find(B => B.id === d.i), m = swById.get(d.m);
-          if (B && m && m.rig && !m.dead && Math.hypot(m.pos.x - (B.fly ? B.fly.x : B.x), m.pos.z - (B.fly ? B.fly.z : B.z)) < 25) { B.rigM = m; B.leap = { t: 0.62, sx: B.fly ? B.fly.x : B.x, sz: B.fly ? B.fly.z : B.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; netEv({ t: 'bmx', i: B.id, m: m.id }); } } }
+          if (B && m && m.rig && !m.dead && Math.hypot(m.pos.x - (B.fly ? B.fly.x : B.x), m.pos.z - (B.fly ? B.fly.z : B.z)) < 25) { B.rigM = m; B.leap = { t: 0.62, sx: B.fly ? B.fly.x : B.x, sz: B.fly ? B.fly.z : B.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) B.by = [q.pos.x, q.pos.z]; netEv({ t: 'bmx', i: B.id, m: m.id }); } } }
       else if (d.t === 'bml') { if (!NET.client) { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.fly = null; B.x = num(d.x, -ARENA, ARENA); B.z = num(d.z, -ARENA, ARENA); } } }
       else if (d.t === 'armed') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R && (W_GEAR.includes(d.k) || d.k === 'jump')) armedFx(R, d.k); }
       else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
@@ -7851,6 +7919,7 @@ const MONSTERS = [
         else if (d.k === 'sp') spit(m, null, null, new THREE.Vector3(num(d.x, -ARENA, ARENA), num(d.y, 0, 20), num(d.z, -ARENA, ARENA))); } }
       else if (d.t === 'sync?') { if (netAmHost()) netEv(netWorld(), from); }
       else if (d.t === 'sync') {
+        if (Array.isArray(d.lt)) for (const q of d.lt.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), 0, 0, 0); lootId = Math.max(lootId, q[0]); }
         for (const i of Array.isArray(d.sm) ? d.sm.slice(0, 400) : []) { const o = obAt(i); if (o && (o.pillar || o.rock) && o.mesh.visible) { o.mesh.visible = false; if (o.rock) rockSmashed(o); } }
         for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
