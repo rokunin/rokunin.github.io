@@ -2879,7 +2879,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 121, buildEl = document.getElementById('build');
+  const BUILD = 122, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4163,6 +4163,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const pedestals = []; let wbKilled = 0, wbSpawned = false;
   const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({ color: 0x6f6458, roughness: 0.9 });
   const PED_RISE_R = 25, PED_GUARD_R = 32;
+  const firstGun = () => pedestals.length ? pedestals[0].k : (ride === 'halo' ? 'nova' : 'spread');      // the halo's own gun is weak: it starts with the nova
   const pedIcon = k => k === 'jump' ? 'jump' : 'w_' + k;
   const pedHave = k => k === 'jump' ? !!abilities.jump : weapons[k] > 0;
   function addPedestal(k, x, z) {
@@ -4233,9 +4234,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
     if (startEl.isConnected) return;
     for (let i = armFx.length - 1; i >= 0; i--) { const F = armFx[i]; F.t += dt; F.spr.position.set(F.R.pos.x, 4.5 + F.t * 1.5, F.R.pos.z); F.spr.material.opacity = Math.min(1, 2.5 - F.t * 1.6);
       if (F.t > 1.6) { scene.remove(F.spr); F.spr.material.dispose(); armFx.splice(i, 1); } }
-    if (!pedestals.length) { const [x, z] = pedSpot(true); addPedestal('spread', x, z); }
-    if (weapons.spread && !pedestals.some(P => P.k === 'jump')) { const [x, z] = pedSpot(true); addPedestal('jump', x, z); }      // the jump comes next, close to the centre too
-    if (abilities.jump && weapons.spread && !pedestals.some(P => P.k === 'nova')) for (const k of ['nova', 'orbit']) { const [x, z] = pedSpot(false); addPedestal(k, x, z); }
+    if (!pedestals.length) { const [x, z] = pedSpot(true); addPedestal(firstGun(), x, z); }
+    const fg = firstGun();
+    if (weapons[fg] && !pedestals.some(P => P.k === 'jump')) { const [x, z] = pedSpot(true); addPedestal('jump', x, z); }      // the jump comes next, close to the centre too
+    if (abilities.jump && weapons[fg] && pedestals.length < 4) for (const k of W_GEAR.filter(k => k !== fg)) { const [x, z] = pedSpot(false); addPedestal(k, x, z); }
     for (let i = 0; i < pedestals.length; i++) {
       const P = pedestals[i];
       if (P.state === 'gone') { if (!pedHave(P.k)) pedReset(P); else continue; }          // the gun was lost: its pedestal is waiting again
@@ -4245,7 +4247,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
         P.ring.material.opacity = 0.45 + Math.sin(elapsed * 4 + i) * 0.3;
         if (car.alive && d < PED_RISE_R) { P.state = 'rising'; P.t = 0; P.icon.visible = true; P.dome.visible = true; shake = Math.max(shake, 0.5);
           SFX.play('tent_slam', tmp.set(P.x, 0, P.z), { vol: 0.6 }); burst(tmp.set(P.x, 0.5, P.z), 0x8a7a64, 22, 3.5, 7, 0.6);
-          const big = P.k !== 'spread' && P.k !== 'jump'; if (NET.client) netEv({ t: 'ambush', x: P.x, z: P.z, b: big ? 1 : 0 }, NET.hostPeer); else ambush(P.x, P.z, big);
+          const big = P.k !== fg && P.k !== 'jump'; if (NET.client) netEv({ t: 'ambush', x: P.x, z: P.z, b: big ? 1 : 0 }, NET.hostPeer); else ambush(P.x, P.z, big);
           flashAlert('GUARDED! CLEAR IT OUT'); }
         continue; }
       if (P.state === 'rising') {
@@ -5524,6 +5526,10 @@ const MONSTERS = [
   const rigLogGeo = new THREE.CylinderGeometry(0.8, 0.8, RIG.half * 2, 12); rigLogGeo.rotateZ(Math.PI / 2);
   const rigSpikeGeo = new THREE.ConeGeometry(0.26, 1.0, 5), rigCapGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.25, 12); rigCapGeo.rotateZ(Math.PI / 2);
   const RIG_OPS = MINI_KINDS.filter(k => !SW_KINDS[k].fly);
+  const rigHpTex = [3, 2, 1, 0].map(left => { const c = mkCanvas(256, 44), x = c.getContext('2d');           // three chunks: one bomb takes one
+    x.fillStyle = '#1b1421'; x.beginPath(); x.roundRect(0, 0, 256, 44, 12); x.fill();
+    for (let i = 0; i < 3; i++) { x.fillStyle = i < left ? (left === 1 ? '#ff4a2a' : '#ffb03a') : '#4a3f48'; x.beginPath(); x.roundRect(8 + i * 81, 8, 77, 28, 7); x.fill(); }
+    return srgbTex(c); });
   let rigT = 8, rigOwed = 0;
   function makeRig(m) {
     if (m.rig) return m; makeMini(m); m.hp *= 1.6; m.K = { ...m.K, heavy: true };
@@ -5549,7 +5555,8 @@ const MONSTERS = [
     const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2.4, 8), rigDark); pipe.position.set(-1.5, 1.6, -1.4); pipe.castShadow = true; g.add(pipe);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 8), rigDark); cap.position.set(-1.5, 2.85, -1.4); g.add(cap);
     g.position.copy(m.pos); scene.add(g);
-    m.rig = { g, sweep, booth, levers, rh: Math.random() * 6.283, a: Math.random() * 6.283, fall: 1.0, hitCd: 0, puff: 0, bob: 0 };
+    const hp = new THREE.Sprite(new THREE.SpriteMaterial({ map: rigHpTex[0], transparent: true, depthTest: false })); hp.renderOrder = 22; hp.scale.set(7, 1.2, 1); hp.position.y = RIG.top + 7.0; g.add(hp);
+    m.rig = { g, sweep, booth, levers, hp, hpN: 0, rh: Math.random() * 6.283, a: Math.random() * 6.283, fall: 1.0, hitCd: 0, puff: 0, bob: 0 };
     m.atkT = 2.5; m.shadow.scale.set(5, 1, 4.4);
     return m;
   }
@@ -5622,6 +5629,8 @@ const MONSTERS = [
     if ((R.puff -= dt) <= 0) { R.puff = 0.22 + Math.random() * 0.15;
       burst(tmp.set(m.pos.x - 1.5, 3.1, m.pos.z - 1.4), Math.random() < 0.3 ? 0x1a1a1a : 0x555049, 2, 0.9, 1.8, 0.55); }
     if (Math.random() < dt * 3) burst(tmp.set(m.pos.x + rand(-2, 2), 0.2, m.pos.z + rand(-2, 2)), 0x8a7a64, 2, 1.2, 2, 0.3);
+    if ((R.hits || 0) !== R.hpN) { R.hpN = R.hits || 0; R.hp.material.map = rigHpTex[Math.min(3, R.hpN)]; R.hp.scale.set(9, 1.55, 1); }      // the bar jumps when a chunk goes
+    if (R.hp.scale.x > 7) R.hp.scale.set(Math.max(7, R.hp.scale.x - dt * 6), Math.max(1.2, R.hp.scale.y - dt * 1.05), 1);
     if (R.hits >= 1 && Math.random() < dt * 9) puff(tmp.set(m.pos.x + rand(-1.5, 1.5), RIG.top + 1.5, m.pos.z + rand(-1.5, 1.5)), 0x221e1c, 1.8, 1.1, rand(-0.5, 0.5), 3, rand(-0.5, 0.5));
     if (R.hits >= 2) { if (Math.random() < dt * 14) spawnParticles(tmp.set(m.pos.x + rand(-1.6, 1.6), RIG.top + 0.6, m.pos.z + rand(-1.6, 1.6)), Math.random() < 0.5 ? 0xff7a2a : 0xffc040, 2, 4); R.booth.rotation.z += 0.12; }
     if ((R.hitCd -= dt) > 0 || elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
@@ -5656,17 +5665,54 @@ const MONSTERS = [
   function numTex(n) { const c = mkCanvas(96, 96), x = c.getContext('2d'); x.font = '900 72px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.lineWidth = 10; x.strokeStyle = '#1a0e08'; x.strokeText(String(n), 48, 52); x.fillStyle = n <= 2 ? '#ff4a2a' : '#ffd23a'; x.fillText(String(n), 48, 52); return srgbTex(c); }
   const bombNums = [1, 2, 3, 4, 5].map(numTex);
-  function addBomb(id, x, z) {
+  // The delivery hand: a big white four-fingered cartoon glove on a black rubber-hose arm. It slides in from the top right of the screen,
+  // sets the bomb down gently, lets go and pulls back the same way.
+  const HAND = { arrive: 1.5, hold: 0.45, leave: 1.0, far: 62, S: 1.7 };
+  const handAxis = new THREE.Vector3(1, 1.25, -1).normalize();                    // toward the top right of the screen, and up
+  const handQuat = (() => { const cam = new THREE.Vector3(1, 1.1, 1).normalize(), Z = cam.clone().addScaledVector(handAxis, -cam.dot(handAxis)).normalize(), X = handAxis.clone().cross(Z);
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, handAxis, Z)); })();
+  const gloveMat = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.85 }), inkMat = new THREE.MeshBasicMaterial({ color: 0x15101a }), inkBack = new THREE.MeshBasicMaterial({ color: 0x15101a, side: THREE.BackSide });
+  const gSph = new THREE.SphereGeometry(1, 18, 14), gCyl = new THREE.CylinderGeometry(1, 1, 1, 14), gTor = new THREE.TorusGeometry(1, 0.26, 10, 22);
+  function makeHand() {
+    const H = new THREE.Group(), inked = (geo, sx, sy, sz, par, x, y, z) => { const m = new THREE.Mesh(geo, gloveMat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; par.add(m);
+      const o = new THREE.Mesh(geo, inkBack); o.scale.set(sx + 0.09, sy + 0.09, sz + 0.09); o.position.copy(m.position); par.add(o); return m; };      // every white part gets a black ink outline
+    inked(gSph, 1.55, 1.0, 1.35, H, 0, 0, 0);                                         // palm
+    inked(gCyl, 1.2, 0.8, 1.2, H, 0, 1.25, 0); const roll = new THREE.Mesh(gTor, gloveMat); roll.rotation.x = Math.PI / 2; roll.scale.setScalar(1.22); roll.position.y = 1.7; H.add(roll);      // cuff with its rolled rim
+    const rollInk = new THREE.Mesh(gTor, inkBack); rollInk.rotation.x = Math.PI / 2; rollInk.scale.setScalar(1.3); rollInk.position.y = 1.7; H.add(rollInk);
+    const arm = new THREE.Mesh(gCyl, inkMat); arm.scale.set(0.5, 90, 0.5); arm.position.y = 46.5; H.add(arm);         // the rubber-hose arm runs off screen
+    for (const x of [-0.5, 0, 0.5]) { const d = new THREE.Mesh(gCyl, inkMat); d.scale.set(0.06, 0.95, 0.06); d.position.set(x, 0.25, 1.33 - Math.abs(x) * 0.28); d.rotation.x = 0.25; H.add(d); }      // three darts on the back of the hand
+    H.fingers = [];
+    for (const [x, z, th] of [[-1.05, 0.55, 0], [-0.35, 0.95, 0], [0.35, 0.95, 0], [1.05, 0.55, 0], [-1.0, -0.8, 1]]) {      // three fingers and a pinky in front, the thumb behind
+      const f = new THREE.Group(); f.position.set(x, -0.35, z); f.dir = th ? -1 : 1; inked(gCyl, 0.4, 1.7, 0.4, f, 0, -0.85, 0); inked(gSph, 0.42, 0.42, 0.42, f, 0, -1.7, 0); H.add(f); H.fingers.push(f); }
+    H.scale.setScalar(HAND.S); H.quaternion.copy(handQuat); return H;
+  }
+  const handGrip = 1.4 + 1.75 * HAND.S + 0.9 * HAND.S;                               // the bomb dangles from the fingertips by its neck, in plain view under the hand
+  function handTick(B, dt) {                                                         // returns true while the bomb is still in the hand
+    const D = B.drop; D.t += dt; const H = D.hand, a = HAND.arrive, h = HAND.hold;
+    let dist, curl;
+    if (D.t < a) { const k = D.t / a; dist = HAND.far * Math.pow(1 - k, 2.6); curl = 1; }                              // fast in, slowing right down for the last metre
+    else if (D.t < a + h) { dist = 0; curl = 1 - (D.t - a) / h; }                                                      // fingers let go
+    else { const k = (D.t - a - h) / HAND.leave; dist = HAND.far * k * k; curl = 0; }
+    if (D.t >= a && !D.set) { D.set = true; burst(tmp.set(B.x, 0.3, B.z), 0x8a7a64, 10, 2, 5, 0.5); SFX.play('land', tmp.set(B.x, 0, B.z), { vol: 0.5, rate: 1.3 }); }
+    const wob = D.t < a ? Math.sin(D.t * 9) * 0.25 * (1 - D.t / a) : 0;
+    H.position.set(B.x, 1.1, B.z).addScaledVector(handAxis, handGrip + dist); H.position.y += wob;
+    for (const f of H.fingers) f.rotation.x = f.dir * (0.3 * curl - 0.8 * (1 - curl));
+    if (D.t < a) B.g.position.set(B.x, wob, B.z).addScaledVector(handAxis, dist);
+    if (D.t >= a + h + HAND.leave) { scene.remove(H); B.drop = null; }
+    return D.t < a;
+  }
+  function addBomb(id, x, z, delivered) {
     const g = new THREE.Group(), body = new THREE.Mesh(bombGeo, bombMat); body.position.y = 1.1; body.castShadow = true; g.add(body);
     const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.45, 10), rigDark); neck.position.y = 2.3; g.add(neck);
     const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.7, 5), new THREE.MeshStandardMaterial({ color: 0xc8a878 })); fuse.position.set(0.15, 2.75, 0); fuse.rotation.z = -0.5; g.add(fuse);
     const spark = new THREE.Sprite(sparkMat); spark.position.set(0.32, 3.1, 0); spark.scale.setScalar(0.7); g.add(spark);
     const num = new THREE.Sprite(new THREE.SpriteMaterial({ map: bombNums[4], transparent: true, depthTest: false })); num.renderOrder = 21; num.position.y = 4.6; num.scale.setScalar(2.6); num.visible = false; g.add(num);
     g.position.set(x, 0, z); scene.add(g);
-    const B = { id, x, z, tx: x, tz: z, g, spark, num, n: 0, gone: false, fly: null };
-    bombs.push(B); burst(tmp.set(x, 0.6, z), 0x8a7a64, 12, 2.5, 6, 0.5); return B;
+    const B = { id, x, z, tx: x, tz: z, g, spark, num, n: 0, gone: false, fly: null, drop: null };
+    if (delivered) { B.drop = { t: 0, hand: makeHand(), set: false }; scene.add(B.drop.hand); handTick(B, 0); }
+    bombs.push(B); return B;
   }
-  function dropBomb(B) { if (B.gone) return; B.gone = true; scene.remove(B.g); bombs.splice(bombs.indexOf(B), 1); if (myTow === B.id) myTow = 0; }
+  function dropBomb(B) { if (B.gone) return; B.gone = true; scene.remove(B.g); if (B.drop) scene.remove(B.drop.hand); bombs.splice(bombs.indexOf(B), 1); if (myTow === B.id) myTow = 0; }
   function bombSpot(m) {                                   // a bomb lies 30-40 m from the rig it is meant for
     for (let i = 0; i < 30; i++) { const a = Math.random() * 6.283, d = 30 + Math.random() * 10, x = m.pos.x + Math.cos(a) * d, z = m.pos.z + Math.sin(a) * d;
       if (Math.abs(x) > ARENA - 6 || Math.abs(z) > ARENA - 6 || inRoom(x, z) || obstacles.some(o => active(o) && Math.hypot(o.mesh.position.x - x, o.mesh.position.z - z) < 5)) continue;
@@ -5693,12 +5739,12 @@ const MONSTERS = [
     const rigs = swarm.filter(m => m.rig && !m.dead && !m.rig.gone);
     if (!NET.client) {                                     // host: a bomb for every rig; drag physics; the hold count; the bang
       if (rigs.length > bombs.filter(B => !B.leap).length && (bombSpawnT -= dt) <= 0) { bombSpawnT = 3;
-        const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++bombId, sp[0], sp[1]); }
+        const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++bombId, sp[0], sp[1], true); }
       for (const B of bombs.slice()) { if (B.leap || B.fly) continue;
         const C = carrierOf(B); B.n = C ? 1 : 0; if (C) { B.x = C.x; B.z = C.z; }
         if (!rigs.length && !C) dropBomb(B);
       }
-      if ((bombNetT -= dt) <= 0 && NET.on && NET.game) { bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), B.fly ? 1 : 0, B.n]) }); }
+      if ((bombNetT -= dt) <= 0 && NET.on && NET.game) { bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), B.fly ? 1 : B.drop && B.drop.t < HAND.arrive ? 2 : 0, B.n]) }); }
     } else for (const B of bombs) if (!B.leap && !B.n && !B.fly) { const k = 1 - Math.exp(-10 * dt); B.x += (B.tx - B.x) * k; B.z += (B.tz - B.z) * k; }
     // everybody: grab, draw, ropes
     for (const B of bombs.slice()) {
@@ -5721,11 +5767,12 @@ const MONSTERS = [
         if (B.fly && F.y <= 1.1) { B.fly = null; B.x = B.tx = F.x; B.z = B.tz = F.z;      // missed: it thuds down and lies there
           burst(tmp.set(F.x, 0.4, F.z), 0x8a7a64, 10, 2.5, 6, 0.5); SFX.play('land', tmp, { vol: 0.6 }); if (F.own && NET.client) netEv({ t: 'bml', i: B.id, x: r1(F.x), z: r1(F.z) }, NET.hostPeer); }
         continue; }
+      if (B.drop && handTick(B, dt)) { B.spark.scale.setScalar(0.5 + Math.random() * 0.5); continue; }      // still in the glove: nobody can take it yet
       let ride_ = null; if (myTow === B.id) ride_ = [cart.pos, (ride === 'spider' ? 0 : car.y * 0.8)]; else for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) ride_ = [R.cpos, R.pos.y || 0];
       if (ride_) { B.x = ride_[0].x; B.z = ride_[0].z; B.g.position.set(B.x, 1.0 + ride_[1] + Math.abs(Math.sin(elapsed * 11 + B.id)) * 0.12, B.z); B.g.scale.setScalar(0.8); B.g.rotation.set(Math.sin(elapsed * 9) * 0.15, 0, Math.sin(elapsed * 7) * 0.15); }
       else { B.g.position.set(B.x, 0, B.z); B.g.scale.setScalar(1); B.g.rotation.set(0, 0, 0); }
       B.spark.scale.setScalar(0.5 + Math.random() * 0.5);
-      if (!myTow && !towCd && !B.n && car.alive && car.burrow === 'up' && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || (cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab))) {
+      if (!myTow && !towCd && !B.n && !(B.drop && B.drop.t < HAND.arrive + HAND.hold) && car.alive && car.burrow === 'up' && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || (cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab))) {
         myTow = B.id; B.n = 1; if (!cart.shown) { cart.shown = true; cartReset(); }
         for (let i = 0; i < 7; i++) puff(tmp.set(B.x + rand(-1.2, 1.2), 0.8 + Math.random(), B.z + rand(-1.2, 1.2)), 0xf0ead8, 1.6, 0.7, rand(-2.5, 2.5), 2.5, rand(-2.5, 2.5));
         SFX.play('clang', car.pos, { rate: 1.4 }); SFX.play('pickup', car.pos, { vol: 0.6 }); flashAlert('BOMB! JUMP TO THROW'); }
@@ -7550,7 +7597,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 29;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 30;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7783,7 +7830,7 @@ const MONSTERS = [
       else if (d.t === 'ambush') { if (!NET.client) { NET.applying = false; ambush(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), d.b === 1); } }
       else if (d.t === 'bm') { if (NET.client && Array.isArray(d.b)) { const seen = new Set();
           for (const q of d.b) { if (!Array.isArray(q) || !Number.isInteger(q[0])) continue; seen.add(q[0]); let B = bombs.find(B => B.id === q[0]);
-            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA)); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
+            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA), q[3] === 2); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
           for (const B of bombs.slice()) if (!B.leap && !seen.has(B.id)) dropBomb(B); } }
       else if (d.t === 'bmx') { if (NET.client) { const B = bombs.find(B => B.id === d.i), m = swById.get(d.m); if (B && !B.leap) { if (B.fly && m) { B.leap = { t: 0.62, sx: B.fly.x, sz: B.fly.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; } else bombBoom(B, m); } } }
       else if (d.t === 'righit') { if (NET.client) { const m = swById.get(d.m), n = num(d.n, 0, 3); if (m && m.rig) m.rig.hits = n; flashAlert(n >= 3 ? 'LOG MACHINE DOWN!' : 'HIT ' + n + '/3'); } }
@@ -8131,7 +8178,8 @@ const MONSTERS = [
     const P = PHASES[PH.i], f = foundN(), nests = Math.min(NEST_GOAL, rocks.length);
     let t = '';
     if (P.key === 'roll') { const K = kit(), have = K.filter(t => abilities[t]).length, gw = W_GEAR.filter(k => weapons[k]).length;
-      t = tk('Grab the spray gun', weapons.spread > 0) + (pedestals.some(P => P.k === 'jump') ? tk('Grab the jump', !!abilities.jump) : '') + (pedestals.some(P => P.k === 'nova') ? tk('Guns on your pedestals', weapons.nova > 0 && weapons.orbit > 0, (+(weapons.nova > 0) + +(weapons.orbit > 0)) + '/2') : '');
+      const fg = firstGun(), rest = W_GEAR.filter(k => k !== fg), rn = rest.filter(k => weapons[k] > 0).length;
+      t = tk(fg === 'nova' ? 'Grab the nova' : 'Grab the spray gun', weapons[fg] > 0) + (pedestals.some(P => P.k === 'jump') ? tk('Grab the jump', !!abilities.jump) : '') + (pedestals.length >= 4 ? tk('Guns on your pedestals', rn >= 2, rn + '/2') : '');
       if (NET.on && NET.game && gw >= 3 && abilities.jump) { const rs = [...NET.remotes.values()].filter(R => R.up), n = rs.filter(R => R.gd).length + 1; t += tk('Everybody got their guns?', n >= rs.length + 1, n + '/' + (rs.length + 1)); }
       if (crewArmed()) { const KB = K.filter(t => t !== 'jump'), hb = KB.filter(t => abilities[t]).length; t += tk('Hunt the wandering bosses', hb >= KB.length, hb + '/' + KB.length + ' skills'); const lr = swarm.filter(m => m.rig && !m.dead).length; t += tk('Bomb the log machines (3 bombs each)', lr === 0, lr ? lr + ' left' : ''); }
       if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (gearDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
@@ -8168,7 +8216,7 @@ const MONSTERS = [
     for (const A of altars) { if (!A.found) continue; const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
       if (!A.done && A.n) { x.beginPath(); x.arc(px, py, 5 * dpr, -1.571, -1.571 + 6.283 * A.n / ALTAR_NEED); x.strokeStyle = '#5fd0ff'; x.lineWidth = 2 * dpr; x.stroke(); } }
     for (const P of pedestals) if (P.state !== 'gone') { const [px, py] = dot(P.x, P.z, 4.5, '#ffd23a'); label(px, py - 9 * dpr, '⚙', '#ffd23a', 11); }
-    for (const m of swarm) if (m.wb && !m.dead) { const [px, py] = f(m.pos.x, m.pos.z); label(px, py, '☠', '#ff5a5a', 13); }
+    for (const m of swarm) if (m.wb && !m.dead) dot(m.pos.x, m.pos.z, 2.6, '#ff5a5a');
     for (const B of bombs) if (!B.leap) { const [px, py] = dot(B.x, B.z, 4, '#ff6a3a'); label(px, py - 9 * dpr, '●', '#1a1a1a', 10); }
     for (const m of swarm) if (m.rig && !m.dead) { const [px, py] = f(m.pos.x, m.pos.z); label(px, py, '✱', '#d8a060', 13); }
     for (const R of NET.remotes.values()) if (R.up) dot(R.pos.x, R.pos.z, 3.4, '#9cf59a');
@@ -8190,9 +8238,9 @@ const MONSTERS = [
           else if (!R.found && PH.i <= 1) rk.push({ x: R.mesh.position.x, z: R.mesh.position.z, d, range: 50, col: '#7fc0ff', text: '?', cap: 'chubzik nest' }); }
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
         for (const P of pedestals) if (P.state !== 'gone') hintList.push({ x: P.x, z: P.z, d: Math.hypot(P.x - car.pos.x, P.z - car.pos.z), range: 999, col: '#ffd23a', text: '⚙', cap: P.state === 'sealed' || P.state === 'rising' ? 'guards: ' + (P.guards || 0) : AB_INFO[pedIcon(P.k)].title });
-        for (const m of swarm) if (m.wb && !m.dead) hintList.push({ x: m.pos.x, z: m.pos.z, d: Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z), range: 999, col: '#ff5a5a', text: '☠', cap: 'wandering boss', live: m });
+        for (const m of swarm) if (m.wb && !m.dead) hintList.push({ x: m.pos.x, z: m.pos.z, d: Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z), range: 999, col: '#ff5a5a', text: '☠', cap: 'wandering boss', live: m, grp: 'wb' });
         if (!myTow) { let nb = null, nd = 1e9; for (const B of bombs) if (!B.leap) { const d = Math.hypot(B.x - car.pos.x, B.z - car.pos.z); if (d < nd) { nd = d; nb = B; } }
-          if (nb && nd < 140) hintList.push({ x: nb.x, z: nb.z, d: nd, range: 999, col: '#ff6a3a', text: '●', cap: 'bomb' }); }
+          if (nb && nd < 140) hintList.push({ x: nb.x, z: nb.z, d: nd, range: 999, col: '#ff6a3a', text: '●', cap: nb.drop && nb.drop.t < HAND.arrive ? 'bomb incoming' : 'bomb' }); }
         else { let nr = null, nd = 1e9; for (const m of swarm) if (m.rig && !m.dead) { const d = Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z); if (d < nd) { nd = d; nr = m; } }
           if (nr) hintList.push({ x: nr.pos.x, z: nr.pos.z, d: nd, range: 999, col: '#ff6a3a', text: '✱', cap: 'log machine ' + (nr.rig.hits || 0) + '/3' }); }
         for (const p of pickups) if (p.own) hintList.push({ x: p.x, z: p.z, d: Math.hypot(p.x - car.pos.x, p.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: AB_INFO[p.type].title });      // your gear drop: always pointed at
@@ -8205,18 +8253,28 @@ const MONSTERS = [
     for (const h of hintList) if (h.live) { h.x = h.live.pos.x; h.z = h.live.pos.z; }
     const W = innerWidth, H = innerHeight, x0 = 40, x1 = W - 40, y0 = 84, y1 = H - 100, cx = W / 2, cy = (y0 + y1) / 2;      // clear of the buttons on top and the bars below
     let i = 0; const placed = [], mmR = mmEl.style.display !== 'none' ? mmEl.getBoundingClientRect() : null;
-    for (const h of hintList) {
+    // where each pointer would sit on the screen edge; pointers of one kind that land close together become one with a count, and only the three nearest bunches of a kind are shown
+    const draw = [], bunch = {};
+    for (const h of hintList.slice().sort((a, b) => a.d - b.d)) {
       hintV.set(h.x, 1, h.z).project(camera);
-      const e = hintEl(i++), on = Math.abs(hintV.x) < 0.95 && Math.abs(hintV.y) < 0.95;
+      const on = Math.abs(hintV.x) < 0.95 && Math.abs(hintV.y) < 0.95;
       const dx = hintV.x * W / 2 + W / 2 - cx, dy = -hintV.y * H / 2 + H / 2 - cy;
       const k = Math.max(dx > 0 ? dx / (x1 - cx) : dx / (x0 - cx), dy > 0 ? dy / (y1 - cy) : dy / (y0 - cy), 1), px = cx + dx / k, py = cy + dy / k;
+      const it = { h, on, dx, dy, px, py, n: 1 };
+      if (h.grp) { if (on) continue; const B = bunch[h.grp] || (bunch[h.grp] = []), near = B.find(q => Math.hypot(q.px - px, q.py - py) < 260);
+        if (near) { near.n++; continue; } if (B.length >= 3) continue; B.push(it); }
+      draw.push(it);
+    }
+    for (const it of draw) {
+      const h = it.h, on = it.on, dx = it.dx, dy = it.dy, px = it.px, py = it.py, e = hintEl(i++);
+      const hText = it.n > 1 ? h.text + '×' + it.n : h.text, hCap = it.n > 1 ? h.cap.replace('boss', 'bosses') : h.cap;
       let qx = px, qy = py; if (!on) { for (let g = 0; g < 4 && placed.some(q => Math.abs(q[0] - qx) < 120 && Math.abs(q[1] - qy) < 62); g++) { if (qx <= x0 + 1 || qx >= x1 - 1) qy += qy > cy ? -64 : 64; else qx += qx > cx ? -124 : 124; } placed.push([qx, qy]); }      // two pointers in one spot: slide the second along the edge
       if (!on && mmR && qx > mmR.left - 70 && qy > mmR.top - 60 && qx < mmR.right + 40 && qy < mmR.bottom + 40) { if (qx >= x1 - 1) qy = mmR.top - 60; else qx = mmR.left - 70; }   // never under the minimap
       e.d.style.opacity = on ? 0 : Math.min(1, (1 - h.d / h.range) * 4 + 0.25);
       e.d.style.transform = `translate(${qx.toFixed(0)}px,${qy.toFixed(0)}px)`;
       e.arrow.style.transform = `rotate(${Math.atan2(dx, -dy).toFixed(2)}rad)`;
-      if (e.text !== h.text) e.label.textContent = e.text = h.text;
-      if (e.capT !== h.cap) e.cap.textContent = e.capT = h.cap;
+      if (e.text !== hText) e.label.textContent = e.text = hText;
+      if (e.capT !== hCap) e.cap.textContent = e.capT = hCap;
       const side = (qx < 90 ? 'l' : qx > W - 90 ? 'r' : 'c') + (qy > H - 150 ? 'u' : 'd');           // keep the caption on screen and off the arrow
       if (e.side !== side) { e.side = side; const c = e.cap.style; c.left = side[0] === 'l' ? '0' : side[0] === 'c' ? '50%' : 'auto'; c.right = side[0] === 'r' ? '0' : 'auto'; c.transform = side[0] === 'c' ? 'translateX(-50%)' : 'none'; c.top = side[1] === 'u' ? '-20px' : '46px'; }
       if (e.col !== h.col) e.d.style.setProperty('--c', e.col = h.col);
