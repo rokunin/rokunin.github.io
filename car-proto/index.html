@@ -2879,7 +2879,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 120, buildEl = document.getElementById('build');
+  const BUILD = 121, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -4162,7 +4162,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   //       When the whole crew holds all three guns, wandering bosses come out carrying the skills -----
   const pedestals = []; let wbKilled = 0, wbSpawned = false;
   const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({ color: 0x6f6458, roughness: 0.9 });
-  const PED_RISE_R = 25, PED_GUARD_R = 13;
+  const PED_RISE_R = 25, PED_GUARD_R = 32;
   const pedIcon = k => k === 'jump' ? 'jump' : 'w_' + k;
   const pedHave = k => k === 'jump' ? !!abilities.jump : weapons[k] > 0;
   function addPedestal(k, x, z) {
@@ -4186,10 +4186,10 @@ laugh(r) {                                       // a big man's belly laugh: bre
   function ambush(x, z, big) {                             // host: the guard that comes out with a pedestal
     if (swarm.length > 150) return;
     const n = big ? 18 : 13;
-    for (let j = 0; j < n; j++) { const a = Math.random() * 6.283, d = 8 + Math.random() * 7; digOut(spawnCritter(['gremlin', 'gremlin', 'maw', 'stilt', 'maw'][j % 5], x + Math.cos(a) * d, z + Math.sin(a) * d)); }
-    const a = Math.random() * 6.283; digOut(makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], x + Math.cos(a) * 11, z + Math.sin(a) * 11)));
+    for (let j = 0; j < n; j++) { const a = Math.random() * 6.283, d = 8 + Math.random() * 7; const g = spawnCritter(['gremlin', 'gremlin', 'maw', 'stilt', 'maw'][j % 5], x + Math.cos(a) * d, z + Math.sin(a) * d); g.guard = true; digOut(g); }
+    const a = Math.random() * 6.283, mb = makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], x + Math.cos(a) * 11, z + Math.sin(a) * 11)); mb.guard = true; digOut(mb);
   }
-  const guardsNear = P => { let n = 0; for (const m of swarm) if (!m.dead && Math.hypot(m.pos.x - P.x, m.pos.z - P.z) < PED_GUARD_R) n++; return n; };
+  const guardsNear = P => { let n = 0; for (const m of swarm) if (m.guard && !m.dead && Math.hypot(m.pos.x - P.x, m.pos.z - P.z) < PED_GUARD_R) n++; return n; };      // only the pedestal's own ambush holds the shield: wave monsters and log machines passing by don't
   const crewArmed = () => W_GEAR.every(k => weapons[k]) && abilities.jump && [...NET.remotes.values()].every(R => !R.up || R.gd);
   function armedFx(R, k) {                                 // somebody else took a gun: a pillar of light and the gun's icon over their ride
     flash(tmp.set(R.pos.x, 2, R.pos.z), 0xffd23a, 10, 0.5, 4); burst(tmp.set(R.pos.x, 0.5, R.pos.z), 0xffd23a, 14, 3, 7, 0.5);
@@ -7550,7 +7550,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 28;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 29;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -7672,7 +7672,7 @@ const MONSTERS = [
   function netSnap() {                                   // host -> everyone: where every monster and loose chubzik is
     const q = NET.q = (NET.q || 0) + 1;
     const chunks = (rows, per, t) => { const n = Math.max(1, Math.ceil(rows.length / per)); for (let c = 0; c < n; c++) netEv({ t, q, c, n, a: rows.slice(c * per, c * per + per) }); };
-    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0) | (m.wb ? 32 : 0) | (m.rig ? 64 : 0)]);
+    const sw = []; for (const m of swarm) if (!m.dead) sw.push([m.id, SW_KEYS.indexOf(m.kind) * 3 + m.v, r1(m.pos.x), r1(m.pos.z), (m.flash > 0 ? 1 : 0) | (m.mini ? 2 : 0) | (m.gate ? 4 : 0) | (m.stun > 0 ? 8 : 0) | (m.dig > 0 ? 16 : 0) | (m.wb ? 32 : 0) | (m.rig ? 64 : 0) | (m.guard ? 128 : 0)]);
     chunks(sw, 60, 'sw');
     const en = []; enemies.forEach((e, i) => en.push([i, r1(e.pos.x), r1(e.pos.z), r2(e.yaw), (e.awake ? 1 : 0) | (e.dead ? 2 : 0) | (e.flash > 0 ? 4 : 0) | (e.charge > 0 ? 8 : 0) | (e.carried ? 16 : 0)]));
     netEv({ t: 'en', a: en });
@@ -7690,7 +7690,7 @@ const MONSTERS = [
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA - 50, ARENA + 50), z = num(e[3], -ARENA - 50, ARENA + 50);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) makeWanderer(m); if (e[4] & 64) makeRig(m); if (e[4] & 4) gateSpawned = true; }
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) makeWanderer(m); if (e[4] & 64) makeRig(m); if (e[4] & 128) m.guard = true; if (e[4] & 4) gateSpawned = true; }
         m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
       for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
