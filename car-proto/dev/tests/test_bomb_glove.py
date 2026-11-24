@@ -28,7 +28,7 @@ with Game() as g:
     t.eq('one log machine stands', ev(p, "return d.swarm.filter(m => m.rig && !m.dead).length"), 1)
     wait(p, "d.bombs.length > 0", 60)
     t.ok('the first bomb comes by glove', ev(p, "return !!d.bombs[0].drop"))
-    t.ok('the glove model has three fingers and a thumb', ev(p, "return d.bombs[0].drop.hand.fingers.length === 4"))
+    t.ok('the glove and the bomb are drawn sprites, all six frames loaded', ev(p, "const B = d.bombs[0]; return B.drop.hand.isSprite && B.drop.hand.flat && B.spr.isSprite && ['pinch', 'half', 'open', 'slap', 'bomb', 'spark'].every(k => d.ART[k].ok)"))
     ev(p, "const B = d.bombs[0]; d.car.pos.set(B.x + 1.5, 0, B.z); d.car.vel.set(0, 0, 0);"); p.wait_for_timeout(500)
     t.ok('a bomb still in the glove cannot be grabbed', ev(p, "return !d.myTow && d.bombs[0].drop && d.bombs[0].drop.t < 1.5"))
     t.ok('first hit lands', land_a_hit(p, 1))

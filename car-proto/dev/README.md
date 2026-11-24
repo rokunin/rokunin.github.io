@@ -13,6 +13,7 @@
 - `booth.py`: фотобудка для моделей.
 - `film.py`: покадровая съёмка в GIF.
 - `tools/nanogpt_gen.py`: генерация картинок, ключ из переменной `NANOGPT_KEY`.
+- `tools/sprite_cut.py sheet.png out_dir --names a,b,c`: режет спрайт-лист на плоском фоне в RGBA WebP и data URI для `ART_SRC`.
 - `music/`: офлайн-партитура и сведение темы.
 - `refs/`: принятые образцы.
 

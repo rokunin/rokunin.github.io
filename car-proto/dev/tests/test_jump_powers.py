@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from harness.game import Game, Checks, ev, wait
 
-MOBS = "d.fireCooldown = 1e9; d.clearSwarm(); window.__m = {}; const x = d.car.pos.x, z = d.car.pos.z; d.car.vel.set(0, 0, 0); d.car.speed = 0; let i = 0; for (const k of a[0]) { const an = i++ / a[0].length * 6.283, m = d.spawnCritter(k, x + Math.cos(an) * a[1], z + Math.sin(an) * a[1]); m.stun = 0; m.K = { ...m.K, speed: 0 }; (window.__m[k] = window.__m[k] || []).push(m); }"
+MOBS = "d.fireCooldown = 1e9; d.clearSwarm(); window.__m = {}; const x = d.car.pos.x, z = d.car.pos.z; d.car.vel.set(0, 0, 0); d.car.speed = 0; let i = 0; for (const k of a[0]) { const an = i++ / a[0].length * 6.283, m = d.spawnCritter(k, x + Math.cos(an) * a[1], z + Math.sin(an) * a[1]); m.stun = 0; m.K = { ...m.K, speed: 0 }; (window.__m[k] = window.__m[k] || []).push(m); } clearInterval(window.__si); window.__si = setInterval(() => { for (const k in window.__m) for (const m of window.__m[k]) m.top = Math.max(m.top || 0, m.stun || 0); }, 16);"      # m.top: the longest stun it was given; reading m.stun later depends on how busy the machine is
 STATE = "const o = {}; for (const k in window.__m) o[k] = window.__m[k].map(m => ({ dead: m.dead, hp: m.hp, stun: m.stun > 0, slow: m.slow > 0 })); return o;"
 
 
@@ -28,14 +28,14 @@ with Game() as g:
     s = hop(p, 0, ['gremlin', 'spitter'] * 2)
     t.ok('Lv0: a plain jump does nothing to those standing around', not any(m['dead'] for k in s for m in s[k]))
     s = hop(p, 1, ['stilt', 'spitter', 'stilt', 'spitter', 'brute'])
-    t.ok('buggy Lv1: shooters stunned 1.5 s', ev(p, "return window.__m.spitter.every(m => m.stun > 1.0)"))
+    t.ok('buggy Lv1: shooters stunned 1.5 s', ev(p, "return window.__m.spitter.every(m => m.top > 1.3 && m.top <= 1.5)"))
     t.ok('buggy Lv1: the rest are not stunned, nobody is hurt', ev(p, "return window.__m.stilt.every(m => !(m.stun > 0) && m.hp === 2) && window.__m.brute[0].hp === 9"), ev(p, "return [window.__m.stilt.map(m => [m.hp, Math.round(m.stun * 100) / 100, m.dead]), window.__m.brute[0].hp]"))
     s = hop(p, 2, ['stilt', 'spitter', 'stilt', 'spitter', 'brute'])
-    t.ok('buggy Lv2: small fry at half health and stunned 2 s', ev(p, "return [...window.__m.stilt, ...window.__m.spitter].every(m => m.hp === 1 && m.stun > 1.5)"))
+    t.ok('buggy Lv2: small fry at half health and stunned 2 s', ev(p, "return [...window.__m.stilt, ...window.__m.spitter].every(m => m.hp === 1 && m.top > 1.8 && m.top <= 2)"))
     t.ok('buggy Lv2: the brute is left alone', ev(p, "return window.__m.brute[0].hp === 9 && !(window.__m.brute[0].stun > 0)"))
     s = hop(p, 3, ['stilt', 'spitter', 'gremlin', 'spitter', 'brute'])
     t.ok('buggy Lv3: small fry dead', all(m['dead'] for k in ('stilt', 'spitter', 'gremlin') for m in s[k]))
-    t.ok('buggy Lv3: the brute lives and is stunned 2 s', ev(p, "return !window.__m.brute[0].dead && window.__m.brute[0].stun > 1.5"))
+    t.ok('buggy Lv3: the brute lives and is stunned 2 s', ev(p, "return !window.__m.brute[0].dead && window.__m.brute[0].top > 1.8 && window.__m.brute[0].top <= 2"))
     p.close()
     # ---- spider: the brood ----
     p = g.solo('spider'); ev(p, "d.PH.brk = 999;")
@@ -58,7 +58,7 @@ with Game() as g:
     t.eq('halo Lv1: one field of six spikes', ev(p, "return d.spikeFields.map(F => F.g.children.length)"), [6])
     wait(p, "d.spikeFields.length === 0", 20)
     h1 = ev(p, "return window.__m.brute.map(m => m.hp)")
-    t.ok('halo Lv1: the spikes hurt what stands in them', all(h < 9 for h in h1), h1)
+    t.ok('halo Lv1: the spikes hurt what stands in them (six spikes land at random: two brutes of three is the least)', sum(h < 9 for h in h1) >= 2, h1)
     s = hop(p, 3, ['brute'] * 3, 4.0)
     t.eq('halo Lv3: eighteen spikes', ev(p, "return d.spikeFields.map(F => F.g.children.length)"), [18])
     ev(p, "for (const m of window.__m.brute) m.stun = 5;"); wait(p, "d.spikeFields.length === 0", 30)

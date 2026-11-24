@@ -74,10 +74,7 @@ jump
 killCritter
 loot
 LOOT
-lootBank
 lootFrom
-lootN
-lootPhase
 lossFx
 makeHand
 makeRig
@@ -148,10 +145,6 @@ wPrice
 ! bakeLog(){return bakeTextures.log}
 ! setView(v){ viewSize = v; resizeCam(); }
 ! special(){special()}
-lootDue
-lootBig
-lootLeft
-lootGrant
 wbMarks
 wbGift
 RIDE_KIT
@@ -164,10 +157,25 @@ spikeFields
 landPower
 upgradeAb
 abMax
-coinW
 stompAt
 STOMP
 SPIKE
 BROOD
 STARB
 rw fireCooldown
+
+ult
+SHOP
+useUlt
+buyUlt
+convertCoins
+castUlt
+ultFx
+ART
+FLAT
+ULT
+furrows
+lootRemove
+makeSword
+makeHand2D
+enableTouch
