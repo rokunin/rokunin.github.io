@@ -1,4 +1,4 @@
-"""Coins and crystals, one player: every source pays its own price with no bank behind it, the field has a ceiling, pieces expire, prices match the HUD."""
+"""Coins and crystals, one player: every source pays its own price with no bank behind it, the field has a ceiling, pieces expire, the magnet pulls them in, prices match the HUD."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from harness.game import Game, Checks, ev, wait
@@ -7,7 +7,7 @@ GROUND = "return [d.loot.filter(L => !L.gem).length + d.coins, d.loot.filter(L =
 
 
 def drop(p, kind, n=1):
-    ev(p, "for (const L of d.loot.slice()) d.lootRemove(L); d.coins = 0; d.gems = 0; for (let i = 0; i < a[1]; i++) d.lootFrom(a[0], d.car.pos.x + 20, d.car.pos.z + 20);", [kind, n])
+    ev(p, "for (const L of d.loot.slice()) d.lootRemove(L); d.coins = 0; d.gems = 0; for (let i = 0; i < a[1]; i++) d.lootFrom(a[0], d.car.pos.x + 40, d.car.pos.z + 40);", [kind, n])
     p.wait_for_timeout(300)
     return ev(p, GROUND)
 
@@ -33,6 +33,10 @@ with Game() as g:
     t.ok('the field holds no more than its ceiling, the oldest pieces go', ev(p, "return d.loot.length <= d.LOOT.max && d.loot.length > d.LOOT.max - 30"), ev(p, "return d.loot.length"))
     ev(p, "for (const L of d.loot) L.t = d.LOOT.life + 1;"); p.wait_for_timeout(300)
     t.eq('pieces nobody came for are gone after their time', ev(p, "return d.loot.length"), 0)
+    ev(p, "for (const L of d.loot.slice()) d.lootRemove(L); d.coins = 0; d.gems = 0; d.car.vel.set(0, 0, 0); d.car.speed = 0; d.lootFrom('tough', d.car.pos.x + 9, d.car.pos.z + 9); d.lootFrom('mini', d.car.pos.x + 40, d.car.pos.z + 40);")
+    p.wait_for_timeout(2500)
+    t.eq('coins that land within the magnet fly into the wallet of a car standing still; the far pile stays', ev(p, "return [d.coins, d.gems, d.loot.length]"), [3, 0, 23])
+    t.eq('a piece lies 25 s, the magnet reaches 18 m', ev(p, "return [d.LOOT.life, d.LOOT.pull]"), [25, 18])
     drop(p, 'rig')
     for _ in range(200):
         if not ev(p, "const L = d.loot[0]; if (!L) return false; d.car.pos.set(L.x + 0.5, 0, L.z); d.car.vel.set(0, 0, 0); return true;"):

@@ -11,7 +11,7 @@ with Game() as g:
     n0 = ev(a, "return d.loot.length")
     w0 = ev(b, "return [d.coins, d.gems]")
     bp = ev(b, "return [d.car.pos.x, d.car.pos.z]")
-    ev(a, "d.car.pos.set(a[0] - 60, 0, a[1]); d.lootFrom('rig', a[0] + 14, a[1]); d.lootFrom('boss', a[0] + 14, a[1] + 3);", bp); a.wait_for_timeout(1500)
+    ev(a, "d.car.pos.set(a[0] - 60, 0, a[1]); d.lootFrom('rig', a[0] + 40, a[1]); d.lootFrom('boss', a[0] + 40, a[1] + 3);", bp); a.wait_for_timeout(1500)
     n = ev(a, "return d.loot.length"); w1 = ev(b, "return [d.coins, d.gems]")      # a piece that flew right at the client may be in its wallet already
     t.eq('a machine and the Pyramidon scatter 90 coins and 35 crystals', n - n0 + sum(w1) - sum(w0), 125)
     t.ok('the client sees every piece of the big pile', abs(ev(b, "return d.loot.length") - n) <= 2, [n, ev(b, "return d.loot.length")])
@@ -24,11 +24,11 @@ with Game() as g:
     t.eq('client collected every piece, crystals as crystals', [w[0] - w0[0] - n0, w[1] - w0[1]], [90, 35])
     t.eq('host has no pieces left', ev(a, "return d.loot.length"), 0)
     t.eq('host wallet untouched', ev(a, "return d.coins + d.gems"), 0)
-    ev(b, "for (let i = 0; i < 10; i++) d.lootFrom('crate', d.car.pos.x + 12, d.car.pos.z);"); b.wait_for_timeout(1500)
+    ev(b, "for (let i = 0; i < 10; i++) d.lootFrom('crate', d.car.pos.x + 40, d.car.pos.z);"); b.wait_for_timeout(1500)
     m = ev(a, "return d.loot.length")
     c = ev(b, "return d.loot.length + d.coins") - w[0]
     t.ok('ten crates broken by the client pay 30 to 50 coins on the host', 30 <= c <= 50, c)
     t.ok('and the client sees them', abs(ev(b, "return d.loot.length") - m) <= 2, m)
-    n1 = ev(a, "return d.loot.length"); ev(b, "d.lootFrom('boss', d.car.pos.x + 12, d.car.pos.z); d.lootFrom('rig', d.car.pos.x + 12, d.car.pos.z);"); b.wait_for_timeout(1200)
+    n1 = ev(a, "return d.loot.length"); ev(b, "d.lootFrom('boss', d.car.pos.x + 40, d.car.pos.z); d.lootFrom('rig', d.car.pos.x + 40, d.car.pos.z);"); b.wait_for_timeout(1200)
     t.ok('asked for a boss pile, the host drops nothing', ev(a, "return d.loot.length") <= n1, [n1, ev(a, "return d.loot.length")])
     t.done(g)
