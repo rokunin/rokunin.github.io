@@ -1264,26 +1264,80 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
     let eng = null, next = 0, idx = 0, lvl = 0, on = true, applied = null;
     try { on = localStorage.getItem('carproto.music') !== '0'; } catch (e) {}
-    // The theme: a recorded track ("Rubber Riffs in the Dark"), streamed and looped. It is the game's music; the synth band above only plays if the file cannot be had.
-    // Quiet and muffled on the start screen and while you are dead, as if from the next room; it opens up and gets louder with the action.
-    const TH = { url: 'assets/rubber_riffs.mp3', vol: [0.34, 0.5, 0.6, 0.7, 0.78], cut: [1100, 20000, 20000, 20000, 20000], state: 'idle', a: null, g: null, f: null, t0: 0, tryT: 0, lv: -1, wa: false };
-    function themeTick(ctx) {
+    // The theme: a recorded track ("Rubber Riffs in the Dark"). It is the game's music; the synth band above only plays if the file cannot be had.
+    // The track is cut along its bar lines into five tiers, from the drumless opening to the finale, and the player moves between them with the action:
+    // up at the very next bar line, down once things have been quieter for a while. Inside a tier the music runs on and loops.
+    //   G[k] is where bar k starts in the file (measured: the drum hits, 2.49 s a bar). A tier is bars a..b, looping back to `loop`.
+    const AD = { G: [2.228, 4.709, 7.197, 9.681, 12.154, 14.639, 17.116, 19.740, 22.232, 24.721, 27.206, 29.707, 32.192, 34.672, 37.172, 39.657, 42.157, 44.642, 47.126, 49.623, 52.107, 54.603, 57.089, 59.584, 62.066, 64.562, 67.046, 69.542, 72.027, 74.522, 77.005, 79.501, 81.997, 84.481, 86.978, 89.462, 91.958, 94.443, 96.940, 99.425, 101.921, 104.417, 106.902, 109.397, 111.881, 114.379, 116.865, 119.361, 121.845, 124.344, 126.829, 129.325, 131.810, 134.304, 136.798, 139.282, 141.778, 144.263, 146.759, 149.243, 151.725, 154.221, 156.706, 159.205, 161.701, 164.200, 166.684, 169.189, 171.677, 174.161, 176.657, 179.151, 181.647, 184.143, 186.627, 189.124, 191.631, 194.265, 196.763],
+      land: 0.07506,                                       // where the sound starts in the file as it was measured; a decoder that keeps the MP3 padding starts later, and everything shifts with it
+      tiers: [{ a: 0, b: 7, loop: 0, calm: true },         // 0  the opening, no drums: the start screen
+              { a: 7, b: 23, loop: 7 },                    // 1  light drums, then the riff comes in: the warm-up and a quiet field
+              { a: 15, b: 39, loop: 15 },                  // 2  the main riff
+              { a: 39, b: 59, loop: 39 },                  // 3  brighter and busier
+              { a: 60, b: 76, loop: 64 }],                 // 4  the stabs and the finale
+      PRE: 0.02, FIN: 0.015, FOUT: 0.04, SOFT: 0.35, DWELL: 10 };
+    const TH = { url: 'assets/rubber_riffs.mp3', vol: [0.85, 0.64, 0.64, 0.64, 0.66], cut: [2600, 20000, 20000, 20000, 20000], state: 'idle', mode: 'adaptive', a: null, g: null, f: null, t0: 0, tryT: 0, lv: -1, wa: false,
+                 buf: null, shift: 0, T: 0, k: 0, tBar: 0, since: 0, cur: null, log: [] };
+    const barT = k => (k === 0 ? 0.1 : AD.G[k]) + TH.shift;
+    function thGraph(ctx) { if (TH.g) return; TH.f = ctx.createBiquadFilter(); TH.f.type = 'lowpass'; TH.f.frequency.value = TH.cut[0]; TH.g = ctx.createGain(); TH.g.gain.value = 0; TH.f.connect(TH.g); TH.g.connect(SFX.master); }
+    function thLoad(ctx) {                                 // fetch and decode the whole track once; cuts need sample-accurate starts, which a streaming <audio> cannot give
+      TH.state = 'loading'; TH.t0 = ctx.currentTime;
+      const fail = () => { if (TH.mode === 'adaptive') { TH.mode = 'stream'; TH.state = 'idle'; } };      // no buffer: fall back to playing the file straight through
+      try { fetch(TH.url).then(r => { if (!r.ok) throw 0; return r.arrayBuffer(); }).then(ab => new Promise((ok, no) => { const pr = ctx.decodeAudioData(ab, ok, no); if (pr && pr.catch) pr.catch(no); })).then(buf => {
+        const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, n = Math.min(L.length, Math.floor(buf.sampleRate * 0.4)); let at = -1;
+        for (let i = 0; i < n; i++) if (Math.abs(L[i]) > 0.004 || Math.abs(R[i]) > 0.004) { at = i / buf.sampleRate; break; }
+        const sh = at < 0 ? 0 : at - AD.land; TH.shift = sh > -0.01 && sh < 0.08 ? sh : 0; TH.buf = buf; TH.state = 'ready'; }).catch(fail); } catch (e) { fail(); }
+    }
+    function thPlay(ctx, bar, when, soft) {                // a new voice from the top of `bar`, landing on the bar line at `when`
+      const src = ctx.createBufferSource(), g = ctx.createGain(), t0 = Math.max(ctx.currentTime, when - AD.PRE); src.buffer = TH.buf; src.connect(g); g.connect(TH.f);
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(1, t0 + (soft ? AD.SOFT : AD.FIN)); src.start(t0, Math.max(0, barT(bar) - AD.PRE - (when - AD.PRE - t0)));
+      return { src, g };
+    }
+    function thStop(ctx, v, at, soft) { if (!v) return; const t0 = Math.max(ctx.currentTime, at - (soft ? 0.02 : 0.03)), d = soft ? AD.SOFT : AD.FOUT;
+      try { v.g.gain.cancelScheduledValues(t0); v.g.gain.setValueAtTime(1, t0); v.g.gain.linearRampToValueAtTime(0, t0 + d); v.src.stop(t0 + d + 0.05); } catch (e) {} }
+    function thMix(ctx, at) { const muf = M.muffle && TH.T > 0;      // dead: the music stays where it is and goes dull and quiet until you are back
+      TH.g.gain.setTargetAtTime(on ? TH.vol[TH.T] * (muf ? 0.55 : 1) : 0, at, 0.25); TH.f.frequency.setTargetAtTime(muf ? 700 : TH.cut[TH.T], at, 0.2); TH.lv = TH.T + (muf ? 10 : 0); }
+    function adaptiveTick(ctx) {
+      thGraph(ctx);
+      if (TH.state === 'idle') thLoad(ctx);
+      if (TH.state === 'loading') { if (ctx.currentTime - TH.t0 > 20 && TH.mode === 'adaptive') { TH.mode = 'stream'; TH.state = 'idle'; } return true; }
+      const now = ctx.currentTime, want = THREE.MathUtils.clamp(M.level | 0, 0, 4);
+      if (!on) { if (TH.cur) { thStop(ctx, TH.cur, now + 0.03, true); TH.cur = null; TH.state = 'ready'; } return true; }
+      if (TH.state === 'ready') { TH.T = want; TH.k = AD.tiers[want].a; TH.tBar = now + 0.12; TH.since = TH.tBar; TH.cur = thPlay(ctx, TH.k, TH.tBar, true); TH.state = 'on'; thMix(ctx, now); TH.log.push([+now.toFixed(2), 'start', want, TH.k]); }
+      if (TH.lv !== TH.T + (M.muffle && TH.T > 0 ? 10 : 0)) thMix(ctx, now);
+      let nxt = TH.tBar + barT(TH.k + 1) - barT(TH.k);
+      while (nxt < now + 0.02 && TH.k < AD.G.length - 3) { TH.k++; TH.tBar = nxt; nxt = TH.tBar + barT(TH.k + 1) - barT(TH.k); }      // the tab slept through some bar lines: the voice played on, catch the counter up
+      if (nxt - now > 0.3) return true;                    // decide a quarter of a second ahead of the bar line
+      const tier = AD.tiers[TH.T]; let jump = null;
+      if (want !== TH.T && (want > TH.T || want === 0 || nxt - TH.since >= AD.DWELL)) {
+        const W = AD.tiers[want];
+        if (!W.calm && !tier.calm && TH.k + 1 >= W.a && TH.k + 1 < W.b) { TH.T = want; TH.since = nxt; thMix(ctx, nxt); TH.log.push([+nxt.toFixed(2), 'adopt', want, TH.k + 1]); }      // already inside that tier's bars: no cut needed
+        else jump = [want, W.a]; }
+      if (!jump && (TH.k + 1 >= AD.tiers[TH.T].b || TH.k >= AD.G.length - 3)) jump = [TH.T, AD.tiers[TH.T].loop];
+      if (jump) { const soft = !!(AD.tiers[jump[0]].calm || tier.calm);
+        thStop(ctx, TH.cur, nxt, soft); TH.cur = thPlay(ctx, jump[1], nxt, !!AD.tiers[jump[0]].calm);
+        TH.log.push([+nxt.toFixed(2), jump[0] === TH.T ? 'loop' : 'jump', jump[0], jump[1]]); if (TH.log.length > 40) TH.log.shift();
+        if (jump[0] !== TH.T) { TH.T = jump[0]; TH.since = nxt; thMix(ctx, nxt); } TH.k = jump[1]; } else TH.k++;
+      TH.tBar = nxt; return true;
+    }
+    function streamTick(ctx) {                             // the plain fallback: the file straight through, looped, on an <audio> element
+      thGraph(ctx);
       if (TH.state === 'idle') { TH.state = 'loading'; TH.t0 = ctx.currentTime;
         const a = TH.a = new Audio(); a.loop = true; a.preload = 'auto';
         a.addEventListener('error', () => { TH.state = 'failed'; }); a.addEventListener('playing', () => { TH.state = 'on'; });
         a.src = TH.url;
-        try { const src = ctx.createMediaElementSource(a); TH.f = ctx.createBiquadFilter(); TH.f.type = 'lowpass'; TH.f.frequency.value = TH.cut[0]; TH.g = ctx.createGain(); TH.g.gain.value = 0;
-          src.connect(TH.f); TH.f.connect(TH.g); TH.g.connect(SFX.master); TH.wa = true; } catch (e) { TH.wa = false; } }      // no Web Audio route: the element's own volume will do
+        try { ctx.createMediaElementSource(a).connect(TH.f); TH.wa = true; } catch (e) { TH.wa = false; } }      // no Web Audio route: the element's own volume will do
       if (TH.state === 'failed') return false;
       if (TH.state === 'loading' && ctx.currentTime - TH.t0 > 12) { TH.state = 'failed'; try { TH.a.pause(); } catch (e) {} return false; }      // too slow to arrive: let the band play
-      const a = TH.a, l = THREE.MathUtils.clamp(M.level | 0, 0, 4);
+      const a = TH.a, l = THREE.MathUtils.clamp(M.level | 0, 0, 4); TH.T = Math.min(l, 1);
       if (on && a.paused && ctx.currentTime > TH.tryT) { TH.tryT = ctx.currentTime + 1; const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); }
-      if (TH.lv !== (on ? l : -2)) { TH.lv = on ? l : -2; const v = on ? TH.vol[l] : 0;
-        if (TH.wa) { TH.g.gain.setTargetAtTime(v, ctx.currentTime, 0.5); TH.f.frequency.setTargetAtTime(TH.cut[l], ctx.currentTime, 0.4); } }
-      if (!TH.wa) a.volume = Math.min(1, (on ? TH.vol[l] : 0) * (SFX.muted ? 0 : SFX.volume * 1.3));
+      if (TH.lv !== (on ? l : -2)) { TH.lv = on ? l : -2; if (TH.wa) { TH.g.gain.setTargetAtTime(on ? [0.34, 0.5, 0.6, 0.7, 0.78][l] : 0, ctx.currentTime, 0.5); TH.f.frequency.setTargetAtTime(l ? 20000 : 1100, ctx.currentTime, 0.4); } }
+      if (!TH.wa) a.volume = Math.min(1, (on ? [0.34, 0.5, 0.6, 0.7, 0.78][l] : 0) * (SFX.muted ? 0 : SFX.volume * 1.3));
       return true;
     }
-    const M = { level: 0, build, BPM,
+    if (navigator.deviceMemory && navigator.deviceMemory < 4) TH.mode = 'stream';      // the decoded track is ~75 MB of samples: too much for a small phone
+    const themeTick = ctx => TH.mode === 'adaptive' ? adaptiveTick(ctx) : streamTick(ctx);
+    const M = { level: 0, muffle: false, build, BPM,
       get on() { return on; }, get theme() { return TH; },
       toggle() { on = !on; try { localStorage.setItem('carproto.music', on ? '1' : '0'); } catch (e) {} return on; },
       tick() {
@@ -2918,7 +2972,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 127, buildEl = document.getElementById('build');
+  const BUILD = 128, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -8621,12 +8675,12 @@ const MONSTERS = [
   { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
   camFocus.copy(car.pos);
   function musicLevel() {                               // how hard the band plays: by phase, one notch up when the crowd is on you
-    if (startEl.isConnected || !car.alive) return 0; if (PH.brk > 0) return 1;
+    if (startEl.isConnected) return 0; if (PH.brk > 0) return 1;
     const l = { roll: 1, scout: 2, save: 2, hell: 3, boss: 3 }[PHASES[PH.i].key] || 1;
     return Math.min(4, l + (waves.alive >= 14 || boss.state === 'fight' ? 1 : 0));
   }
   function frame() {
-    MUSIC.level = MUSIC.force ?? musicLevel(); MUSIC.tick();
+    MUSIC.level = MUSIC.force ?? musicLevel(); MUSIC.muffle = !startEl.isConnected && !car.alive; MUSIC.tick();
     const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
     adaptQuality(raw);
     update(dt);
