@@ -120,7 +120,7 @@
 
 **Офлайн-музыка.** `music/score.py` (ноты, темп 133) и `music/mix.py VARIANT` (всё синтами, слои по розовому шуму, сайдчейн, EQ по эталонной кривой, «радио»). Нужны mido, tinysoundfont, numpy, scipy и саундфонт GeneralUser-GS (`git clone https://github.com/mrbumpy409/GeneralUser-GS` в `/tmp/sf/gu`). Принятый Романом вариант: A с плавными аккордами в интро (`chubz_king_A2.mp3`, в репо не лежит).
 
-**Картинки.** `tools/nanogpt_gen.py MODEL PREFIX N "prompt" refs...`, ключ в переменной `NANOGPT_KEY`. `nano-banana-pro` отдаёт картинку сразу, 0.14 $ за штуку. `gpt-image-2` отдаёт ссылку, которую песочница не скачивает. Плоская графика: просить лист на ровном пурпурном фоне, резать `tools/sprite_cut.py sheet.png out_dir --names ...` (WebP с альфой, data URI и `meta.json` с размерами; точку привязки в `ART_META` править руками: щепоть перчатки, низ бомбы).
+**Картинки.** `tools/nanogpt_gen.py MODEL PREFIX N "prompt" refs...`, ключ в переменной `NANOGPT_KEY`. `nano-banana-pro` отдаёт картинку сразу, 0.14 $ за штуку. Каждый запуск дописывает промпт в `prompts.log` рядом с картинками (промпты билда 129 не сохранились: лога ещё не было). `gpt-image-2` отдаёт ссылку, которую песочница не скачивает. Плоская графика: просить лист на ровном пурпурном фоне, резать `tools/sprite_cut.py sheet.png out_dir --names ...` (WebP с альфой, data URI и `meta.json` с размерами; точку привязки в `ART_META` править руками: щепоть перчатки, низ бомбы).
 
 ## Принято, не менять без слова Романа
 

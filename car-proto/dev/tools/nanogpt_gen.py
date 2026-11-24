@@ -19,5 +19,6 @@ def one(i):
         return fn+' ok '+str(r.get('cost',''))
     except Exception as e:
         return f'{out}_{i} ERR {getattr(e,"read",lambda:b"")()[:200]} {e}'
+open(os.path.join(os.path.dirname(os.path.abspath(out)) or '.', 'prompts.log'), 'a').write(json.dumps({'out': os.path.basename(out), 'model': model, 'n': n, 'size': size, 'refs': [os.path.basename(r) for r in refs], 'prompt': prompt}, ensure_ascii=False) + '\n')      # every paid prompt stays on disk next to its pictures
 with cf.ThreadPoolExecutor(n) as ex:
     for s in ex.map(one,range(1,n+1)): print(s)
