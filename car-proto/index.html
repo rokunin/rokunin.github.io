@@ -129,6 +129,7 @@
              text-align: center; color: #ff8fc8; font: 800 15px/1 system-ui, sans-serif; letter-spacing: 3px; text-shadow: 0 2px 0 #000; }
   #bosshp { margin-top: 6px; height: 14px; background: rgba(20,22,26,.8); border-radius: 7px; padding: 3px; }
   #bossfill { height: 100%; width: 100%; background: linear-gradient(90deg, #d040a0, #ff5a8a); border-radius: 5px; transition: width .1s; }
+  #bossbar.p2 #bossfill { background: linear-gradient(90deg, #ff5a1a, #ffd23a); box-shadow: 0 0 12px rgba(255,140,40,.7); }      /* out in the field, healed: a new bar */
   /* ---- touch layout: two floating sticks, ability buttons in an arc around the right thumb ---- */
   .tc { display: none; }
   .stick { position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; display: none; pointer-events: none;
@@ -1661,7 +1662,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xc4c0b8, map: blockTex.map, roughnessMap: blockTex.rough, normalMap: blockTex.normal, roughness: 1 });
   const roomWallMat = new THREE.MeshStandardMaterial({ color: 0x8a6aa8, map: blockTex.map, roughnessMap: blockTex.rough, normalMap: blockTex.normal, roughness: 0.8, metalness: 0.2 });
   const ROOM_X1 = ARENA, ROOM_X2 = ARENA + 64, ROOM_HZ = 34, GATE_HZ = 8;
-  const BOSS_POS = new THREE.Vector3((ROOM_X1 + ROOM_X2) / 2, 0, 0);
+  const BOSS_POS = new THREE.Vector3((ROOM_X1 + ROOM_X2) / 2, 0, 0), LAIR_POS = BOSS_POS.clone();      // BOSS_POS is where the Pyramidon is NOW: it leaves the lair at half health
   const inRoom = (x, z) => x > ROOM_X1 && x < ROOM_X2 && Math.abs(z) < ROOM_HZ;
   const inWorld = (x, z) => (Math.abs(x) <= ARENA && Math.abs(z) <= ARENA) || inRoom(x, z);
   function addWall(x, z, w, d, h = 2.5, mat = wallMat) {
@@ -2993,7 +2994,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 130, buildEl = document.getElementById('build');
+  const BUILD = 131, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -7279,7 +7280,11 @@ const MONSTERS = [
   // ---------- BOSS: Пирамидон ----------
   const BOSS_HP = 1000, TENT_SP = 0.85, TENT_MIN = 10, TENT_MAX = 34;
   const bossBarEl = document.getElementById('bossbar'), bossFillEl = document.getElementById('bossfill');
-  const boss = { state: 'idle', hp: BOSS_HP, dealt: 0, t: 0, throwCd: 2, lashCd: 1.5, lifting: null, flash: 0, dirtT: 0 };
+  const boss = { state: 'idle', hp: BOSS_HP, dealt: 0, t: 0, throwCd: 2, lashCd: 1.5, lifting: null, flash: 0, dirtT: 0, ph: 1, mv: null, vol: null };
+  // Two halves of the fight. In the lair it loses half its health, then breaks out through the gate into the field, heals (the bar comes back in another colour) and fights on there:
+  // it moves in dashes between volleys, and every volley of quake rings comes with a ring of lava around it that has to be jumped, from either side.
+  const BOSS2 = { out: [ARENA - 78, 0], fleeV: 26, dashV: 30, near: [14, 22], sight: 75, ram: 18,
+                  lairQ: { n: 3, r: 13, dmg: 26 }, fieldQ: { n: 6, r: 26, dmg: 12 }, step: 0.5, lavaR: 32, lavaW: 1.7, lavaH: 2.8, lavaDmg: 20 };
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
   const bossGroup = new THREE.Group();
   bossGroup.position.set(BOSS_POS.x, -BOSS_SINK, BOSS_POS.z); bossGroup.visible = false; scene.add(bossGroup);
@@ -7443,10 +7448,10 @@ const MONSTERS = [
   }
   function bossFanNet(n, spread, speed, aim) { bossFan(n, spread, speed, aim); netEv({ t: 'bf', n, s: r2(spread), v: r1(speed), a: r2(aim) }); }
   // everyone the pyramid can reach: players alive and above ground inside its room
-  function bossTgts() {
-    const a = [];
-    if (car.alive && car.depth < 0.3 && inRoom(car.pos.x, car.pos.z)) a.push({ pos: car.pos, vel: car.vel, peer: String(NET.on && NET.game ? netMe() : 'me') });
-    if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up && inRoom(R.pos.x, R.pos.z)) a.push({ pos: R.pos, vel: R.vel, peer: String(R.peer) });
+  function bossTgts(all) {
+    const a = [], ok = p => boss.ph === 2 ? all || Math.hypot(p.x - BOSS_POS.x, p.z - BOSS_POS.z) < BOSS2.sight : inRoom(p.x, p.z);      // out in the field: whoever is near enough (or anybody, for choosing where to dash)
+    if (car.alive && car.depth < 0.3 && ok(car.pos)) a.push({ pos: car.pos, vel: car.vel, peer: String(NET.on && NET.game ? netMe() : 'me') });
+    if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up && ok(R.pos)) a.push({ pos: R.pos, vel: R.vel, peer: String(R.peer) });
     return a;
   }
   function netPeerPos(p) {
@@ -7457,7 +7462,7 @@ const MONSTERS = [
   function bossFanTick(dt) {
     const tg = bossTgts(); if (boss.state !== 'fight' || !tg.length) return;
     let T = boss.fanT && tg.find(t => t.peer === boss.fanT.peer); if (!T) T = boss.fanT = tg[Math.floor(Math.random() * tg.length)];
-    const rage = boss.dealt > bossMax() * 0.5, aim = Math.atan2(T.pos.x - BOSS_POS.x, T.pos.z - BOSS_POS.z);
+    const rage = bossRage(), aim = Math.atan2(T.pos.x - BOSS_POS.x, T.pos.z - BOSS_POS.z);
     if (boss.fanLeft > 0 && (boss.fanGap -= dt) <= 0) {                  // a burst: several fans in a row, each offset half a step so the gaps move
       boss.fanLeft--; boss.fanGap = 0.42;
       if (boss.fanRing) bossFanNet(18, 6.283 * 17 / 18, 9.5, boss.fanLeft * 0.175); else bossFanNet(rage ? 9 : 7, rage ? 1.5 : 1.15, 11.5, aim + (boss.fanLeft % 2 ? 0.09 : -0.09));
@@ -7482,12 +7487,12 @@ const MONSTERS = [
     if (NET.client) { bossLiftAnim(dt); return; }        // a guest only animates what the host's pyramid does
     bossFanTick(dt);
     boss.throwCd -= dt;
-    if (!boss.lifting && boss.throwCd <= 0) {
+    if (!boss.lifting && boss.throwCd <= 0 && !boss.mv) {
       let best = null, bd = Infinity;
       for (const o of obstacles) {
-        if (!o.room || !active(o)) continue;
+        if (!(boss.ph === 2 ? o.crate : o.room) || !active(o)) continue;      // in the field it throws whatever crates lie around it
         const d = Math.hypot(o.mesh.position.x - BOSS_POS.x, o.mesh.position.z - BOSS_POS.z);
-        if (d < bd) { bd = d; best = o; }
+        if (d < bd && (boss.ph !== 2 || d < 45)) { bd = d; best = o; }
       }
       if (best) { bossLift(best); netEv({ t: 'bl', i: obstacles.indexOf(best) }); }
       boss.throwCd = rand(2.2, 3.2);
@@ -7507,7 +7512,7 @@ const MONSTERS = [
       const tg = bossTgts(); if (!tg.length) { releaseLift(); return; }
       const T = tg[Math.floor(Math.random() * tg.length)], from = L.o.mesh.position.clone();
       const lead = new THREE.Vector3(T.pos.x + T.vel.x * 0.55, 0, T.pos.z + T.vel.z * 0.55);
-      if (!inRoom(lead.x, lead.z)) lead.set(T.pos.x, 0, T.pos.z);
+      if (boss.ph !== 2 && !inRoom(lead.x, lead.z)) lead.set(T.pos.x, 0, T.pos.z);
       const dx = lead.x - from.x, dz = lead.z - from.z, dist = Math.hypot(dx, dz);
       const tt = THREE.MathUtils.clamp(dist / 22, 0.6, 1.5);
       const vel = new THREE.Vector3(dx / tt, 0.5 * G * tt - (from.y - L.o.h / 2) / tt, dz / tt);
@@ -7518,12 +7523,20 @@ const MONSTERS = [
 
   function bossDamage(d) {
     if (boss.state !== 'fight') return;
-    boss.dealt += d; boss.flash = 0.06; NET.bdAcc = (NET.bdAcc || 0) + d;      // everyone in the lobby chips at the same health pool
-    bossBar();
-    if (boss.dealt >= bossMax()) { killBoss(); netEv({ t: 'bk' }); }
+    const was = boss.dealt; boss.dealt += d; boss.flash = 0.06;
+    bossHealth(true); NET.bdAcc = (NET.bdAcc || 0) + Math.max(0, boss.dealt - was);      // everyone in the lobby chips at the same health pool; what the lair's half cut off is not passed on
   }
+  // One counter for both halves: the lair takes it from 0 to half of bossMax() (and no further), the field from there to one and a half.
+  function bossHealth(mine) {
+    if (boss.ph !== 2) { boss.dealt = Math.min(boss.dealt, bossMax() * 0.5); if (!NET.client && boss.state === 'fight' && boss.dealt >= bossMax() * 0.5) bossFlee(); }
+    else if (boss.state === 'fight' && boss.dealt >= bossMax() * 1.5) { killBoss(); if (mine) netEv({ t: 'bk' }); }
+    bossBar();
+  }
+  const bossRage = () => boss.ph === 2 ? boss.dealt > bossMax() : boss.dealt > bossMax() * 0.25;      // the second half of each bar
   const bossMax = () => BOSS_HP * (1 + 1.5 * (NET.on && NET.game ? NET.remotes.size : 0));       // every extra player: +150%
-  const bossBar = () => { bossFillEl.style.width = Math.max(0, (1 - boss.dealt / bossMax()) * 100) + '%'; };
+  const bossBar = () => { const M = bossMax(); let f = boss.ph === 2 ? 1 - (boss.dealt - M * 0.5) / M : 1 - boss.dealt / M;
+    if (boss.state === 'flee' && boss.mv) f = 0.5 + 0.5 * Math.min(1, boss.mv.t / boss.mv.T);      // healing on the run
+    bossFillEl.style.width = Math.max(0, Math.min(1, f) * 100) + '%'; bossBarEl.classList.toggle('p2', boss.ph === 2); };
   function setDoor(closed) { if (door.targetY !== (closed ? 2.3 : -2.5)) SFX.play('door', doorMesh.position); door.targetY = closed ? 2.3 : -2.5; }
   function releaseLift() {
     if (!boss.lifting) return;
@@ -7531,7 +7544,7 @@ const MONSTERS = [
     thrown.push({ kind: 'crate', ref: o, r: Math.max(o.hx, o.hz) * 1.2, s: o.h, pos: o.mesh.position.clone(), vel: new THREE.Vector3(), spin: 3, rot: 0 });
   }
   function killBoss() {
-    boss.state = 'dead'; boss.t = 0; bossCol.disabled = true; crewSay('bossdead', 1, true);
+    boss.state = 'dead'; boss.t = 0; boss.mv = null; boss.vol = null; bossCol.disabled = true; clearLava(); crewSay('bossdead', 1, true);
     releaseLift();
     for (const tn of tentacles) {
       for (let i = 0; i < tn.n; i += 2) spawnParticles(tn.pts[i], 0x8a3ab0, 2, 7);
@@ -7553,17 +7566,20 @@ const MONSTERS = [
     bossBarEl.style.display = 'block'; bossBar();
     flashAlert('PYRAMIDON'); SFX.play('boss_emerge', BOSS_POS); SFX.play('boss_roar', BOSS_POS, { delay: 1.6 });
   }
-  function bossFightNow(ns) {                            // joined mid-fight: skip the rising
+  function bossFightNow(ns, bp) {                            // joined mid-fight: skip the rising
     boss.state = 'fight'; boss.t = 0; bossGroup.visible = true; bossGroup.position.y = 0; bossCol.disabled = false;
     bossBarEl.style.display = 'block'; bossBar();
     if (Array.isArray(ns)) tentacles.forEach((tn, k) => { tn.n = Math.round(num(ns[k], TENT_MIN, TENT_MAX)); syncSegs(tn); });
+    if (Array.isArray(bp) && bp[0] === 2) { boss.ph = 2; boss.dealt = Math.max(boss.dealt, bossMax() * 0.5); bossSetPos(num(bp[1], -ARENA, ROOM_X2), num(bp[2], -ARENA, ARENA)); bossBar(); }
   }
   function resetBoss() {
     if (boss.state === 'dead' || boss.state === 'idle') return;
-    boss.state = 'idle'; boss.t = 0; boss.throwCd = 2; boss.lashCd = 1.5;
-    if (!(NET.on && NET.game)) boss.dealt = 0;           // solo: the fight starts over; in a lobby the damage already done stays
+    boss.state = 'idle'; boss.t = 0; boss.throwCd = 2; boss.lashCd = 1.5; boss.quakeCd = null; boss.mv = null; boss.vol = null;
+    if (!(NET.on && NET.game)) { boss.dealt = 0; boss.ph = 1; }           // solo: the fight starts over, back in the lair; in a lobby the damage already done stays
+    if (boss.ph !== 2) bossSetPos(LAIR_POS.x, LAIR_POS.z);
+    bossGroup.rotation.set(0, 0, 0); bossBar();
     releaseLift();
-    clearQuakes();
+    clearQuakes(); clearLava();
     for (let i = thrown.length - 1; i >= 0; i--) if (thrown[i].hostile) finishThrown(thrown[i], i);
     bossCol.disabled = true; bossGroup.visible = false; bossGroup.position.y = -BOSS_SINK;
     for (const tn of tentacles) {
@@ -7576,11 +7592,11 @@ const MONSTERS = [
   const quakes = [], QUAKE_T = 2.4;
   const quakeRingGeo = new THREE.RingGeometry(0.955, 1, 72); quakeRingGeo.rotateX(-Math.PI / 2);
   const quakeDiscGeo = new THREE.CircleGeometry(1, 56); quakeDiscGeo.rotateX(-Math.PI / 2);
-  function bossQuake(x, z, r) {
+  function bossQuake(x, z, r, dmg = 26) {
     const ring = new THREE.Mesh(quakeRingGeo, glow(new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.9, depthWrite: false }), 3));
     const disc = new THREE.Mesh(quakeDiscGeo, glow(new THREE.MeshBasicMaterial({ color: 0xff4a2a, transparent: true, opacity: 0.22, depthWrite: false }), 1.6));
     ring.position.set(x, 0.09, z); ring.scale.setScalar(r); disc.position.set(x, 0.08, z); disc.scale.setScalar(0.01); scene.add(ring, disc);
-    quakes.push({ x, z, r, t: 0, ring, disc }); SFX.play('boss_roar', BOSS_POS, { rate: 0.6, vol: 0.7 });
+    quakes.push({ x, z, r, dmg, t: 0, ring, disc }); SFX.play('boss_roar', BOSS_POS, { rate: 0.6, vol: 0.7 });
     if (Math.hypot(car.pos.x - x, car.pos.z - z) < r + 4) flashAlert('GET OUT OF THE RING');
   }
   function clearQuakes() { for (const q of quakes) scene.remove(q.ring, q.disc); quakes.length = 0; }
@@ -7595,11 +7611,93 @@ const MONSTERS = [
       flash(tmp.set(q.x, 1, q.z), 0xff7a2a, q.r * 2.2, 0.45, 3);
       for (let j = 0; j < 22; j++) { const a = j / 22 * 6.283, d = q.r * (0.3 + 0.7 * Math.random()); tmp.set(q.x + Math.cos(a) * d, 0.4, q.z + Math.sin(a) * d); spawnParticles(tmp, 0x6a5a4a, 3, 9); if (j % 3 === 0) burst(tmp, 0x8a7a6a, 2, 2.4, 5, 0.4); }
       if (car.alive && car.depth < 0.3 && car.y < 1.5 && Math.hypot(car.pos.x - q.x, car.pos.z - q.z) < q.r)
-        hurtCar(26, new THREE.Vector3(car.pos.x - q.x, 0, car.pos.z - q.z).normalize());
+        hurtCar(q.dmg, new THREE.Vector3(car.pos.x - q.x, 0, car.pos.z - q.z).normalize());
+    }
+  }
+  // -- the break-out, the dashes, the lava --
+  function bossSetPos(x, z) { BOSS_POS.x = x; BOSS_POS.z = z; bossGroup.position.x = x; bossGroup.position.z = z; bossCol.mesh.position.set(x, 0, z); }
+  function bossMove(x, z, v) { const d = Math.hypot(x - BOSS_POS.x, z - BOSS_POS.z); boss.mv = { sx: BOSS_POS.x, sz: BOSS_POS.z, tx: x, tz: z, t: 0, T: Math.max(0.5, d / v), hit: false, dustT: 0 };
+    SFX.play('whoosh', BOSS_POS, { rate: 0.5, vol: 1 }); SFX.play('boss_roar', BOSS_POS, { rate: 1.25, vol: 0.5 }); }
+  function bossFlee() {                                  // half its health gone: out of the lair, through the gate, into the field, healing as it goes
+    if (boss.ph === 2 || boss.state === 'dead') return;
+    boss.ph = 2; boss.dealt = Math.max(boss.dealt, bossMax() * 0.5); boss.vol = null; releaseLift(); clearQuakes();
+    for (const tn of tentacles) { tn.reach = 0; tn.state = 'idle'; tn.t = 0; hideTent(tn); }
+    boss.state = 'flee'; boss.t = 0; bossGroup.visible = true; bossGroup.position.y = 0; bossCol.disabled = false; bossBarEl.style.display = 'block';
+    bossMove(BOSS2.out[0], BOSS2.out[1], BOSS2.fleeV); flashAlert('PYRAMIDON BREAKS OUT'); bossBar();
+    if (!NET.client) netEv({ t: 'bs', s: 'f' });
+  }
+  function bossMoveTick(dt) {                            // everybody plays the same run: start, end and speed come from the host
+    const M = boss.mv; M.t += dt; const k = Math.min(1, M.t / M.T), e = k * k * (3 - 2 * k), px = BOSS_POS.x, pz = BOSS_POS.z;
+    bossSetPos(M.sx + (M.tx - M.sx) * e, M.sz + (M.tz - M.sz) * e);
+    const vx = (BOSS_POS.x - px) / Math.max(dt, 1e-3), vz = (BOSS_POS.z - pz) / Math.max(dt, 1e-3), sp = Math.hypot(vx, vz), lean = Math.min(0.17, sp * 0.006);
+    bossGroup.rotation.set(sp > 0.1 ? vz / sp * lean : 0, 0, sp > 0.1 ? -vx / sp * lean : 0);      // leaning into the run
+    if ((M.dustT -= dt) <= 0) { M.dustT = 0.04; burst(tmp.set(px + rand(-4, 4), 0.4, pz + rand(-4, 4)), 0x8a7a64, 5, 3, 8, 0.6); }
+    const dc = Math.hypot(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z) || 1e-3; if (dc < 60) shake = Math.max(shake, 0.25);
+    if (!M.hit && sp > 6 && car.alive && car.y < 1.5 && dc < 7.2) { M.hit = true; hurtCar(BOSS2.ram, tmp.set((car.pos.x - BOSS_POS.x) / dc, 0, (car.pos.z - BOSS_POS.z) / dc).clone()); }      // run over: once a dash
+    for (const o of obstacles) { if (o === bossCol || !(o.crate || o.pillar) || !active(o)) continue;                                                         // crates and pillars in its way are gone
+      if (Math.abs(o.mesh.position.x - BOSS_POS.x) > o.hx + 4.2 || Math.abs(o.mesh.position.z - BOSS_POS.z) > o.hz + 4.2) continue;
+      const was = NET.applying; NET.applying = true; if (o.crate) damageCrate(o, 99); else smashPillar(o, tmp.set(vx, 0, vz).clone()); NET.applying = was; }      // every side smashes its own copy: no loot, no events
+    if (boss.state === 'flee') bossBar();
+    if (k < 1) return;
+    boss.mv = null; bossGroup.rotation.set(0, 0, 0);
+    waveFx(BOSS_POS.x, BOSS_POS.z, 10, 0xff7ad8, 0.4); burst(tmp.set(BOSS_POS.x, 0.5, BOSS_POS.z), 0x8a7a64, 26, 5, 12, 0.6); SFX.play('land', tmp, { vol: 0.9, rate: 0.55 }); if (dc < 70) shake = Math.max(shake, 0.9);
+    if (boss.state === 'flee') { boss.state = 'fight'; boss.t = 0; boss.quakeCd = 2.5; boss.throwCd = 2; boss.lashCd = 1; bossBar(); flashAlert('PYRAMIDON IS LOOSE'); }
+  }
+  function bossDash() {                                  // host: to a new spot beside somebody, so the next ring of lava closes around them
+    const tg = bossTgts(true); if (!tg.length) return false;
+    const T = tg[Math.floor(Math.random() * tg.length)], dx = BOSS_POS.x - T.pos.x, dz = BOSS_POS.z - T.pos.z, d = Math.hypot(dx, dz), keep = rand(BOSS2.near[0], BOSS2.near[1]);
+    const a = d < keep + 10 ? Math.random() * 6.283 : Math.atan2(dz, dx) + rand(-0.6, 0.6), lim = ARENA - 14;      // already beside them: round to another side
+    const x = THREE.MathUtils.clamp(T.pos.x + Math.cos(a) * keep, -lim, lim), z = THREE.MathUtils.clamp(T.pos.z + Math.sin(a) * keep, -lim, lim);
+    if (Math.hypot(x - BOSS_POS.x, z - BOSS_POS.z) < 6) return false;
+    bossMove(x, z, BOSS2.dashV); netEv({ t: 'bgo', x: r1(x), z: r1(z), v: BOSS2.dashV }); return true;
+  }
+  function bossVolleyTick(dt) {                          // host: quake rings one after another; in the field a ring of lava stands around the pyramid while they go off
+    if (boss.mv) return;
+    const field = boss.ph === 2, Q = field ? BOSS2.fieldQ : BOSS2.lairQ, V = boss.vol;
+    if (!V) {
+      if ((boss.quakeCd = (boss.quakeCd == null ? 8 : boss.quakeCd) - dt) > 0) return;
+      const tg = bossTgts();
+      if (!tg.length) { boss.quakeCd = field && bossDash() ? 0.5 : 1; return; }      // nobody near: go and find them
+      const sp = [];
+      for (const T of tg.sort(() => Math.random() - 0.5)) if (!field || Math.hypot(T.pos.x - BOSS_POS.x, T.pos.z - BOSS_POS.z) < BOSS2.lavaR + 20) sp.push([T.pos.x, T.pos.z]);      // one under each player
+      while (sp.length < Q.n) { const a = Math.random() * 6.283;                                                                                                              // the rest scattered
+        if (field) { const d = rand(4, BOSS2.lavaR - 8); sp.push([BOSS_POS.x + Math.cos(a) * d, BOSS_POS.z + Math.sin(a) * d]); }
+        else { const T = tg[Math.floor(Math.random() * tg.length)], d = rand(10, 22); sp.push([THREE.MathUtils.clamp(T.pos.x + Math.cos(a) * d, ROOM_X1 + 4, ROOM_X2 - 4), THREE.MathUtils.clamp(T.pos.z + Math.sin(a) * d, -ROOM_HZ + 4, ROOM_HZ - 4)]); } }
+      sp.length = Q.n; boss.vol = { i: 0, t: 0, sp };
+      if (field) { const q = { t: 'bv', x: r1(BOSS_POS.x), z: r1(BOSS_POS.z), r: BOSS2.lavaR, T: r1((Q.n - 1) * BOSS2.step + QUAKE_T + 0.3) }; bossLava(q.x, q.z, q.r, q.T); netEv(q); }
+      return;
+    }
+    V.t += dt;
+    while (V.i < Q.n && V.t >= V.i * BOSS2.step) { const [x, z] = V.sp[V.i++], q = { t: 'bq', x: r1(x), z: r1(z), r: Q.r, d: Q.dmg }; bossQuake(q.x, q.z, q.r, q.d); netEv(q); }
+    if (V.t < (Q.n - 1) * BOSS2.step + QUAKE_T + 0.5) return;
+    boss.vol = null; const rage = bossRage(); boss.quakeCd = field ? (rage ? rand(3.5, 5) : rand(5, 7)) : (rage ? rand(7, 10) : rand(10, 14));
+    if (field) bossDash();
+  }
+  const lavas = [], lavaWallGeo = new THREE.CylinderGeometry(1, 1, 1, 120, 1, true); lavaWallGeo.translate(0, 0.5, 0);
+  function bossLava(x, z, r, T) {                        // a ring of lava: it rises, stands T seconds, sinks; on the ground you do not cross it unhurt, in the air you do
+    const mk = (col, op, g) => glow(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false }), g), w = BOSS2.lavaW, G = new THREE.Group();
+    const crust = new THREE.Mesh(new THREE.RingGeometry(r - w - 0.7, r + w + 0.7, 120), new THREE.MeshBasicMaterial({ color: 0x1c0a08, transparent: true, opacity: 0.8, depthWrite: false }));      // a scorched edge: this is lava, not one more quake ring
+    const band = new THREE.Mesh(new THREE.RingGeometry(r - w, r + w, 120), mk(0xc81e06, 0.95, 1.15)), core = new THREE.Mesh(new THREE.RingGeometry(r - w * 0.42, r + w * 0.42, 120), mk(0xff7a14, 0.95, 1.5));
+    crust.rotation.x = band.rotation.x = core.rotation.x = -Math.PI / 2; crust.position.y = 0.09; band.position.y = 0.1; core.position.y = 0.12;
+    const wIn = new THREE.Mesh(lavaWallGeo, mk(0xff6a12, 0.55, 1.3)), wOut = new THREE.Mesh(lavaWallGeo, mk(0xd82408, 0.45, 1.1)); wIn.scale.set(r - w * 0.5, 0.01, r - w * 0.5); wOut.scale.set(r + w * 0.5, 0.01, r + w * 0.5);
+    G.add(crust, band, core, wIn, wOut); G.position.set(x, 0, z); scene.add(G); lavas.push({ x, z, r, t: 0, T, G, crust, band, core, wIn, wOut });
+    SFX.play('boss_roar', tmp.set(x, 0, z), { rate: 0.45, vol: 0.8 }); if (Math.hypot(car.pos.x - x, car.pos.z - z) < r + 25) flashAlert('LAVA RING: JUMP IT');
+  }
+  function lavaOff(L) { scene.remove(L.G); for (const m of L.G.children) { m.material.dispose(); if (m.geometry !== lavaWallGeo) m.geometry.dispose(); } }
+  function clearLava() { for (const L of lavas) lavaOff(L); lavas.length = 0; }
+  function updateLava(dt) {
+    for (let i = lavas.length - 1; i >= 0; i--) { const L = lavas[i]; L.t += dt;
+      if (L.t >= L.T) { lavaOff(L); lavas.splice(i, 1); continue; }
+      const up = Math.min(1, L.t / 0.45) * Math.min(1, (L.T - L.t) / 0.4), h = BOSS2.lavaH * up * (1 + 0.12 * Math.sin(L.t * 9));
+      L.wIn.scale.y = Math.max(0.01, h); L.wOut.scale.y = Math.max(0.01, h * 0.7); L.crust.material.opacity = 0.8 * up; L.band.material.opacity = 0.95 * up; L.core.material.opacity = (0.7 + 0.25 * Math.sin(L.t * 14)) * up;
+      const dx = car.pos.x - L.x, dz = car.pos.z - L.z, d = Math.hypot(dx, dz) || 1e-3, a0 = Math.atan2(dz, dx);
+      for (let j = 0; j < 3; j++) if (Math.random() < dt * 30) { const a = a0 + rand(-0.8, 0.8); spawnParticles(tmp.set(L.x + Math.cos(a) * L.r, 0.5 + Math.random() * h, L.z + Math.sin(a) * L.r), Math.random() < 0.5 ? 0xffb030 : 0xff4a10, 2, 5); }      // embers on the stretch you can see
+      if (up > 0.6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + 0.5 && (car.lavaT || 0) < elapsed) { car.lavaT = elapsed + 0.5; const sd = d < L.r ? -1 : 1;
+        hurtCar(BOSS2.lavaDmg, tmp.set(dx / d * sd, 0, dz / d * sd).clone()); }      // burnt, and thrown back to the side you came from
     }
   }
   function updateBoss(dt) {
-    updateQuakes(dt);
+    updateQuakes(dt); updateLava(dt);
     const runeTarget = boss.state === 'fight' ? 1.5 + 0.6 * Math.sin(elapsed * 3) : boss.state === 'emerging' ? 3.2 : boss.state === 'dead' ? 0.25 : 0.8;
     runeLevel += (runeTarget - runeLevel) * Math.min(1, 3 * dt); runeMat.color.setScalar(runeLevel);
     // дверь
@@ -7612,7 +7710,7 @@ const MONSTERS = [
       if (!NET.client && bossTgts().some(t => t.pos.x > ROOM_X1 + 5)) { bossEmerge(); netEv({ t: 'bs', s: 'e' }); }   // someone drove in: it rises (the gate stays open)
       return;
     }
-    if (NET.on && NET.game && !NET.client && boss.state === 'fight') {              // nobody left in the room for a while: it sinks back and waits
+    if (NET.on && NET.game && !NET.client && boss.state === 'fight' && boss.ph !== 2) {              // nobody left in the room for a while: it sinks back and waits (once it is out in the field it stays out)
       if (bossTgts().length) boss.empty = 0; else if ((boss.empty = (boss.empty || 0) + dt) > 6) { boss.empty = 0; resetBoss(); netEv({ t: 'bs', s: 'i' }); return; }
     }
     boss.t += dt;
@@ -7633,6 +7731,7 @@ const MONSTERS = [
       if (bossGroup.position.y < -BOSS_SINK) { bossGroup.visible = false; bossBarEl.style.display = 'none'; }
       return;
     }
+    if (boss.mv) bossMoveTick(dt);
 
     // глаз и орбита
     eye.lookAt(car.pos.x, 1, car.pos.z);
@@ -7651,11 +7750,7 @@ const MONSTERS = [
     for (const tn of tentacles) updateTentacle(tn, dt);
 
     // хлёст щупальцем по кд — хост выбирает, кого бить
-    if (!NET.client && (boss.quakeCd = (boss.quakeCd == null ? 8 : boss.quakeCd) - dt) <= 0) {       // the ground itself: a wide ring that gives everyone a moment to get out
-      const tg = bossTgts();
-      if (tg.length) { const T = tg[Math.floor(Math.random() * tg.length)], q = { t: 'bq', x: r1(T.pos.x), z: r1(T.pos.z), r: 13 };
-        boss.quakeCd = boss.dealt > bossMax() * 0.5 ? rand(7, 10) : rand(10, 14); bossQuake(q.x, q.z, q.r); netEv(q); } else boss.quakeCd = 1;
-    }
+    if (!NET.client) bossVolleyTick(dt);
     if (!NET.client) bossLash(dt);
     bossThrowTick(dt);
   }
@@ -8055,7 +8150,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 34;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 35;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -8133,7 +8228,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible && !o.dormant) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' ? 1 : 0, pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), lt: loot.slice(0, 120).map(L => [L.id, L.gem ? 1 : 0, r1(L.x), r1(L.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' || boss.state === 'flee' ? 1 : 0, bp: [boss.ph, r1(boss.mv ? boss.mv.tx : BOSS_POS.x), r1(boss.mv ? boss.mv.tz : BOSS_POS.z)], pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), lt: loot.slice(0, 120).map(L => [L.id, L.gem ? 1 : 0, r1(L.x), r1(L.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -8244,16 +8339,18 @@ const MONSTERS = [
       else if (d.t === 'pk') { if (typeof d.id === 'string' && d.id.length < 40 && typeof d.ty === 'string' && ICONS[d.ty] && !pickups.some(p => p.id === d.id) && pickups.length < 40)
         spawnPickup(d.ty, new THREE.Vector3(num(d.x, -400, 400), 0, num(d.z, -400, 400)), d.id, true); }
       else if (d.t === 'pkx') { if (typeof d.id === 'string') pickupGone(d.id); }
-      else if (d.t === 'bs') { if (NET.client) { if (d.s === 'e' && boss.state === 'idle') bossEmerge(); else if (d.s === 'i' && boss.state !== 'dead') resetBoss(); } }
+      else if (d.t === 'bs') { if (NET.client) { if (d.s === 'e' && boss.state === 'idle') bossEmerge(); else if (d.s === 'i' && boss.state !== 'dead') resetBoss(); else if (d.s === 'f' && boss.state !== 'dead') bossFlee(); } }
       else if (d.t === 'bt') { const tn = tentacles[d.k]; if (NET.client && tn && boss.state === 'fight' && tn.state === 'idle') { tn.state = 'wind'; tn.t = 0; tn.tp = netPeerPos(d.p); SFX.play('tent_wind', tentRoot(tn)); } }
-      else if (d.t === 'bq') { if (NET.client && boss.state === 'fight' && quakes.length < 4) bossQuake(num(d.x, -400, 400), num(d.z, -400, 400), num(d.r, 4, 20)); }
+      else if (d.t === 'bq') { if (NET.client && boss.state === 'fight' && quakes.length < 12) bossQuake(num(d.x, -400, 400), num(d.z, -400, 400), num(d.r, 4, 40), num(d.d, 1, 40, 26)); }
+      else if (d.t === 'bv') { if (NET.client && boss.state === 'fight' && lavas.length < 2) bossLava(num(d.x, -400, 400), num(d.z, -400, 400), num(d.r, 8, 60, BOSS2.lavaR), num(d.T, 1, 12, 5)); }
+      else if (d.t === 'bgo') { if (NET.client && boss.ph === 2 && boss.state === 'fight' && typeof d.x === 'number' && typeof d.z === 'number') bossMove(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), num(d.v, 5, 60, BOSS2.dashV)); }
       else if (d.t === 'bf') { if (NET.client && boss.state === 'fight') bossFan(Math.round(num(d.n, 1, 24)), num(d.s, 0, 7), num(d.v, 1, 30), num(d.a, -9, 9)); }
-      else if (d.t === 'bl') { const o = obAt(d.i); if (NET.client && o && o.room && boss.state === 'fight') { releaseLift(); bossLift(o); } }
-      else if (d.t === 'bh') { const o = obAt(d.i); if (NET.client && o && o.room && Array.isArray(d.f) && Array.isArray(d.v) && Array.isArray(d.l)) {
+      else if (d.t === 'bl') { const o = obAt(d.i); if (NET.client && o && o.crate && boss.state === 'fight') { releaseLift(); bossLift(o); } }
+      else if (d.t === 'bh') { const o = obAt(d.i); if (NET.client && o && o.crate && Array.isArray(d.f) && Array.isArray(d.v) && Array.isArray(d.l)) {
         if (boss.lifting && boss.lifting.o !== o) releaseLift();
         bossHurl(o, new THREE.Vector3(num(d.f[0], -400, 400), num(d.f[1], 0, 40), num(d.f[2], -400, 400)), new THREE.Vector3(num(d.v[0], -80, 80), num(d.v[1], -80, 80), num(d.v[2], -80, 80)), new THREE.Vector3(num(d.l[0], -400, 400), 0, num(d.l[1], -400, 400))); } }
-      else if (d.t === 'bd') { boss.dealt = Math.max(boss.dealt, 0) + num(d.d, 0, 500); bossBar(); if (boss.state === 'fight' && boss.dealt >= bossMax()) killBoss(); }
-      else if (d.t === 'bk') { if (boss.state === 'fight' || boss.state === 'emerging') { boss.state = 'fight'; killBoss(); } else if (boss.state !== 'dead') { boss.state = 'dead'; bossBarEl.style.display = 'none'; setDoor(false); flashAlert('PYRAMIDON IS DEAD'); angelStart(); } }
+      else if (d.t === 'bd') { boss.dealt = Math.max(boss.dealt, 0) + num(d.d, 0, 500); bossHealth(false); }
+      else if (d.t === 'bk') { if (boss.state === 'fight' || boss.state === 'emerging' || boss.state === 'flee') { boss.state = 'fight'; killBoss(); } else if (boss.state !== 'dead') { boss.state = 'dead'; bossBarEl.style.display = 'none'; setDoor(false); flashAlert('PYRAMIDON IS DEAD'); angelStart(); } }
       else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
       else if (d.t === 'en') { const quiet = !NET.enSeen; NET.enSeen = true; if (NET.client && Array.isArray(d.a)) for (const r of d.a.slice(0, 64)) {
         const e = Array.isArray(r) && enemies[r[0]]; if (!e || e.carried) continue;
@@ -8324,7 +8421,7 @@ const MONSTERS = [
         for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
           if (!c[3] && o.mesh.visible) { o.mesh.visible = false; respawnQueue.push({ o, t: 4 }); } }
-        boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); } else if (d.bst === 1 && boss.state === 'idle') bossFightNow(d.bn);
+        boss.dealt = Math.max(boss.dealt, num(d.bd, 0, 1e6)); if (d.bk === 1 && boss.state === 'idle') { boss.state = 'dead'; setDoor(false); } else if (d.bst === 1 && boss.state === 'idle') bossFightNow(d.bn, d.bp);
         if (d.go === 1) NET.goPending = true;
         (Array.isArray(d.pk) ? d.pk : []).forEach(q => { if (Array.isArray(q) && typeof q[0] === 'string' && typeof q[1] === 'string' && ICONS[q[1]] && !pickups.some(p => p.id === q[0])) spawnPickup(q[1], new THREE.Vector3(num(q[2], -400, 400), 0, num(q[3], -400, 400)), q[0], true); });
         (Array.isArray(d.aw) ? d.aw : []).forEach((t, k) => { const A = altars[k]; if (A && typeof t === 'number' && t >= 0) { A.awake = true; A.spawnT = num(t, 0, 99); } });
@@ -8681,6 +8778,7 @@ const MONSTERS = [
     const dot = (wx, wz, r, col, ring) => { const [px, py] = f(wx, wz); x.beginPath(); x.arc(px, py, r * dpr, 0, 6.283); if (ring) { x.strokeStyle = col; x.lineWidth = 2 * dpr; x.stroke(); } else { x.fillStyle = col; x.fill(); } return [px, py]; };
     const label = (px, py, t, col, size) => { x.font = `800 ${size * dpr}px system-ui,sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 3 * dpr; x.strokeStyle = 'rgba(0,0,0,.85)'; x.strokeText(t, px, py); x.fillStyle = col; x.fillText(t, px, py); };
     if (PH.gate) { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : gateOpen ? '☠' : '🔒', gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
+    if (boss.ph === 2 && boss.state !== 'dead' && boss.state !== 'idle') { const [bx, by] = dot(BOSS_POS.x, BOSS_POS.z, 6, '#ff7a1a'); label(bx, by, '☠', '#1a1014', 10); }      // the Pyramidon out in the field
     for (const R of rocks) { if (!R.mesh.visible || !R.found) continue; const n = PH.i >= 2 ? nestCount(R) : 0, [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
     for (const A of altars) { if (!A.found) continue; const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
       if (!A.done && A.n) { x.beginPath(); x.arc(px, py, 5 * dpr, -1.571, -1.571 + 6.283 * A.n / ALTAR_NEED); x.strokeStyle = '#5fd0ff'; x.lineWidth = 2 * dpr; x.stroke(); } }
@@ -8714,7 +8812,8 @@ const MONSTERS = [
           if (nr) hintList.push({ x: nr.pos.x, z: nr.pos.z, d: nd, range: 999, col: '#ff6a3a', text: '✱', cap: 'log machine ' + (nr.rig.hits || 0) + '/3' }); }
         for (const p of pickups) if (p.own) hintList.push({ x: p.x, z: p.z, d: Math.hypot(p.x - car.pos.x, p.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: AB_INFO[p.type].title });      // your gear drop: always pointed at
         if (worldUp) altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
-        { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
+        if (boss.ph === 2 && boss.state !== 'dead' && boss.state !== 'idle') hintList.push({ x: BOSS_POS.x, z: BOSS_POS.z, d: Math.hypot(BOSS_POS.x - car.pos.x, BOSS_POS.z - car.pos.z), range: 999, col: '#ff7a1a', text: 'BOSS', cap: 'kill boss' });
+        else { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
       }
     }
     if (hintT === 0.3 && !startEl.isConnected && NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up)

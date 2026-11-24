@@ -179,3 +179,16 @@ lootRemove
 makeSword
 makeHand2D
 enableTouch
+BOSS_POS
+LAIR_POS
+BOSS2
+BOSS_HP
+lavas
+bossLava
+bossFlee
+bossMove
+bossDash
+bossSetPos
+bossTgts
+resetBoss
+ROOM_X1
