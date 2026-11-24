@@ -2994,7 +2994,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 132, buildEl = document.getElementById('build');
+  const BUILD = 133, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -7284,7 +7284,8 @@ const MONSTERS = [
   // Two halves of the fight. In the lair it loses half its health, then breaks out through the gate into the field, heals (the bar comes back in another colour) and fights on there:
   // it moves in dashes between volleys, and every volley of quake rings comes with a ring of lava around it that has to be jumped, from either side.
   const BOSS2 = { out: [ARENA - 78, 0], fleeV: 26, dashV: 30, near: [14, 22], sight: 75, ram: 18,
-                  lairQ: { n: 3, r: 13, dmg: 26 }, fieldQ: { n: 6, r: 26, dmg: 12 }, step: 0.5, lavaR: 32, lavaW: 1.7, lavaH: 2.8, lavaDmg: 20 };
+                  lairQ: { n: 3, r: 13, dmg: 26, gap: [12.5, 17.5], rage: [8.75, 12.5] }, fieldQ: { n: 6, r: 26, dmg: 12, gap: [6.25, 8.75], rage: [4.4, 6.25] },      // gap: seconds between volleys (build 133: a fifth rarer)
+                  step: 0.5, lavaR: 32, lavaW: 1.7, lavaH: 2.8, lavaDmg: 20 };
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
   const bossGroup = new THREE.Group();
   bossGroup.position.set(BOSS_POS.x, -BOSS_SINK, BOSS_POS.z); bossGroup.visible = false; scene.add(bossGroup);
@@ -7673,7 +7674,7 @@ const MONSTERS = [
     V.t += dt;
     while (V.i < Q.n && V.t >= V.i * BOSS2.step) { const [x, z] = V.sp[V.i++], q = { t: 'bq', x: r1(x), z: r1(z), r: Q.r, d: Q.dmg }; bossQuake(q.x, q.z, q.r, q.d); netEv(q); }
     if (V.t < (Q.n - 1) * BOSS2.step + QUAKE_T + 0.5) return;
-    boss.vol = null; const rage = bossRage(); boss.quakeCd = field ? (rage ? rand(3.5, 5) : rand(5, 7)) : (rage ? rand(7, 10) : rand(10, 14));
+    boss.vol = null; const G = bossRage() ? Q.rage : Q.gap; boss.quakeCd = rand(G[0], G[1]);
     if (field) bossDash();
   }
   const lavas = [], lavaWallGeo = new THREE.CylinderGeometry(1, 1, 1, 120, 1, true); lavaWallGeo.translate(0, 0.5, 0);
