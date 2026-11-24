@@ -148,3 +148,13 @@ wPrice
 ! bakeLog(){return bakeTextures.log}
 ! setView(v){ viewSize = v; resizeCam(); }
 ! special(){special()}
+lootDue
+lootBig
+lootLeft
+lootGrant
+wbMarks
+wbGift
+RIDE_KIT
+kit
+bossDrop
+fire
