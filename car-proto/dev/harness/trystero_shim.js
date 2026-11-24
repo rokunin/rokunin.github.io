@@ -1,7 +1,8 @@
-export const selfId = Math.random().toString(36).slice(2, 10);
+const Q = new URLSearchParams(location.search), cut = new Set((Q.get('cut') || '').split(',').filter(Boolean));      // test only: ?sid= fixes my id, ?cut= ids I can never link to (a strict NAT)
+export const selfId = Q.get('sid') || Math.random().toString(36).slice(2, 10);
 export function joinRoom(cfg, name) {
   const bc = new BroadcastChannel(cfg.appId + name), known = new Map(), room = { onPeerJoin: null, onPeerLeave: null }, acts = {};
-  bc.onmessage = e => { const d = e.data; if (d.from === selfId) return;
+  bc.onmessage = e => { const d = e.data; if (d.from === selfId || cut.has(d.from)) return;
     if (d.k === 'hi') { if (!known.has(d.from)) { known.set(d.from, Date.now()); room.onPeerJoin && room.onPeerJoin(d.from); } else known.set(d.from, Date.now()); }
     else if (d.k === 'act' && (!d.to || d.to === selfId)) { const a = acts[d.n]; a && a.onMessage && a.onMessage(d.data, { peerId: d.from }); } };
   setInterval(() => { bc.postMessage({ k: 'hi', from: selfId }); for (const [id, t] of known) if (Date.now() - t > 2500) { known.delete(id); room.onPeerLeave && room.onPeerLeave(id); } }, 300);

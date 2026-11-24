@@ -75,8 +75,9 @@ with Game() as g:
     p = g.solo('unicorn'); ev(p, "d.PH.brk = 999;")
     for lv, n in ((1, 10), (2, 16), (3, 24)):
         ev(p, "d.fireCooldown = 1e9; d.clearSwarm(); for (const b of d.bullets) d.scene.remove(b.m); d.bullets.length = 0; d.abLv.jump = a; d.jump();", lv)
-        wait(p, "d.car.airborne", 5); wait(p, "d.bullets.some(b => b.m.scale.x === 0.7)", 10)
-        t.eq(f'unicorn Lv{lv}: stars in the ring', ev(p, "return d.bullets.filter(b => b.m.scale.x === 0.7).length"), n)
+        ev(p, "clearInterval(window.__st); window.__sn = 0; window.__st = setInterval(() => { window.__sn = Math.max(window.__sn, d.bullets.filter(b => b.m.scale.x === 0.7).length); }, 4);")      # the most seen at once: a star that hits a crate on its first frame is gone before a single look
+        wait(p, "d.car.airborne", 5); wait(p, "d.bullets.some(b => b.m.scale.x === 0.7)", 10); p.wait_for_timeout(150)
+        t.eq(f'unicorn Lv{lv}: stars in the ring', ev(p, "return window.__sn"), n)
         wait(p, "!d.bullets.some(b => b.m.scale.x === 0.7)", 10)
     t.eq('unicorn: the ring reaches further with each level, m', ev(p, "return d.STARB.reach"), [9, 13, 17])
     t.done(g)

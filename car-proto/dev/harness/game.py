@@ -86,12 +86,12 @@ class Game:
     def solo(self, ride='buggy', god=True, name='solo'):
         p = self._open(name); self._ride(p, ride, god); return p
 
-    def host(self, ride='buggy', god=True, name='Host'):
-        p = self._open(name, '?p2p'); p.fill('#nick', name); p.click('#hostBtn'); p.wait_for_timeout(400)
+    def host(self, ride='buggy', god=True, name='Host', q=''):
+        p = self._open(name, '?p2p' + q); p.fill('#nick', name); p.click('#hostBtn'); p.wait_for_timeout(400)
         self._ride(p, ride, god); return p
 
-    def join(self, ride='unicorn', god=True, name='Friend'):
-        p = self._open(name, '?p2p'); p.fill('#nick', name)
+    def join(self, ride='unicorn', god=True, name='Friend', q=''):
+        p = self._open(name, '?p2p' + q); p.fill('#nick', name)
         p.wait_for_selector('#mpList button:not([disabled])', timeout=20000); p.click('#mpList button:not([disabled])'); p.wait_for_timeout(400)
         self._ride(p, ride, god); return p
 

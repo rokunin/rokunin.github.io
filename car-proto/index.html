@@ -2994,7 +2994,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 131, buildEl = document.getElementById('build');
+  const BUILD = 132, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -7521,19 +7521,22 @@ const MONSTERS = [
     }
   }
 
+  // In a lobby the host keeps the one true count: a guest shows its own hits at once and sends them to the host (bd), the host
+  // sends everybody the count and the size of the pool (bhp); only the host starts the break-out and only the host kills it.
   function bossDamage(d) {
     if (boss.state !== 'fight') return;
     const was = boss.dealt; boss.dealt += d; boss.flash = 0.06;
-    bossHealth(true); NET.bdAcc = (NET.bdAcc || 0) + Math.max(0, boss.dealt - was);      // everyone in the lobby chips at the same health pool; what the lair's half cut off is not passed on
+    bossHealth(); if (NET.client) NET.bdAcc = (NET.bdAcc || 0) + Math.max(0, boss.dealt - was);      // what the lair's half cut off is not sent
   }
   // One counter for both halves: the lair takes it from 0 to half of bossMax() (and no further), the field from there to one and a half.
-  function bossHealth(mine) {
-    if (boss.ph !== 2) { boss.dealt = Math.min(boss.dealt, bossMax() * 0.5); if (!NET.client && boss.state === 'fight' && boss.dealt >= bossMax() * 0.5) bossFlee(); }
-    else if (boss.state === 'fight' && boss.dealt >= bossMax() * 1.5) { killBoss(); if (mine) netEv({ t: 'bk' }); }
+  function bossHealth() {
+    const M = bossMax();
+    if (boss.ph !== 2) { boss.dealt = Math.min(boss.dealt, M * 0.5); if (!NET.client && boss.state === 'fight' && boss.dealt >= M * 0.5) bossFlee(); }
+    else if (boss.state === 'fight' && boss.dealt >= M * 1.5) { if (NET.client) boss.dealt = M * 1.5; else { killBoss(); netEv({ t: 'bk' }); } }      // a guest's bar may show zero: the host says when it dies
     bossBar();
   }
   const bossRage = () => boss.ph === 2 ? boss.dealt > bossMax() : boss.dealt > bossMax() * 0.25;      // the second half of each bar
-  const bossMax = () => BOSS_HP * (1 + 1.5 * (NET.on && NET.game ? NET.remotes.size : 0));       // every extra player: +150%
+  const bossMax = () => NET.client && boss.hm ? boss.hm : BOSS_HP * (1 + 1.5 * (NET.on && NET.game ? NET.remotes.size : 0));       // every extra player: +150%; a guest takes the host's number
   const bossBar = () => { const M = bossMax(); let f = boss.ph === 2 ? 1 - (boss.dealt - M * 0.5) / M : 1 - boss.dealt / M;
     if (boss.state === 'flee' && boss.mv) f = 0.5 + 0.5 * Math.min(1, boss.mv.t / boss.mv.T);      // healing on the run
     bossFillEl.style.width = Math.max(0, Math.min(1, f) * 100) + '%'; bossBarEl.classList.toggle('p2', boss.ph === 2); };
@@ -7647,9 +7650,9 @@ const MONSTERS = [
     const tg = bossTgts(true); if (!tg.length) return false;
     const T = tg[Math.floor(Math.random() * tg.length)], dx = BOSS_POS.x - T.pos.x, dz = BOSS_POS.z - T.pos.z, d = Math.hypot(dx, dz), keep = rand(BOSS2.near[0], BOSS2.near[1]);
     const a = d < keep + 10 ? Math.random() * 6.283 : Math.atan2(dz, dx) + rand(-0.6, 0.6), lim = ARENA - 14;      // already beside them: round to another side
-    const x = THREE.MathUtils.clamp(T.pos.x + Math.cos(a) * keep, -lim, lim), z = THREE.MathUtils.clamp(T.pos.z + Math.sin(a) * keep, -lim, lim);
+    let x = THREE.MathUtils.clamp(T.pos.x + Math.cos(a) * keep, -lim, lim), z = THREE.MathUtils.clamp(T.pos.z + Math.sin(a) * keep, -lim, lim);
     if (Math.hypot(x - BOSS_POS.x, z - BOSS_POS.z) < 6) return false;
-    bossMove(x, z, BOSS2.dashV); netEv({ t: 'bgo', x: r1(x), z: r1(z), v: BOSS2.dashV }); return true;
+    x = r1(x); z = r1(z); bossMove(x, z, BOSS2.dashV); netEv({ t: 'bgo', x, z, v: BOSS2.dashV }); return true;      // the guests get it rounded: so does the host
   }
   function bossVolleyTick(dt) {                          // host: quake rings one after another; in the field a ring of lava stands around the pyramid while they go off
     if (boss.mv) return;
@@ -8150,7 +8153,7 @@ const MONSTERS = [
   try { nickEl.value = cleanNick(localStorage.getItem('carproto.nick')) || ''; } catch (e) {}
   if (!nickEl.value) nickEl.value = 'Driver' + Math.floor(100 + trueRandom() * 900);
   const num = (v, lo, hi, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);     // presence is untrusted input
-  const VER = 35;                                         // players on different builds must not share a lobby: their monsters would not match
+  const VER = 36;                                         // players on different builds must not share a lobby: their monsters would not match
   function netGames(peers) {
     const g = {};
     for (const p of peers) { const pr = p.presence || {}; if (typeof pr.game !== 'string' || !/^g[a-z0-9]{1,10}$/.test(pr.game)) continue;
@@ -8176,22 +8179,43 @@ const MONSTERS = [
   }
   // Outside Claude (GitHub Pages and the like): browsers connect to each other directly over WebRTC; they find one another through
   // public relays (Trystero, bundled next to the page as trystero.js). The object mimics the small part of Claude's room API used here.
+  // Two players whose browsers cannot open a direct link (strict NAT, no TURN) still play together if a third sees both: every peer
+  // lists its direct links in its presence (_nb), and traffic to a peer I cannot reach goes through the lowest-id peer that reaches us both.
   async function p2pRoom() {
     const T = await import('./trystero.js');
     const room = T.joinRoom({ appId: 'car-proto-rokunin-v1' }, 'lobby');
-    const st = new Map(), hs = [], pres = room.makeAction('pres');
-    let mine = {}, snap = null;
+    const st = new Map(), far = new Map(), hs = [], pres = room.makeAction('pres'), ev = room.makeAction('ev');      // st: direct peers; far: { p, t } reached through a bridge
+    let mine = {}, snap = null, evH = null;
     const fire = () => { snap = null; for (const h of hs) h(); };
-    const send = target => { try { const p = pres.send(mine, target ? { target } : undefined); if (p && p.catch) p.catch(() => {}); } catch (e) {} };
-    pres.onMessage = (data, meta) => { if (data && typeof data === 'object' && meta && meta.peerId) { st.set(meta.peerId, data); fire(); } };
-    room.onPeerJoin = id => { st.set(id, {}); send(id); fire(); };
-    room.onPeerLeave = id => { st.delete(id); fire(); };
-    const ev = room.makeAction('ev'); let evH = null;
-    ev.onMessage = (data, meta) => { if (evH && data && typeof data === 'object' && meta && meta.peerId) evH(data, meta.peerId); };
+    const quiet = p => { if (p && p.catch) p.catch(() => {}); };
+    const full = () => ({ ...mine, _nb: [...st.keys()] });
+    const via = x => { for (const id of [...st.keys()].sort()) { const n = st.get(id)._nb; if (Array.isArray(n) && n.includes(x)) return id; } return null; };
+    const farIds = () => { const a = new Set(); for (const p of st.values()) if (Array.isArray(p._nb)) for (const x of p._nb.slice(0, 16)) if (typeof x === 'string' && x !== T.selfId && !st.has(x)) a.add(x); return [...a]; };
+    const send = target => { try { const P = full();
+      if (target && !st.has(target)) { const b = via(target); if (b) quiet(ev.send({ _r: target, _p: P }, { target: b })); return; }
+      quiet(pres.send(P, target ? { target } : undefined));
+      if (!target) for (const x of farIds()) { const b = via(x); if (b) quiet(ev.send({ _r: x, _p: P }, { target: b })); } } catch (e) {} };
+    pres.onMessage = (data, meta) => { if (data && typeof data === 'object' && meta && meta.peerId) { const was = String((st.get(meta.peerId) || {})._nb); st.set(meta.peerId, data); far.delete(meta.peerId); if (String(data._nb) !== was) send(); fire(); } };
+    room.onPeerJoin = id => { st.set(id, {}); far.delete(id); send(); fire(); };
+    room.onPeerLeave = id => { st.delete(id); send(); fire(); };
+    ev.onMessage = (data, meta) => {
+      if (!data || typeof data !== 'object' || !meta || !meta.peerId) return;
+      if (typeof data._r === 'string') { if (st.has(data._r)) quiet(ev.send({ _f: meta.peerId, _d: data._d, _p: data._p }, { target: data._r })); return; }      // I am the bridge: pass it on
+      if (typeof data._f === 'string') { if (st.has(data._f)) return;                                                                                                 // it came through a bridge
+        if (data._p && typeof data._p === 'object') { far.set(data._f, { p: data._p, t: performance.now() }); snap = null; fire(); }
+        if (evH && data._d && typeof data._d === 'object') evH(data._d, data._f); return; }
+      if (evH) evH(data, meta.peerId);
+    };
+    setInterval(() => { let ch = false; for (const [x, F] of far) if (st.has(x) || !via(x) || performance.now() - F.t > 4000) { far.delete(x); ch = true; } if (ch) fire(); }, 1000);
     return {
-      sendEv(d, to) { try { const p = ev.send(d, to ? { target: to } : undefined); if (p && p.catch) p.catch(() => {}); } catch (e) {} },
+      sendEv(d, to) { try {
+        if (to && !st.has(to)) { const b = via(to); if (b) quiet(ev.send({ _r: to, _d: d }, { target: b })); return; }
+        quiet(ev.send(d, to ? { target: to } : undefined));
+        if (!to) for (const x of farIds()) { const b = via(x); if (b) quiet(ev.send({ _r: x, _d: d }, { target: b })); } } catch (e) {} },
       onEv(h) { evH = h; },
-      peers() { return snap || (snap = [{ peer: T.selfId, isMe: true, sameTab: true, kind: 'viewer', presence: mine }, ...[...st].map(([peer, presence]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence }))]); },
+      peers() { return snap || (snap = [{ peer: T.selfId, isMe: true, sameTab: true, kind: 'viewer', presence: mine },
+        ...[...st].map(([peer, presence]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence })),
+        ...[...far].map(([peer, F]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence: F.p, bridged: true }))]); },
       onPeers(h) { hs.push(h); return () => {}; },
       presence(p) { mine = { ...mine, ...p }; snap = null; send(); return Promise.resolve(); },
     };
@@ -8349,7 +8373,10 @@ const MONSTERS = [
       else if (d.t === 'bh') { const o = obAt(d.i); if (NET.client && o && o.crate && Array.isArray(d.f) && Array.isArray(d.v) && Array.isArray(d.l)) {
         if (boss.lifting && boss.lifting.o !== o) releaseLift();
         bossHurl(o, new THREE.Vector3(num(d.f[0], -400, 400), num(d.f[1], 0, 40), num(d.f[2], -400, 400)), new THREE.Vector3(num(d.v[0], -80, 80), num(d.v[1], -80, 80), num(d.v[2], -80, 80)), new THREE.Vector3(num(d.l[0], -400, 400), 0, num(d.l[1], -400, 400))); } }
-      else if (d.t === 'bd') { boss.dealt = Math.max(boss.dealt, 0) + num(d.d, 0, 500); bossHealth(false); }
+      else if (d.t === 'bd') { if (!NET.client && boss.state === 'fight') { boss.dealt += num(d.d, 0, 5000); boss.flash = 0.06; bossHealth(); } }
+      else if (d.t === 'bhp') { if (NET.client && (!NET.hostPeer || String(from) === NET.hostPeer) && boss.state !== 'dead') { boss.hm = num(d.m, 1, 1e6, BOSS_HP);
+        if (d.p === 2 && boss.ph !== 2 && (boss.state === 'fight' || boss.state === 'emerging')) bossFlee();
+        boss.dealt = Math.min(num(d.d, 0, 1e7) + (NET.bdAcc || 0), boss.hm * (boss.ph === 2 ? 1.5 : 0.5)); bossBar(); } }
       else if (d.t === 'bk') { if (boss.state === 'fight' || boss.state === 'emerging' || boss.state === 'flee') { boss.state = 'fight'; killBoss(); } else if (boss.state !== 'dead') { boss.state = 'dead'; bossBarEl.style.display = 'none'; setDoor(false); flashAlert('PYRAMIDON IS DEAD'); angelStart(); } }
       else if (d.t === 'sw' || d.t === 'ch') netMirror(d, from);
       else if (d.t === 'en') { const quiet = !NET.enSeen; NET.enSeen = true; if (NET.client && Array.isArray(d.a)) for (const r of d.a.slice(0, 64)) {
@@ -8585,7 +8612,8 @@ const MONSTERS = [
     if ((NET.sendT -= dt) <= 0) { NET.sendT = 0.08; netSend(); }
     if (netMe() && (NET.roleT = (NET.roleT || 0) - dt) <= 0) { NET.roleT = 0.5; netRole(); }
     if (!NET.client && NET.remotes.size && (NET.snapT = (NET.snapT || 0) - dt) <= 0) { NET.snapT = 0.2; netSnap(); }
-    if (NET.bdAcc > 0 && (NET.bdT = (NET.bdT || 0) - dt) <= 0) { NET.bdT = 0.25; netEv({ t: 'bd', d: r1(NET.bdAcc) }); NET.bdAcc = 0; }
+    if (NET.client && NET.hostPeer && NET.bdAcc > 0 && (NET.bdT = (NET.bdT || 0) - dt) <= 0) { NET.bdT = 0.25; netEv({ t: 'bd', d: r1(NET.bdAcc) }, NET.hostPeer); NET.bdAcc = 0; }
+    if (!NET.client && NET.remotes.size && (boss.state === 'fight' || boss.state === 'flee') && (NET.bhT = (NET.bhT || 0) - dt) <= 0) { NET.bhT = 0.3; netEv({ t: 'bhp', d: r1(boss.dealt), m: Math.round(bossMax()), p: boss.ph }); }
     if (!NET.synced && netMe()) { NET.synced = true; if (!NET.isHost) netEv({ t: 'sync?' }); }      // ask the host what has already been broken and fed
     const seen = new Set(); let n = 1;
     for (const p of NET.room.peers()) {
