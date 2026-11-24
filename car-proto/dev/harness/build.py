@@ -8,6 +8,7 @@ What changes against the shipped page, and nothing else:
   * window.__dbg exposes the names listed in names.txt, read live through getters;
   * window.__hx owns the frame clock: cap dt, freeze time, step frame by frame, skip idle renders;
   * adaptQuality() is off, so the picture does not change with the machine's speed;
+  * the lobby's how-to pictures are not rendered (they cost 18 s of start-up in a headless browser);
   * the room mock and the Trystero shim stand in for the network.
 
 Every patch asserts that its anchor matched exactly once. If the game's code moved, the build fails here
@@ -25,6 +26,7 @@ window.__hx = {            // the test build's frame clock
   frozen: false,           // true: game time stands still, frames advance only through step()
   queue: 0, stepDt: 0.05,  // frames still to play while frozen, and the dt each one gets
   frames: 0, dirty: true,
+  noRender: !!window.__noRender,   // set before the page loads (game.py, fast mode): not even the first frame is drawn. The first full render costs ~18 s headless
   dt(raw) { this.frames++;
     if (this.frozen) { if (this.queue > 0) { this.queue--; this.dirty = true; return this.stepDt; } return 1e-6; }
     this.dirty = true; return Math.min(raw, this.cap || window.__dtcap || 1 / 30); },
@@ -88,6 +90,9 @@ def build(src=DEFAULT_SRC, out=DEFAULT_OUT, quiet=False):
     s = sub_once(s, '    if (composer) {\n      gradePass.uniforms.time.value = elapsed;',
                  '    if (window.__hx && window.__hx.skipRender()) {} else if (composer) {\n      gradePass.uniforms.time.value = elapsed;', 'idle render skip')
 
+    # the lobby's "how to play" pictures are five full renders of the game at start-up: 18 of the 22 seconds a headless page takes to boot
+    s = sub_once(s, "        if (!composer) throw 0;\n        const cv = renderer.domElement, asp", "        if (!composer || window.__hx) throw 0;\n        const cv = renderer.domElement, asp", 'skip the how-to renders')
+    s = sub_once(s, "  (function prewarm() {\n    try {\n", "  (function prewarm() {\n    try {\n      if (window.__noRender) return;      // fast mode draws nothing, so there is nothing to compile\n", 'skip the shader prewarm in fast mode')
     head = '<script>\n' + HX + open(os.path.join(HERE, 'mock_room.js'), encoding='utf8').read() + '</script>\n'
     s = sub_once(s, '<script src="node_modules/three/build/three.min.js"', head + '<script src="node_modules/three/build/three.min.js"', 'head scripts')
 

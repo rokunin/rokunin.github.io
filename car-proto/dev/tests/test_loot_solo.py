@@ -9,11 +9,11 @@ with Game() as g:
     p = g.solo('buggy')
     ev(p, "d.gainWeapon('w_spread'); d.gainWeapon('w_nova'); d.abilities.jump = true; d.abilities.drill = true; d.applyAbilityVisuals(); d.PH.brk = 999;")      # the warm-up is held: no monsters wander in and drop coins of their own
     wait(p, "d.lootLeft().c > 0", 15)
-    t.eq('phase 1 share for one three-skill ride', ev(p, "const L = d.lootLeft(); return [L.c, L.g]"), [220, 70])
-    t.eq('split: reserve for big kills', ev(p, "return [Math.round(d.lootBig.c), Math.round(d.lootBig.g * 10) / 10]"), [121, 38.5])
+    t.eq('phase 1 share for one three-skill ride', ev(p, "const L = d.lootLeft(); return [L.c, L.g]"), [280, 70])
+    t.eq('split: reserve for big kills', ev(p, "return [Math.round(d.lootBig.c), Math.round(d.lootBig.g * 10) / 10]"), [154, 38.5])
     t0 = ev(p, "return d.elapsed"); wait(p, "d.elapsed > %f" % (t0 + 6), 40)
     s = ev(p, "return { bank: d.lootBank.c, due: d.lootDue.c }")
-    t.ok('the rest drips into the bank over time', s['bank'] > 1 and abs(s['bank'] + s['due'] - 99) < 0.01, round(s['bank'], 2))
+    t.ok('the rest drips into the bank over time', s['bank'] > 1 and abs(s['bank'] + s['due'] - 126) < 0.01, round(s['bank'], 2))
     ev(p, "d.lootBank.c = 0; d.lootBank.g = 0; d.lootDue.c = 0; d.lootDue.g = 0;")
     ev(p, "d.lootFrom('rig', d.car.pos.x + 12, d.car.pos.z + 12);"); p.wait_for_timeout(400)
     t.eq('a log machine scatters 25 coins and 15 crystals with the bank empty', ev(p, GROUND), [25, 15])
@@ -24,7 +24,7 @@ with Game() as g:
     t.ok('crates pay 3 to 5 coins each until the bank cannot cover one', 48 <= n <= 50, n)
     ev(p, "for (let i = 0; i < 20; i++) d.lootFrom('boss', d.car.pos.x + 12, d.car.pos.z - 12);"); p.wait_for_timeout(400)
     gr = ev(p, GROUND)
-    t.eq('bosses take what is left of the reserve and of the bank, and no more', gr, [25 + 50 + 96, 38])
+    t.eq('bosses take what is left of the reserve and of the bank, and no more', gr, [25 + 50 + 129, 38])
     for _ in range(200):
         if not ev(p, "const L = d.loot[0]; if (!L) return false; d.car.pos.set(L.x + 0.5, 0, L.z); d.car.vel.set(0, 0, 0); return true;"):
             break

@@ -1,4 +1,4 @@
-"""Coins and crystals, two players: a share per player (a two-skill ride gets 2/3 of the coins), both see the same pieces, a piece has one owner."""
+"""Coins and crystals, two players: a share per player (the spider, with fewer skill levels to buy, gets 3/4 of the coins), both see the same pieces, a piece has one owner."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from harness.game import Game, Checks, ev, wait
@@ -9,7 +9,7 @@ with Game() as g:
     ev(a, "d.PH.brk = 999; d.clearSwarm();")      # the host holds the waves: no monsters drop coins of their own during the count
     wait(a, "d.lootLeft().g > 0", 15)
     TOTAL = "const L = d.lootLeft(); return [L.c + d.loot.filter(q => !q.gem).length + d.coins, L.g + d.loot.filter(q => q.gem).length + d.gems]"
-    t.eq('host pots for a buggy and a spider (dropped pieces counted in)', ev(a, TOTAL), [367, 140])
+    t.eq('host pots for a buggy and a spider (dropped pieces counted in)', ev(a, TOTAL), [490, 140])
     n0 = ev(a, "return d.loot.length")
     w0 = ev(b, "return [d.coins, d.gems]")
     bp = ev(b, "return [d.car.pos.x, d.car.pos.z]")

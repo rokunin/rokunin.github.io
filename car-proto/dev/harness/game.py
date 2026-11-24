@@ -53,7 +53,7 @@ class Game:
         self.browser = self.pw.chromium.launch(**kw)
         self.ctx = self.browser.new_context(viewport={'width': self.size[0], 'height': self.size[1]}, device_scale_factor=self.scale)
         if self.fast:
-            self.ctx.add_init_script("window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);")
+            self.ctx.add_init_script("window.__noRender = true; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);")
         return self
 
     def __exit__(self, *exc):
@@ -68,7 +68,7 @@ class Game:
     def _open(self, name, query=''):
         p = self.ctx.new_page(); self.pages.append(p)
         p.on('pageerror', lambda e: self.errs.append(f'{name}: {e}'))
-        p.goto(f'http://127.0.0.1:{self.port}/index.html{query}', wait_until='domcontentloaded')
+        p.goto(f'http://127.0.0.1:{self.port}/index.html{query}', wait_until='commit')      # not DOMContentLoaded: the game is up in ~2 s, the event comes ~15 s later
         p.wait_for_function('!!window.__dbg', timeout=90000)
         bad = p.evaluate('__dbg.__check()')
         if bad:

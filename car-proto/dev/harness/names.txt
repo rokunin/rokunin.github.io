@@ -158,3 +158,16 @@ RIDE_KIT
 kit
 bossDrop
 fire
+releaseCubes
+broods
+spikeFields
+landPower
+upgradeAb
+abMax
+coinW
+stompAt
+STOMP
+SPIKE
+BROOD
+STARB
+rw fireCooldown
