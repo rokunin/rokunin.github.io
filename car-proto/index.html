@@ -1184,7 +1184,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
              get ctx() { return ctx; }, get master() { return master; }, DEFS, LOOPS, buildMs: 0, worker: false };
   })();
 
-  // ---------- MUSIC: a written score (Grieg, "In the Hall of the Mountain King") played live by synths; the arrangement thickens with the action ----------
+  // ---------- MUSIC: the recorded theme (see TH below). Behind it, as a fallback, a written score (Grieg, "In the Hall of the Mountain King") played live by synths ----------
   //   level 0 plucked theme · 1 synthwave (arp, soft kick) · 2 full synthwave (lead, snare) · 3 metal (power-chord chug, double kick) · 4 dubstep (halftime, wobble bass)
   const MUSIC = (() => {
     const BPM = [132, 144, 156, 168, 172], VOL = 0.5;
@@ -1264,14 +1264,34 @@ laugh(r) {                                       // a big man's belly laugh: bre
     }
     let eng = null, next = 0, idx = 0, lvl = 0, on = true, applied = null;
     try { on = localStorage.getItem('carproto.music') !== '0'; } catch (e) {}
+    // The theme: a recorded track ("Rubber Riffs in the Dark"), streamed and looped. It is the game's music; the synth band above only plays if the file cannot be had.
+    // Quiet and muffled on the start screen and while you are dead, as if from the next room; it opens up and gets louder with the action.
+    const TH = { url: 'assets/rubber_riffs.mp3', vol: [0.34, 0.5, 0.6, 0.7, 0.78], cut: [1100, 20000, 20000, 20000, 20000], state: 'idle', a: null, g: null, f: null, t0: 0, tryT: 0, lv: -1, wa: false };
+    function themeTick(ctx) {
+      if (TH.state === 'idle') { TH.state = 'loading'; TH.t0 = ctx.currentTime;
+        const a = TH.a = new Audio(); a.loop = true; a.preload = 'auto';
+        a.addEventListener('error', () => { TH.state = 'failed'; }); a.addEventListener('playing', () => { TH.state = 'on'; });
+        a.src = TH.url;
+        try { const src = ctx.createMediaElementSource(a); TH.f = ctx.createBiquadFilter(); TH.f.type = 'lowpass'; TH.f.frequency.value = TH.cut[0]; TH.g = ctx.createGain(); TH.g.gain.value = 0;
+          src.connect(TH.f); TH.f.connect(TH.g); TH.g.connect(SFX.master); TH.wa = true; } catch (e) { TH.wa = false; } }      // no Web Audio route: the element's own volume will do
+      if (TH.state === 'failed') return false;
+      if (TH.state === 'loading' && ctx.currentTime - TH.t0 > 12) { TH.state = 'failed'; try { TH.a.pause(); } catch (e) {} return false; }      // too slow to arrive: let the band play
+      const a = TH.a, l = THREE.MathUtils.clamp(M.level | 0, 0, 4);
+      if (on && a.paused && ctx.currentTime > TH.tryT) { TH.tryT = ctx.currentTime + 1; const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); }
+      if (TH.lv !== (on ? l : -2)) { TH.lv = on ? l : -2; const v = on ? TH.vol[l] : 0;
+        if (TH.wa) { TH.g.gain.setTargetAtTime(v, ctx.currentTime, 0.5); TH.f.frequency.setTargetAtTime(TH.cut[l], ctx.currentTime, 0.4); } }
+      if (!TH.wa) a.volume = Math.min(1, (on ? TH.vol[l] : 0) * (SFX.muted ? 0 : SFX.volume * 1.3));
+      return true;
+    }
     const M = { level: 0, build, BPM,
-      get on() { return on; },
+      get on() { return on; }, get theme() { return TH; },
       toggle() { on = !on; try { localStorage.setItem('carproto.music', on ? '1' : '0'); } catch (e) {} return on; },
       tick() {
         const ctx = SFX.ctx; if (!ctx || !SFX.master || ctx.state !== 'running') return;
+        const themed = themeTick(ctx);                     // the recorded theme has the floor; the band stays silent unless it failed
         if (!eng) { eng = build(ctx, SFX.master); next = ctx.currentTime + 0.1; }
-        if (applied !== on) { applied = on; eng.bus.gain.setTargetAtTime(on ? VOL : 0, ctx.currentTime, 0.08); }
-        if (!on) { next = ctx.currentTime + 0.1; return; }
+        if (applied !== (on && !themed)) { applied = on && !themed; eng.bus.gain.setTargetAtTime(applied ? VOL : 0, ctx.currentTime, 0.08); }
+        if (!on || themed) { next = ctx.currentTime + 0.1; return; }
         if (next < ctx.currentTime) next = ctx.currentTime + 0.05;       // fell behind (tab was asleep): pick up from now
         while (next < ctx.currentTime + 0.3) { if (idx % 16 === 0) lvl = THREE.MathUtils.clamp(M.level | 0, 0, 4);      // the arrangement changes on the bar line
           const s16 = 60 / BPM[lvl] / 4; eng.step(idx, next, lvl, s16); next += s16; idx++; }
@@ -2898,7 +2918,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 126, buildEl = document.getElementById('build');
+  const BUILD = 127, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
