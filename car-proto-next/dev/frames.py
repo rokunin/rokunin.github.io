@@ -32,7 +32,7 @@ STAGE = r"""
 const [seed, x, z, heading] = a;
 (new Function(a[4]))();                                       // Math.random seeded again: the scene draws the same numbers every run
 const hx = window.__hx; hx.freeze(); d.elapsed = 100;                    // the game's clock drives pulses, orbits and shader noise
-d.clearSwarm(); d.calm(); d.PH.brk = 999; d.fireCooldown = 1e9;
+d.clearSwarm(); d.calm(); d.PH.brk = 999; d.fireCooldown = 1e9; d.setView(18);
 d.car.pos.set(x, 0, z); d.car.vel.set(0, 0, 0); d.car.speed = 0; d.car.heading = heading;
 d.camFocus.copy(d.car.pos); d.camera.position.copy(d.car.pos).add(d.ISO_OFFSET); d.camera.lookAt(d.camFocus);
 for (const P of d.pedestals) P.g.visible = false;            // each player's pedestals are laid out at random: not part of the picture
@@ -57,6 +57,8 @@ SCENES = {
                "let i = 0; for (const k of ['gremlin', 'stilt', 'brute', 'spitter', 'gremlin', 'stilt', 'brute', 'spitter']) { const an = i++ / 8 * 6.283, m = d.spawnCritter(k, d.car.pos.x + Math.cos(an) * 7, d.car.pos.z + Math.sin(an) * 7, 0); m.K = { ...m.K, speed: 0 }; m.stun = 99; }", 24),      # they grow out of the ground for a moment
     'lair':   (None, None, 1.2, 'buggy', '', 2),
     'lava':   (60, -120, 0.4, 'buggy', "d.bossSetPos(d.car.pos.x + 12, d.car.pos.z - 6); d.bossLava(d.car.pos.x + 12, d.car.pos.z - 6, 30, 99);", 20),
+    # close up on what glows: the halo's spikes and wing cubes (bloom on white; Roman caught r187's bloom at 5x on 25.11.2026)
+    'halo_fx': (-20, 120, 2.2, 'halo', "d.setView(6); d.abilities.cubes = true; d.abLv.jump = 3; d.landPower(3); d.special();", 8),
     'loot':   (90, 60, 2.8, 'buggy', "d.dropCoins(new d.THREE.Vector3(d.car.pos.x + 13, 0, d.car.pos.z + 13), 24, 10);", 30),      # 18 m out: beyond the magnet's 13 m
 }
 
