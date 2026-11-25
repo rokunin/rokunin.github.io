@@ -4,7 +4,8 @@
     python3 frames.py record [--dir frames/r151]          take the scenes and save them as the reference
     python3 frames.py compare [--dir frames/r128]         take them again, compare, write side-by-sides to /tmp/chubz-frames
 
-References live per Three.js version: frames/r<N> for the version in node_modules (REF). frames/r128 is the picture before the upgrade.
+References live per Three.js version: frames/r<N> for the version in node_modules (REF). frames/r128 is the picture before the upgrade;
+since build 150 glowing whites are 15% dimmer (the grade's whiteDim), so the check against r128 uses a second render with whiteDim at 0.
 
 A scene is staged in one go on a frozen clock: Math.random is seeded again, the car, camera and objects are put in place,
 then a few frames of 1/30 s run (the fire wall rises, coins land) and the canvas is read right after a render, without the HUD.
@@ -43,8 +44,11 @@ d.camFocus.copy(d.car.pos); d.camera.position.copy(d.car.pos).add(d.ISO_OFFSET);
 const gp = d.gradePass;
 if (gp) { gp.uniforms.time.value = 1.0; gp.uniforms.hurt.value = 0; gp.uniforms.lowHp.value = 0; }
 d.renderer.shadowMap.needsUpdate = true;
-if (d.composer) d.composer.render(); else d.renderer.render(d.scene, d.camera);
-return d.renderer.domElement.toDataURL('image/png');
+const draw = () => { if (d.composer) d.composer.render(); else d.renderer.render(d.scene, d.camera); return d.renderer.domElement.toDataURL('image/png'); };
+const shot = draw(), dim = gp && gp.uniforms.whiteDim;                // and once more without the white dim (build 150) for the check against r128
+if (!dim) return [shot, shot];
+const k = dim.value; dim.value = 0; const plain = draw(); dim.value = k;
+return [shot, plain];
 """
 
 # name: (car x, car z, heading, ride, JS run after the staging, frames of 1/30 s before the shot)
@@ -71,8 +75,7 @@ def shoot(g, p, name):
         x, z = ev(p, "return [d.LAIR_POS.x - 22, d.LAIR_POS.z + 14]")
     ev(p, STAGE + extra + "\nwindow.__hx.step(a[5], 1 / 30);", [7, x, z, heading, rng_js(7000 + sorted(SCENES).index(name)), n])
     wait(p, "window.__hx.queue === 0", 60, every=0.02)
-    url = ev(p, SNAP)
-    return Image.open(io.BytesIO(base64.b64decode(url.split(',', 1)[1]))).convert('RGB')
+    return [Image.open(io.BytesIO(base64.b64decode(u.split(',', 1)[1]))).convert('RGB') for u in ev(p, SNAP)]
 
 
 def changed(a, b):
@@ -82,14 +85,15 @@ def changed(a, b):
     return sum(h[25:]) / (a.size[0] * a.size[1])
 
 
-def take(names):
-    out = {}
+def take(names, plain=False):
+    """The scenes as players see them; with plain=True also as a second dict without the white dim (what frames/r128 is compared with)."""
+    out, flat = {}, {}
     with Game(fast=False, size=SIZE, out=os.environ.get('CHUBZ_OUT', '/tmp/chubz-test') + '-frames') as g:
         p = g.solo('buggy')
         p.wait_for_timeout(1500)
         for n in names:
-            out[n] = shoot(g, p, n)
-    return out
+            out[n], flat[n] = shoot(g, p, n)
+    return (out, flat) if plain else out
 
 
 def main():

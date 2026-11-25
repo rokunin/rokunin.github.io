@@ -470,20 +470,23 @@ import { createWorldSetup } from './world/setup.ts';
       .forEach(t => { t.texture.type = THREE.HalfFloatType; });
     GS.composer.addPass(bloom);
     GS.gradePass = new THREE.ShaderPass({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, exposure: { value: 2.0 }, hurt: { value: 0 }, lowHp: { value: 0 } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, exposure: { value: 2.0 }, hurt: { value: 0 }, lowHp: { value: 0 }, whiteDim: { value: 0.15 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: `
-        uniform sampler2D tDiffuse; uniform float time, exposure, hurt, lowHp; varying vec2 vUv;
+        uniform sampler2D tDiffuse; uniform float time, exposure, hurt, lowHp, whiteDim; varying vec2 vUv;
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
         void main(){
           vec2 d = vUv - 0.5; float r2 = dot(d, d);
           vec2 ca = d * r2 * 0.006;                                   // slight chromatic fringe toward the corners
           vec3 c = vec3(texture2D(tDiffuse, vUv + ca).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - ca).b);
+          float lit = smoothstep(0.6, 0.95, max(c.r, max(c.g, c.b)));   // glows: 1 and up in the scene; sunlit white stays under 0.5
           c = aces(c * exposure);
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
           c *= mix(vec3(0.94, 0.98, 1.08), vec3(1.05, 1.0, 0.94), smoothstep(0.0, 0.55, l));   // cool shadows, warm highlights
           c = mix(vec3(l), c, 1.14);                                  // saturation
           c = pow(max(c, 0.0), vec3(1.0 / 2.2));
+          float hi = max(c.r, max(c.g, c.b)), sat = (hi - min(c.r, min(c.g, c.b))) / max(hi, 1e-4);
+          c *= 1.0 - whiteDim * lit * (1.0 - smoothstep(0.1, 0.25, sat));   // Roman, 25.11.2026: what glows white on screen, 15% down
           c *= 1.0 - 0.5 * smoothstep(0.12, 0.62, r2);                // vignette
           float edge = smoothstep(0.06, 0.45, r2);
           c = mix(c, vec3(0.75, 0.04, 0.04), edge * clamp(hurt * 0.55 + lowHp * (0.22 + 0.12 * sin(time * 6.0)), 0.0, 0.8));
