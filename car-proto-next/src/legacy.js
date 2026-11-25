@@ -37,7 +37,7 @@ import { THREE } from './three.js';
     else logError('light falloff: the shader chunk changed, point lights fade the physical way'); }
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = COARSE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;      // r187 dropped PCFSoftShadowMap and uses this one in its place
   renderer.shadowMap.autoUpdate = false;                // refreshed from frame(): every frame on desktop, every 2nd-3rd on phones
   let shadowEvery = COARSE ? 2 : 1, shadowTick = 0, bloomPass = null;
   document.body.appendChild(renderer.domElement);
@@ -7516,7 +7516,7 @@ const MONSTERS = [
   }
 
   // ---------- loop ----------
-  const clock = new THREE.Clock();
+  const clock = new THREE.Timer();      // Clock is deprecated since r183
   const tmp = new THREE.Vector3();
   let roll = 0, pitch = 0, wheelSpin = 0, prevSpeed = 0;
   let elapsed = 0, hurtFlash = 0, shake = 0;
@@ -8699,7 +8699,7 @@ const MONSTERS = [
   }
   function frame() {
     MUSIC.level = MUSIC.force ?? musicLevel(); MUSIC.muffle = !startEl.isConnected && !car.alive; MUSIC.tick();
-    const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
+    clock.update(); const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
     adaptQuality(raw);
     for (let k = 0, n = HX ? HX.sub : 1; k < n; k++) update(dt);      // tests in turbo run several game steps a frame
     if (++shadowTick >= shadowEvery) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }
