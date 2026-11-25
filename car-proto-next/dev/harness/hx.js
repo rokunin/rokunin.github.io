@@ -13,5 +13,6 @@ window.__hx = {            // the test build's frame clock
   skipRender() { if (this.noRender) return true; if (this.frozen && !this.dirty) return true; this.dirty = false; return false; },
   freeze() { this.frozen = true; this.queue = 0; this.dirty = true; },
   thaw() { this.frozen = false; },
+  reseed() { if (window.__reseed) window.__reseed(); },      // called by the game when its world is built (game.py: rng_js)
   step(n, dt) { this.frozen = true; if (dt) this.stepDt = dt; this.queue += n || 1; },
 };

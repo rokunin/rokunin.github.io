@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Reference frames: a few fixed scenes through the game's own renderer and post-processing, for comparing the picture between builds.
 
-    python3 frames.py record [--dir frames/r128]          take the scenes and save them as the reference
+    python3 frames.py record [--dir frames/r151]          take the scenes and save them as the reference
     python3 frames.py compare [--dir frames/r128]         take them again, compare, write side-by-sides to /tmp/chubz-frames
+
+References live per Three.js version: frames/r<N> for the version in node_modules (REF). frames/r128 is the picture before the upgrade.
 
 A scene is staged in one go on a frozen clock: Math.random is seeded again, the car, camera and objects are put in place,
 then a few frames of 1/30 s run (the fire wall rises, coins land) and the canvas is read right after a render, without the HUD.
@@ -18,6 +20,12 @@ from PIL import Image, ImageChops
 from harness.game import Game, ev, wait, rng_js
 
 SIZE = (960, 600)
+def three_revision():
+    import json as _j
+    return _j.load(open(os.path.join(HERE, '..', 'node_modules', 'three', 'package.json')))['version'].split('.')[1]
+
+
+REF = os.path.join(HERE, 'frames', 'r' + three_revision())
 NOISE = 0.01          # share of changed pixels that still counts as "the same picture" (runs differ by under 0.5%)
 
 STAGE = r"""
@@ -85,7 +93,7 @@ def take(names):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('what', choices=['record', 'compare'])
-    ap.add_argument('--dir', default=os.path.join(HERE, 'frames', 'r128'))
+    ap.add_argument('--dir', default=REF)
     ap.add_argument('--only', default='', help='comma-separated scene names')
     ap.add_argument('--out', default='/tmp/chubz-frames')
     a = ap.parse_args()

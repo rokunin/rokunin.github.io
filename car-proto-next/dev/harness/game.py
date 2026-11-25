@@ -40,8 +40,9 @@ def day_js(day):
 
 
 def rng_js(seed):
-    """Math.random becomes a seeded mulberry32 stream for this page."""
-    return ("(() => { let s = %d >>> 0; Math.random = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s;"
+    """Math.random becomes a seeded mulberry32 stream for this page; window.__reseed() starts it over (the game calls it once its world is built)."""
+    return ("(() => { const seed = %d; let s; window.__reseed = () => { s = seed >>> 0; }; window.__reseed();"
+            " Math.random = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s;"
             " t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();") % seed
 
 

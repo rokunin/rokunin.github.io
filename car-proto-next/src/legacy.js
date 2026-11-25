@@ -107,9 +107,9 @@ import { THREE } from './three.js';
     composer.addPass(new THREE.RenderPass(scene, camera));
     const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.36, 0.55, hdr ? 1.15 : 0.86);
     bloomPass = bloom;
-    try { const hp = bloom.materialHighPassFilter;
-      hp.fragmentShader = hp.fragmentShader.replace('vec4 texel = texture2D( tDiffuse, vUv );', 'vec4 texel = texture2D( tDiffuse, vUv ); texel.rgb = min(max(texel.rgb, vec3(0.0)), vec3(40.0));');
-      hp.needsUpdate = true; } catch (e) { logError('bloom clamp: ' + e.message); }
+    { const hp = bloom.materialHighPassFilter, at = 'vec4 texel = texture2D( tDiffuse, vUv );';      // clamp what feeds the bloom: one hot pixel must not flare the screen
+      if (hp.fragmentShader.includes(at)) { hp.fragmentShader = hp.fragmentShader.replace(at, at + ' texel.rgb = min(max(texel.rgb, vec3(0.0)), vec3(40.0));'); hp.needsUpdate = true; }
+      else logError('bloom clamp: the high-pass shader changed, the clamp is not in'); }
     { const ss = bloom.setSize.bind(bloom), k = COARSE ? 0.5 : 0.75; bloom.setSize = (w, h) => ss(Math.round(w * k), Math.round(h * k)); bloom.setSize(innerWidth * PR, innerHeight * PR); }   // blur chain on a smaller buffer
     if (hdr) [bloom.renderTargetBright, ...bloom.renderTargetsHorizontal, ...bloom.renderTargetsVertical]
       .forEach(t => { t.texture.type = THREE.HalfFloatType; });
@@ -1134,7 +1134,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     #else
       surf(vUv, alb, rough, extra, h);
       #if CH == 0
-        gl_FragColor = vec4(pow(sat(alb), vec3(1.0 / 2.2)), 1.0);
+        vec3 e = pow(sat(alb), vec3(1.0 / 2.2));      // the stored colour; the sRGB target encodes on write (r137+), so hand it the linear value that decodes back to e
+        gl_FragColor = vec4(mix(e / 12.92, pow((e + 0.055) / 1.055, vec3(2.4)), step(0.04045, e)), 1.0);
       #else
         gl_FragColor = vec4(1.0, sat(rough), sat(extra), 1.0);
       #endif
@@ -1334,8 +1335,8 @@ laugh(r) {                                       // a big man's belly laugh: bre
     mat.onBeforeCompile = sh => {
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <roughnessmap_fragment>', `
-          float roughnessFactor = roughness * texture2D( roughnessMap, vUv ).g;
-          vec2 wuv = mat2( 0.8, -0.6, 0.6, 0.8 ) * ( vUv * ${scale.toFixed(4)} ) + vec2( 0.37, 0.11 );
+          float roughnessFactor = roughness * texture2D( roughnessMap, vRoughnessMapUv ).g;
+          vec2 wuv = mat2( 0.8, -0.6, 0.6, 0.8 ) * ( vRoughnessMapUv * ${scale.toFixed(4)} ) + vec2( 0.37, 0.11 );
           float wetMask = smoothstep( 0.675, 0.725, texture2D( roughnessMap, wuv ).b );
           roughnessFactor = mix( roughnessFactor, 0.07, wetMask );
           diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.13, 0.15, 0.19 ), wetMask );`)
@@ -8683,6 +8684,7 @@ const MONSTERS = [
     if (rp) setRide(keep);
   })();
   worldRnd = trueRandom;                                // world is built: back to real randomness for the simulation
+  if (HX && HX.reseed) HX.reseed();                     // tests: the game's own randomness starts from the test's seed here, however many numbers Three.js took while loading
   for (const e of earlyErrors.splice(0)) try { netLog('error: ' + e); } catch (x) {}      // the log exists now
   { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
   camFocus.copy(car.pos);
