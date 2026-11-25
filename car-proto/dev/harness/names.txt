@@ -192,3 +192,8 @@ bossSetPos
 bossTgts
 resetBoss
 ROOM_X1
+makeMini
+makeWanderer
+touch
+special
+phEnter

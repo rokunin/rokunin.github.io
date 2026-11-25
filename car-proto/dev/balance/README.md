@@ -11,3 +11,9 @@ The car jumps when three or more monsters are within 10 m; RMB skills go off on 
 
 Left out: obstacles and crates, evil cubes, mob shots other than spitter/oculon acid, mini-boss attack patterns, turret turn speed and aiming error, players' mixed levels, co-op.
 The damage-taken numbers count bites and acid only: compare them between rides, do not read them as real hp loss.
+
+## Real fights
+`real.py` plays the actual game in a headless browser with a bot at the wheel, in harness turbo (`Game(turbo=4)`: four fixed 1/30 s steps a frame, no frame delay; 70 s of game in about 8 s).
+The bot steers the touch stick round a 24 m circle (round the nearest mini-boss at 14 m in `minis`, round the Pyramidon at 12 m in `boss`), jumps when three or more monsters are within 10 m (the halo spends its air jumps), presses the special when something is within 16 m (the spider goes under for 1.2 s every 6 s); the gun aims and fires by itself as for a player. Its hp is refilled below 40% and the loss is counted.
+`python3 real.py` runs hell (6 seeds), minis (2) and the Pyramidon's lair half (2) for every ride and tier into `real.json` (skips what is done; about 40 minutes); `python3 real_report.py` prints `REAL_TABLES.txt`.
+Hell pressure is the number of monsters within 40 m of the car on average.

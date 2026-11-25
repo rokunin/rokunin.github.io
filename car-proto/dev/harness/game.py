@@ -30,9 +30,10 @@ def _free_port():
 
 
 class Game:
-    def __init__(self, fast=True, size=None, scale=1, src=None, out=None):
+    def __init__(self, fast=True, size=None, scale=1, src=None, out=None, turbo=0):
         self.fast, self.scale = fast, scale
         self.size = size or ((700, 440) if fast else (1100, 700))
+        self.turbo = turbo
         self.src, self.out = src or _build.DEFAULT_SRC, out or _build.DEFAULT_OUT
         self.errs, self.pages = [], []
 
@@ -53,7 +54,7 @@ class Game:
         self.browser = self.pw.chromium.launch(**kw)
         self.ctx = self.browser.new_context(viewport={'width': self.size[0], 'height': self.size[1]}, device_scale_factor=self.scale)
         if self.fast:
-            self.ctx.add_init_script("window.__noRender = true; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);")
+            self.ctx.add_init_script("window.__noRender = true; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), %d);" % (0 if self.turbo else 16))
         return self
 
     def __exit__(self, *exc):
@@ -75,6 +76,8 @@ class Game:
             raise RuntimeError('names.txt lists names the game no longer has: ' + ', '.join(bad))
         if self.fast:
             p.evaluate("() => { __hx.noRender = true; __hx.cap = 0.1; }")
+        if self.turbo:
+            p.evaluate("n => { __hx.sub = n; __hx.fixed = 1 / 30; }", self.turbo)      # game time runs as fast as the machine can step it, 1/30 s a step
         return p
 
     def _ride(self, p, ride, god):
