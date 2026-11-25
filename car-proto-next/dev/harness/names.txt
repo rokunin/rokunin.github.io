@@ -55,7 +55,7 @@ drillRPM
 dropCoins
 dropLoot
 eaten = chubEaten
-elapsed
+rw elapsed
 enemies
 eshots
 firstGun
@@ -198,3 +198,7 @@ touch
 special
 phEnter
 DG
+THREE
+# calm(): no camera shake, and every puff, flash and flying chip is gone by the next frame (frames.py stages scenes with it)
+! calm(){ shake = 0; for (const p of puffs) { p.life = 0; p.m.visible = false; } for (const f of flashes) { f.life = 0; f.m.visible = false; } for (const p of particles) { p.life = 0; p.m.visible = false; } }
+ISO_OFFSET

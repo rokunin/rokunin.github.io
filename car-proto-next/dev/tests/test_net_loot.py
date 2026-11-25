@@ -11,10 +11,11 @@ with Game() as g:
     n0 = ev(a, "return d.loot.length")
     w0 = ev(b, "return [d.coins, d.gems]")
     bp = ev(b, "return [d.car.pos.x, d.car.pos.z]")
-    # the host parks 60 m away on the far side, on a spot with no crate within 8 m: a car set down on a crate breaks it and its coins fly into the host's wallet
+    # the host parks 60 m away on the far side, on a spot with no crate within 8 m and no evil cube within 20 m: a car set down on a crate breaks it and its coins fly into the host's wallet
     ev(a, """let x = a[0] - 60, z = a[1];
       for (let k = 0; k <= 12; k++) { const ang = Math.PI / 2 + k * Math.PI / 12, cx = a[0] + Math.cos(ang) * 60, cz = a[1] + Math.sin(ang) * 60;
-        if (!d.obstacles.some(o => Math.hypot(o.mesh.position.x - cx, o.mesh.position.z - cz) < 8 + Math.max(o.hx || 0, o.hz || 0))) { x = cx; z = cz; break; } }
+        if (!d.obstacles.some(o => Math.hypot(o.mesh.position.x - cx, o.mesh.position.z - cz) < 8 + Math.max(o.hx || 0, o.hz || 0))
+            && !d.enemies.some(e => !e.dead && Math.hypot(e.pos.x - cx, e.pos.z - cz) < 20)) { x = cx; z = cz; break; } }      // nor an evil cube that wakes, bites the god-mode host and dies into his wallet
       d.car.pos.set(x, 0, z); d.lootFrom('rig', a[0] + 40, a[1]); d.lootFrom('boss', a[0] + 40, a[1] + 3);""", bp); a.wait_for_timeout(1500)
     h0 = ev(a, "return d.coins + d.gems")
     n = ev(a, "return d.loot.length"); w1 = ev(b, "return [d.coins, d.gems]")      # a piece that flew right at the client may be in its wallet already
@@ -27,6 +28,9 @@ with Game() as g:
     a.wait_for_timeout(1000)
     w = ev(b, "return [d.coins, d.gems]")
     t.eq('client collected every piece, crystals as crystals', [w[0] - w0[0] - n0, w[1] - w0[1]], [90, 35])
+    for _ in range(20):                                  # the last pickups reach the host over the network; on a busy machine that takes over a second
+        if ev(a, "return d.loot.length") == 0: break
+        a.wait_for_timeout(250)
     t.eq('host has no pieces left', ev(a, "return d.loot.length"), 0)
     t.eq('host wallet untouched', [h0, ev(a, "return d.coins + d.gems")], [0, 0])
     ev(b, "for (let i = 0; i < 10; i++) d.lootFrom('crate', d.car.pos.x + 40, d.car.pos.z);"); b.wait_for_timeout(1500)

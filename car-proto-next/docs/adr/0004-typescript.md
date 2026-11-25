@@ -1,6 +1,6 @@
 ---
 date: 2026-11-25
-status: proposed
+status: accepted
 ---
 # Вынутые модули пишем на TypeScript; проверяет TypeScript 7
 

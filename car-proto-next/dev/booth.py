@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness.game import Game, ev, sheet
 
 SHOOT = r"""
-const THREE = window.THREE, scene = d.scene, hx = window.__hx; hx.freeze();
+const THREE = d.THREE, scene = d.scene, hx = window.__hx; hx.freeze();
 const obj = (new Function('d', 'THREE', 'return (' + a.expr + ')'))(d, THREE);
 if (!obj || !obj.isObject3D) throw new Error('booth: the expression must return a THREE.Object3D');
 const own = !obj.parent; if (own) scene.add(obj);

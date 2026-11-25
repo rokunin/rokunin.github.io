@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from harness.game import Game, Checks, ev, wait
 
-MOBS = "d.fireCooldown = 1e9; d.clearSwarm(); window.__m = {}; const x = d.car.pos.x, z = d.car.pos.z; d.car.vel.set(0, 0, 0); d.car.speed = 0; let i = 0; for (const k of a[0]) { const an = i++ / a[0].length * 6.283, m = d.spawnCritter(k, x + Math.cos(an) * a[1], z + Math.sin(an) * a[1]); m.stun = 0; m.K = { ...m.K, speed: 0 }; (window.__m[k] = window.__m[k] || []).push(m); } clearInterval(window.__si); window.__si = setInterval(() => { for (const k in window.__m) for (const m of window.__m[k]) m.top = Math.max(m.top || 0, m.stun || 0); }, 16);"      # m.top: the longest stun it was given; reading m.stun later depends on how busy the machine is
+MOBS = "d.fireCooldown = 1e9; d.clearSwarm(); window.__m = {}; const x = d.car.pos.x, z = d.car.pos.z; d.car.vel.set(0, 0, 0); d.car.speed = 0; let i = 0; for (const k of a[0]) { const an = i++ / a[0].length * 6.283, m = d.spawnCritter(k, x + Math.cos(an) * a[1], z + Math.sin(an) * a[1]); m.stun = 0; m.K = { ...m.K, speed: 0 }; let st = 0; Object.defineProperty(m, 'stun', { configurable: true, get() { return st; }, set(v) { st = v; m.top = Math.max(m.top || 0, v); } }); (window.__m[k] = window.__m[k] || []).push(m); }"      # m.top: the longest stun it was ever given, caught where it is set (polling it missed the peak on a busy machine)
 # The jump happens on a spot with nothing within 16 m and far from pedestals and the lair: a stomp breaks crates, and a crate's flying chunks deal 99 to small monsters,
 # which is a different mechanic from the one under test (this was the old "nobody is hurt" flake).
 CLEAR = """let best = null; for (let i = 0; i < 400 && !best; i++) { const r = 20 + i * 0.6, an = i * 2.39996, x = Math.cos(an) * r, z = Math.sin(an) * r;
@@ -38,10 +38,10 @@ with Game() as g:
     s = hop(p, 0, ['gremlin', 'spitter'] * 2)
     t.ok('Lv0: a plain jump does nothing to those standing around', not any(m['dead'] for k in s for m in s[k]))
     s = hop(p, 1, ['stilt', 'spitter', 'stilt', 'spitter', 'brute'])
-    t.ok('buggy Lv1: shooters stunned 1.5 s', ev(p, "return window.__m.spitter.every(m => m.top > 1.3 && m.top <= 1.5)"))
+    t.ok('buggy Lv1: shooters stunned 1.5 s', ev(p, "return window.__m.spitter.every(m => m.top > 1.3 && m.top <= 1.5)"), ev(p, "return window.__m.spitter.map(m => m.top)"))
     t.ok('buggy Lv1: the rest are not stunned, nobody is hurt', ev(p, "return window.__m.stilt.every(m => !(m.stun > 0) && m.hp === 2) && window.__m.brute[0].hp === 9"), ev(p, "return [window.__m.stilt.map(m => [m.hp, Math.round(m.stun * 100) / 100, m.dead]), window.__m.brute[0].hp]"))
     s = hop(p, 2, ['stilt', 'spitter', 'stilt', 'spitter', 'brute'])
-    t.ok('buggy Lv2: small fry at half health and stunned 2 s', ev(p, "return [...window.__m.stilt, ...window.__m.spitter].every(m => m.hp === 1 && m.top > 1.8 && m.top <= 2)"))
+    t.ok('buggy Lv2: small fry at half health and stunned 2 s', ev(p, "return [...window.__m.stilt, ...window.__m.spitter].every(m => m.hp === 1 && m.top > 1.8 && m.top <= 2)"), ev(p, "return [...window.__m.stilt, ...window.__m.spitter].map(m => [m.hp, m.top])"))
     t.ok('buggy Lv2: the brute is left alone', ev(p, "return window.__m.brute[0].hp === 9 && !(window.__m.brute[0].stun > 0)"))
     s = hop(p, 3, ['stilt', 'spitter', 'gremlin', 'spitter', 'brute'])
     t.ok('buggy Lv3: small fry dead', all(m['dead'] for k in ('stilt', 'spitter', 'gremlin') for m in s[k]))

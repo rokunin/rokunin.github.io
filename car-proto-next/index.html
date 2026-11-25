@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="chubz-build" content="137">
-<!-- const BUILD = 137 : the text pages of build 136 and older look for to see an update -->
+<meta name="chubz-build" content="138">
+<!-- const BUILD = 138 : the text pages of build 136 and older look for to see an update -->
 <title>Car Proto — isometric</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font-family: system-ui, sans-serif;
@@ -28484,6 +28484,7 @@ var THREE = {
 if (typeof window !== "undefined" && typeof window.__threeHook === "function") window.__threeHook(THREE);
 // src/legacy.js
 (() => {
+	const HX = window.__hx || null;
 	const earlyErrors = [], seenErrors = /* @__PURE__ */ new Set();
 	function logError(s) {
 		s = String(s).slice(0, 300);
@@ -47281,6 +47282,7 @@ if (typeof window !== "undefined" && typeof window.__threeHook === "function") w
 	}
 	let perfT = 0, perfN = 0, warmup = 30;
 	function adaptQuality(raw) {
+		if (HX) return;
 		if (warmup > 0) {
 			warmup--;
 			return;
@@ -49714,6 +49716,7 @@ if (typeof window !== "undefined" && typeof window.__threeHook === "function") w
 	}
 	(function prewarm() {
 		try {
+			if (HX && HX.noRender) return;
 			const g = new THREE.Group(), mats = [];
 			for (const k in SW_ART) for (const v of SW_ART[k]) mats.push(...v.walk, ...v.hit);
 			for (const row of chubMats) mats.push(...row);
@@ -49759,7 +49762,7 @@ if (typeof window !== "undefined" && typeof window.__threeHook === "function") w
 		};
 		const shot = (x, tx, ty, tz, half) => {
 			try {
-				if (!composer) throw 0;
+				if (!composer || HX) throw 0;
 				const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = composer.passes[0], keep = rp.camera;
 				tmp.set(tx, ty, tz);
 				cam.position.copy(tmp).add(ISO_OFFSET);
@@ -50011,14 +50014,14 @@ if (typeof window !== "undefined" && typeof window.__threeHook === "function") w
 		MUSIC.level = MUSIC.force ?? musicLevel();
 		MUSIC.muffle = !startEl.isConnected && !car.alive;
 		MUSIC.tick();
-		const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
+		const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
 		adaptQuality(raw);
-		update(dt);
+		for (let k = 0, n = HX ? HX.sub : 1; k < n; k++) update(dt);
 		if (++shadowTick >= shadowEvery) {
 			shadowTick = 0;
 			renderer.shadowMap.needsUpdate = true;
 		}
-		if (composer) {
+		if (HX && HX.skipRender()) {} else if (composer) {
 			gradePass.uniforms.time.value = elapsed;
 			gradePass.uniforms.hurt.value = Math.max(0, hurtFlash) / .18;
 			gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * .35)) : 0;

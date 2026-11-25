@@ -3,6 +3,8 @@
 import { THREE } from './three.js';
 
 (() => {
+  // Test seam: the harness puts its frame clock on window.__hx before the page loads (dev/harness/hx.js). Players never have it.
+  const HX = window.__hx || null;
   // Every uncaught error and rejected promise goes to the lobby's diagnostics log (tap the build number), each distinct one once.
   // Errors from before the log exists wait in earlyErrors until the end of the set-up. localStorage reads and writes stay silent: private mode refuses them.
   const earlyErrors = [], seenErrors = new Set();
@@ -4548,6 +4550,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     abSig = '';
   }
   applyAbilityVisuals();
+  /* test-seam: debug registry */
 
   // лут
   const pickups = [];
@@ -7861,7 +7864,7 @@ const MONSTERS = [
 
   // drop render resolution if the machine can't hold ~40 fps (only ever goes down, so it can't oscillate)
   let perfT = 0, perfN = 0, warmup = 30;
-  function adaptQuality(raw) {
+  function adaptQuality(raw) { if (HX) return;      // tests: the picture must not change with the machine's speed
     if (warmup > 0) { warmup--; return; }           // shader compiles make the first frames slow
     if (raw > 1) return;                            // tab was in the background
     perfT += raw; perfN++;
@@ -8615,6 +8618,7 @@ const MONSTERS = [
   }
   (function prewarm() {
     try {
+      if (HX && HX.noRender) return;      // tests in fast mode draw nothing, so there is nothing to compile
       const g = new THREE.Group(), mats = [];
       for (const k in SW_ART) for (const v of SW_ART[k]) mats.push(...v.walk, ...v.hit);
       for (const row of chubMats) mats.push(...row);
@@ -8633,7 +8637,7 @@ const MONSTERS = [
     const sprites = (x, list) => { x.fillStyle = '#3b2f33'; x.fillRect(0, 0, 160, 160); for (const [img, dx, dy, sz] of list) x.drawImage(img, dx, dy, sz, sz); };
     const shot = (x, tx, ty, tz, half) => {              // a real render of that spot through the game's own post-processing
       try {
-        if (!composer) throw 0;
+        if (!composer || HX) throw 0;      // tests skip the how-to pictures: five full renders, 18 s of a headless start
         const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = composer.passes[0], keep = rp.camera;
         tmp.set(tx, ty, tz); cam.position.copy(tmp).add(ISO_OFFSET); cam.lookAt(tmp);
         cam.left = -half * asp; cam.right = half * asp; cam.top = half; cam.bottom = -half; cam.zoom = 1; cam.updateProjectionMatrix();
@@ -8689,11 +8693,11 @@ const MONSTERS = [
   }
   function frame() {
     MUSIC.level = MUSIC.force ?? musicLevel(); MUSIC.muffle = !startEl.isConnected && !car.alive; MUSIC.tick();
-    const raw = clock.getDelta(), dt = Math.min(raw, 1 / 30);
+    const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
     adaptQuality(raw);
-    update(dt);
+    for (let k = 0, n = HX ? HX.sub : 1; k < n; k++) update(dt);      // tests in turbo run several game steps a frame
     if (++shadowTick >= shadowEvery) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }
-    if (composer) {
+    if (HX && HX.skipRender()) { /* tests: nothing to draw */ } else if (composer) {
       gradePass.uniforms.time.value = elapsed;
       gradePass.uniforms.hurt.value = Math.max(0, hurtFlash) / 0.18;
       gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * 0.35)) : 0;

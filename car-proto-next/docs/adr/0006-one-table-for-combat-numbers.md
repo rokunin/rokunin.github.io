@@ -1,6 +1,6 @@
 ---
 date: 2026-11-25
-status: proposed
+status: accepted
 ---
 # Все боевые числа — в одной таблице данных
 

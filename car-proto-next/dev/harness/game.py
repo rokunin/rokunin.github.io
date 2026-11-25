@@ -76,6 +76,9 @@ class Game:
         self.ctx = self.browser.new_context(viewport={'width': self.size[0], 'height': self.size[1]}, device_scale_factor=self.scale)
         if self.fast:
             self.ctx.add_init_script("window.__noRender = true; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), %d);" % (0 if self.turbo else 16))
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.ctx.add_init_script(path=os.path.join(here, 'hx.js'))            # the frame clock the game reads at its seams (HX)
+        self.ctx.add_init_script(path=os.path.join(here, 'mock_room.js'))     # ?mock: the artifact room between tabs; no query: lobby skipped
         print(f'      random seed {self.seed}, day {self.day}  (CHUBZ_SEED= and CHUBZ_DAY= replay or change them)')
         return self
 

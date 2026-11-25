@@ -3,45 +3,20 @@
 
     python3 build.py [--src ../../src] [--out /tmp/chubz-test]
 
-The sources are src/ (build 137 on): build.py copies them to dev/.test-src, patches the copy and runs the game's own Vite build
-on it, so the test page is the shipped page plus the hooks below. Given an .html file instead (build 136 and older, e.g. the frozen
-../../../car-proto/index.html), it patches that file the old way and serves three.js from node_modules in place of the CDNs.
+The test page is the game's own build in test mode (`vite build --mode test`): the shipped page plus the debug registry
+window.__dbg at the marker in src/legacy.js (vite-test.js reads names.txt). Everything else a test needs comes in through
+seams: game.py adds hx.js (the frame clock the game reads as HX) and mock_room.js as Playwright init scripts, and this script
+puts trystero_shim.js next to the page as trystero.js.
 
-What changes against the shipped page, and nothing else:
-  * window.__dbg exposes the names listed in names.txt, read live through getters;
-  * window.__hx owns the frame clock: cap dt, freeze time, step frame by frame, skip idle renders;
-  * adaptQuality() is off, so the picture does not change with the machine's speed;
-  * the lobby's how-to pictures are not rendered (they cost 18 s of start-up in a headless browser);
-  * the room mock and the Trystero shim stand in for the network.
-
-Every patch asserts that its anchor matched exactly once. If the game's code moved, the build fails here
-and names the anchor, instead of producing a page that silently lacks a hook.
+Given an .html file instead (build 136 and older, e.g. the frozen ../../../car-proto/index.html), it patches that file the old way,
+by text anchors, and serves three.js from node_modules in place of the CDNs.
 """
 import argparse, hashlib, os, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.normpath(os.path.join(HERE, '..', '..'))
 DEFAULT_SRC = os.path.join(PROJECT, 'src')
-TEST_SRC = os.path.join(PROJECT, 'dev', '.test-src')
 DEFAULT_OUT = os.environ.get('CHUBZ_OUT', '/tmp/chubz-test')
-
-HX = r"""
-window.__hx = {            // the test build's frame clock
-  cap: 0,                  // max dt per frame in normal running; 0 = the game's own 1/30
-  frozen: false,           // true: game time stands still, frames advance only through step()
-  queue: 0, stepDt: 0.05,  // frames still to play while frozen, and the dt each one gets
-  sub: 1, fixed: 0,        // turbo: run update() `sub` times a frame, each with the fixed dt (game time no longer waits for the wall clock)
-  frames: 0, dirty: true,
-  noRender: !!window.__noRender,   // set before the page loads (game.py, fast mode): not even the first frame is drawn. The first full render costs ~18 s headless
-  dt(raw) { this.frames++;
-    if (this.frozen) { if (this.queue > 0) { this.queue--; this.dirty = true; return this.stepDt; } return 1e-6; }
-    this.dirty = true; if (this.fixed) return this.fixed; return Math.min(raw, this.cap || window.__dtcap || 1 / 30); },
-  skipRender() { if (this.noRender) return true; if (this.frozen && !this.dirty) return true; this.dirty = false; return false; },
-  freeze() { this.frozen = true; this.queue = 0; this.dirty = true; },
-  thaw() { this.frozen = false; },
-  step(n, dt) { this.frozen = true; if (dt) this.stepDt = dt; this.queue += n || 1; },
-};
-"""
 
 
 def sub_once(s, old, new, what):
@@ -76,7 +51,7 @@ def dbg_object(path):
 
 
 def patch_code(s):
-    """The hooks inside the game's code. Same anchors for src/legacy.js and for an old single index.html."""
+    """The hooks an old single index.html (build 136 and older) gets by text anchors; src/ has seams in their place."""
     dbg, n_names = dbg_object(os.path.join(HERE, 'names.txt'))
     m = re.findall(r'^  applyAbilityVisuals\(\);$', s, re.M)
     if len(m) != 1:
@@ -93,10 +68,6 @@ def patch_code(s):
     s = sub_once(s, "        if (!composer) throw 0;\n        const cv = renderer.domElement, asp", "        if (!composer || window.__hx) throw 0;\n        const cv = renderer.domElement, asp", 'skip the how-to renders')
     s = sub_once(s, "  (function prewarm() {\n    try {\n", "  (function prewarm() {\n    try {\n      if (window.__noRender) return;      // fast mode draws nothing, so there is nothing to compile\n", 'skip the shader prewarm in fast mode')
     return s, n_names
-
-
-def head_scripts():
-    return '<script>\n' + HX + open(os.path.join(HERE, 'mock_room.js'), encoding='utf8').read() + '</script>\n'
 
 
 def finish(out, quiet, build_no, n_names):
@@ -119,35 +90,27 @@ def build(src=DEFAULT_SRC, out=DEFAULT_OUT, quiet=False):
 
 
 def build_src(src, out, quiet):
-    """src/ → dev/.test-src (patched) → the game's Vite build → out/index.html. Skipped when nothing it reads has changed."""
+    """src/ → the game's Vite build in test mode → out/index.html. Skipped when nothing it reads has changed."""
     inputs = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in fs)
-    inputs += [os.path.join(HERE, f) for f in ('build.py', 'names.txt', 'mock_room.js')] + [os.path.join(PROJECT, f) for f in ('vite.config.js', 'package-lock.json')]
+    inputs += [os.path.join(HERE, f) for f in ('build.py', 'names.txt', 'vite-test.js')] + [os.path.join(PROJECT, f) for f in ('vite.config.js', 'package-lock.json')]
     h = hashlib.sha1()
     for f in inputs:
         h.update(f.encode()); h.update(open(f, 'rb').read())
     stamp, page = os.path.join(out, '.stamp'), os.path.join(out, 'index.html')
     meta = re.search(r'<meta name="chubz-build" content="(\d+)"', open(os.path.join(src, 'index.html'), encoding='utf8').read())
-    build_no = int(meta.group(1)) if meta else None
+    build_no, n_names = (int(meta.group(1)) if meta else None), dbg_object(os.path.join(HERE, 'names.txt'))[1]
     if os.path.exists(page) and os.path.exists(stamp) and open(stamp).read() == h.hexdigest():
-        return finish(out, quiet, build_no, dbg_object(os.path.join(HERE, 'names.txt'))[1])
-
+        return finish(out, quiet, build_no, n_names)
     if not os.path.isdir(os.path.join(PROJECT, 'node_modules', 'vite')):
         if not quiet:
             print('build.py: npm ci in', PROJECT)
         subprocess.run(['npm', 'ci', '--silent', '--no-audit', '--no-fund'], cwd=PROJECT, check=True)
-    shutil.rmtree(TEST_SRC, ignore_errors=True)
-    shutil.copytree(src, TEST_SRC)
-    code = os.path.join(TEST_SRC, 'legacy.js')
-    s, n_names = patch_code(open(code, encoding='utf8').read())
-    open(code, 'w', encoding='utf8').write(s)
-    shell = os.path.join(TEST_SRC, 'index.html')
-    html = sub_once(open(shell, encoding='utf8').read(), '<script type="module" src="./legacy.js"></script>',
-                    head_scripts() + '<script type="module" src="./legacy.js"></script>', 'head scripts')
-    open(shell, 'w', encoding='utf8').write(html)
     if os.path.exists(page):
         os.remove(page)
+    if os.path.normpath(src) != DEFAULT_SRC:
+        sys.exit('build.py: a source folder other than src/ is not supported; vite.config.js sets the root')
     r = subprocess.run(['node', os.path.join(PROJECT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', os.path.join(PROJECT, 'vite.config.js'),
-                        TEST_SRC, '--outDir', out, '--logLevel', 'error'], cwd=PROJECT, capture_output=True, text=True)
+                        '--mode', 'test', '--outDir', out, '--logLevel', 'error'], cwd=PROJECT, capture_output=True, text=True)
     if r.returncode != 0 or not os.path.exists(page):
         sys.exit('build.py: vite build failed\n' + r.stdout + r.stderr)
     open(stamp, 'w').write(h.hexdigest())
@@ -163,8 +126,6 @@ def build_html(src, out, quiet):
     if n_cdn < 2 or 'https://cdn' in s:
         sys.exit('build.py: the CDN script tags changed; update the replacements in build.py')
     s, n_names = patch_code(s)
-    head = head_scripts()
-    s = sub_once(s, '<script src="node_modules/three/build/three.min.js"', head + '<script src="node_modules/three/build/three.min.js"', 'head scripts')
     open(os.path.join(out, 'index.html'), 'w', encoding='utf8').write(s)
     if os.path.exists(os.path.join(out, '.stamp')):
         os.remove(os.path.join(out, '.stamp'))
