@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="chubz-build" content="146">
-<!-- const BUILD = 146 : the text pages of build 136 and older look for to see an update -->
+<meta name="chubz-build" content="147">
+<!-- const BUILD = 147 : the text pages of build 136 and older look for to see an update -->
 <title>Car Proto — isometric</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font-family: system-ui, sans-serif;
@@ -54809,6 +54809,8 @@ var THREE = {
 	UnrealBloomPass
 };
 if (typeof window !== "undefined" && typeof window.__threeHook === "function") window.__threeHook(THREE);
+// src/game/state.ts
+var GS = {};
 // src/audio/synth.ts
 function audioLib(SR) {
 	function rng(seed) {
@@ -59698,8 +59700,8 @@ var DATA_HASH = (() => {
 		powerPreference: "high-performance"
 	});
 	const COARSE = matchMedia("(pointer: coarse)").matches;
-	let PR = Math.min(devicePixelRatio, COARSE ? 1.5 : 2);
-	renderer.setPixelRatio(PR);
+	GS.PR = Math.min(devicePixelRatio, COARSE ? 1.5 : 2);
+	renderer.setPixelRatio(GS.PR);
 	const LIGHT = Math.PI;
 	{
 		const C = THREE.ShaderChunk, src = C.lights_pars_begin, i = src.indexOf("float getDistanceAttenuation("), j = i < 0 ? -1 : src.indexOf("\n}\n", i);
@@ -59712,17 +59714,19 @@ var DATA_HASH = (() => {
 	renderer.shadowMap.enabled = true;
 	renderer.shadowMap.type = THREE.PCFShadowMap;
 	renderer.shadowMap.autoUpdate = false;
-	let shadowEvery = COARSE ? 2 : 1, shadowTick = 0, bloomPass = null;
+	GS.shadowTick = 0;
+	GS.bloomPass = null;
+	GS.shadowEvery = COARSE ? 2 : 1;
 	document.body.appendChild(renderer.domElement);
 	const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 	const scene = new THREE.Scene();
 	scene.background = new THREE.Color(1315356);
 	scene.fog = new THREE.Fog(2366768, 88, 190);
-	let viewSize = COARSE ? 15 : 18;
+	GS.viewSize = COARSE ? 15 : 18;
 	const ISO_OFFSET = new THREE.Vector3(30, 30, 30);
 	const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 300);
 	function resizeCam() {
-		const a = innerWidth / innerHeight, v = Math.max(viewSize, 11 / a);
+		const a = innerWidth / innerHeight, v = Math.max(GS.viewSize, 11 / a);
 		camera.left = -v * a;
 		camera.right = v * a;
 		camera.top = v;
@@ -59750,7 +59754,7 @@ var DATA_HASH = (() => {
 	const rim = new THREE.DirectionalLight(7375103, .09 * LIGHT);
 	rim.position.set(30, 20, -28);
 	scene.add(rim);
-	let ENV = null;
+	GS.ENV = null;
 	{
 		const envScene = new THREE.Scene();
 		const geo = new THREE.SphereGeometry(50, 48, 24);
@@ -59795,10 +59799,12 @@ var DATA_HASH = (() => {
 		disc.position.copy(SUN_OFFSET).normalize().multiplyScalar(40);
 		envScene.add(disc);
 		const pmrem = new THREE.PMREMGenerator(renderer);
-		scene.environment = ENV = pmrem.fromScene(envScene, .03).texture;
+		scene.environment = GS.ENV = pmrem.fromScene(envScene, .03).texture;
 		pmrem.dispose();
 	}
-	let composer = null, gradePass = null, fxaaPass = null;
+	GS.gradePass = null;
+	GS.fxaaPass = null;
+	GS.composer = null;
 	if (THREE.EffectComposer && THREE.RenderPass && THREE.ShaderPass && THREE.UnrealBloomPass) {
 		const hdr = !!(renderer.capabilities.isWebGL2 && renderer.extensions.get("EXT_color_buffer_float")) || !!renderer.extensions.get("EXT_color_buffer_half_float");
 		const rt = new THREE.WebGLRenderTarget(4, 4, {
@@ -59807,12 +59813,12 @@ var DATA_HASH = (() => {
 			format: THREE.RGBAFormat,
 			type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType
 		});
-		composer = new THREE.EffectComposer(renderer, rt);
-		composer.setPixelRatio(PR);
-		composer.setSize(innerWidth, innerHeight);
-		composer.addPass(new THREE.RenderPass(scene, camera));
+		GS.composer = new THREE.EffectComposer(renderer, rt);
+		GS.composer.setPixelRatio(GS.PR);
+		GS.composer.setSize(innerWidth, innerHeight);
+		GS.composer.addPass(new THREE.RenderPass(scene, camera));
 		const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .36, .55, hdr ? 1.15 : .86);
-		bloomPass = bloom;
+		GS.bloomPass = bloom;
 		{
 			const hp = bloom.materialHighPassFilter, at = "vec4 texel = texture2D( tDiffuse, vUv );";
 			if (hp.fragmentShader.includes(at)) {
@@ -59823,7 +59829,7 @@ var DATA_HASH = (() => {
 		{
 			const ss = bloom.setSize.bind(bloom), k = COARSE ? .5 : .75;
 			bloom.setSize = (w, h) => ss(Math.round(w * k), Math.round(h * k));
-			bloom.setSize(innerWidth * PR, innerHeight * PR);
+			bloom.setSize(innerWidth * GS.PR, innerHeight * GS.PR);
 		}
 		if (hdr) [
 			bloom.renderTargetBright,
@@ -59832,8 +59838,8 @@ var DATA_HASH = (() => {
 		].forEach((t) => {
 			t.texture.type = THREE.HalfFloatType;
 		});
-		composer.addPass(bloom);
-		gradePass = new THREE.ShaderPass({
+		GS.composer.addPass(bloom);
+		GS.gradePass = new THREE.ShaderPass({
 			uniforms: {
 				tDiffuse: { value: null },
 				time: { value: 0 },
@@ -59862,11 +59868,11 @@ var DATA_HASH = (() => {
           gl_FragColor = vec4(c, 1.0);
         }`
 		});
-		composer.addPass(gradePass);
+		GS.composer.addPass(GS.gradePass);
 		if (THREE.FXAAShader) {
-			fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
-			fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
-			composer.addPass(fxaaPass);
+			GS.fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+			GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
+			GS.composer.addPass(GS.fxaaPass);
 		}
 	} else {
 		renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -60023,7 +60029,7 @@ var DATA_HASH = (() => {
 		normalMap: groundTex.normal,
 		roughness: 1,
 		metalness: 1,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 1.5
 	}), .293));
 	ground.rotation.x = -Math.PI / 2;
@@ -60144,7 +60150,7 @@ var DATA_HASH = (() => {
 		normalMap: groundTex.normal,
 		roughness: .8,
 		metalness: 1,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 1.5
 	}), .293);
 	const runeMat = new THREE.MeshBasicMaterial({
@@ -60153,7 +60159,7 @@ var DATA_HASH = (() => {
 		blending: THREE.AdditiveBlending,
 		depthWrite: false
 	});
-	let runeLevel = .7;
+	GS.runeLevel = .7;
 	{
 		const floor = new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(64, 68), 4, 4.25), roomFloorMat);
 		floor.rotation.x = -Math.PI / 2;
@@ -60374,8 +60380,8 @@ var DATA_HASH = (() => {
 		emissive: 3809292,
 		roughness: .8
 	});
-	let worldRnd = Math.random;
-	const rand = (a, b) => a + worldRnd() * (b - a);
+	GS.worldRnd = Math.random;
+	const rand = (a, b) => a + GS.worldRnd() * (b - a);
 	const SEED = (() => {
 		const d = /* @__PURE__ */ new Date();
 		return d.getUTCFullYear() * 1e4 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
@@ -60383,7 +60389,7 @@ var DATA_HASH = (() => {
 	const trueRandom = Math.random;
 	function seedRandom(s0) {
 		let s = s0 >>> 0;
-		worldRnd = () => {
+		GS.worldRnd = () => {
 			s = s + 1831565813 >>> 0;
 			let t = s;
 			t = Math.imul(t ^ t >>> 15, t | 1);
@@ -60528,7 +60534,7 @@ var DATA_HASH = (() => {
 		color: 3814706,
 		metalness: .55,
 		roughness: .55,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 1.1,
 		flatShading: true
 	});
@@ -60548,7 +60554,7 @@ var DATA_HASH = (() => {
 		color: 3811348,
 		metalness: .9,
 		roughness: .06,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 2.2,
 		flatShading: true
 	});
@@ -60801,7 +60807,7 @@ var DATA_HASH = (() => {
 		emissive: 0,
 		metalness: 1,
 		roughness: .25,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 1.6,
 		flatShading: true
 	});
@@ -60930,7 +60936,8 @@ var DATA_HASH = (() => {
 		] }
 	};
 	const rideG = {};
-	let ride = "buggy", ridePhase = 0;
+	GS.ridePhase = 0;
+	GS.ride = "buggy";
 	const hoverShadow = new THREE.Mesh(new THREE.CircleGeometry(1.9, 20), new THREE.MeshBasicMaterial({
 		color: 0,
 		transparent: true,
@@ -61107,7 +61114,7 @@ var DATA_HASH = (() => {
 				opacity: .42,
 				roughness: .6,
 				metalness: 0,
-				envMap: ENV,
+				envMap: GS.ENV,
 				envMapIntensity: .2,
 				flatShading: true,
 				depthWrite: false,
@@ -61143,7 +61150,7 @@ var DATA_HASH = (() => {
 			R.anim = (dt, sp) => {
 				spdS += ((car.airborne ? 0 : SPD.vel.length()) - spdS) * Math.min(1, 8 * dt);
 				const k = Math.min(1, spdS / 12);
-				legRoot.position.y = SPL.bodyH - .08 * k + Math.sin(ridePhase * 5) * .04 * k;
+				legRoot.position.y = SPL.bodyH - .08 * k + Math.sin(GS.ridePhase * 5) * .04 * k;
 				carGroup.updateMatrixWorld(true);
 				spBoxes.length = 0;
 				for (const o of obstacles) if (climbable(o) && Math.abs(o.mesh.position.x - car.pos.x) < o.hx + 6 && Math.abs(o.mesh.position.z - car.pos.z) < o.hz + 6) spBoxes.push(o);
@@ -61197,20 +61204,20 @@ var DATA_HASH = (() => {
 					}
 					legIK(L);
 				}
-				pyr.position.y = 1.95 + Math.sin(elapsed * 2) * .08;
-				pyr.rotation.y = Math.sin(elapsed * .7) * .2;
+				pyr.position.y = 1.95 + Math.sin(GS.elapsed * 2) * .08;
+				pyr.rotation.y = Math.sin(GS.elapsed * .7) * .2;
 				pilots.forEach((s, i) => {
-					s.material = chubMats[car.hp < car.maxHp * .4 ? 1 : 0][Math.floor(elapsed * 3 + i * 2) % CHUB_FR];
+					s.material = chubMats[car.hp < car.maxHp * .4 ? 1 : 0][Math.floor(GS.elapsed * 3 + i * 2) % CHUB_FR];
 				});
-				eyeMat.uniforms.t.value = elapsed;
-				eyeG.position.y = Math.sin(elapsed * 2.6) * .07;
+				eyeMat.uniforms.t.value = GS.elapsed;
+				eyeG.position.y = Math.sin(GS.elapsed * 2.6) * .07;
 			};
 		} else if (k === "halo") {
 			const gold = new THREE.MeshStandardMaterial({
 				color: 15258250,
 				metalness: .9,
 				roughness: .25,
-				envMap: ENV,
+				envMap: GS.ENV,
 				envMapIntensity: 1.6,
 				flatShading: true
 			});
@@ -61289,11 +61296,11 @@ var DATA_HASH = (() => {
 			P(new THREE.ConeGeometry(.22, 1.5, 5), gold, 0, 0, 2.3, T).rotation.x = Math.PI / 2;
 			P(new THREE.TorusGeometry(.4, .06, 5, 14), glow(new THREE.MeshBasicMaterial({ color: 16767322 }), 2.4), 0, 0, 1.75, T);
 			R.anim = (dt, sp) => {
-				core.position.y = 2 + Math.sin(elapsed * 2.2) * .16;
+				core.position.y = 2 + Math.sin(GS.elapsed * 2.2) * .16;
 				t1.rotation.y += dt * (1.2 + sp * .12);
-				t1.rotation.x = Math.sin(elapsed * .8) * .5;
+				t1.rotation.x = Math.sin(GS.elapsed * .8) * .5;
 				t2.rotation.x += dt * (1.7 + sp * .15);
-				t2.rotation.z = Math.cos(elapsed * .9) * .5;
+				t2.rotation.z = Math.cos(GS.elapsed * .9) * .5;
 			};
 		} else if (k === "unicorn") {
 			const white = new THREE.MeshStandardMaterial({
@@ -61369,7 +61376,7 @@ var DATA_HASH = (() => {
 			P(new THREE.BoxGeometry(.3, .3, .5), dark, 0, 0, .1, T);
 			P(new THREE.CylinderGeometry(.07, .09, 1.3, 6), dark, 0, .05, .95, T).rotation.x = Math.PI / 2;
 			R.anim = (dt, sp) => {
-				const k = Math.min(1, sp / 5), a = ridePhase * 2.4, beat = Math.floor(a / Math.PI);
+				const k = Math.min(1, sp / 5), a = GS.ridePhase * 2.4, beat = Math.floor(a / Math.PI);
 				if (beat !== R.beat) {
 					R.beat = beat;
 					if (sp > 1.5 && car.alive && !car.airborne && car.depth === 0) {
@@ -61390,16 +61397,16 @@ var DATA_HASH = (() => {
 				tor.position.y = Math.abs(Math.sin(a)) * .14 * k;
 				head.rotation.x = Math.sin(a * 2) * .06 * k;
 				tail.forEach((m, i) => {
-					m.position.x = Math.sin(elapsed * 5 + i * .7) * .08 * i;
+					m.position.x = Math.sin(GS.elapsed * 5 + i * .7) * .08 * i;
 				});
 				riders.forEach((s, i) => {
-					s.material = SW_ART.gremlin[i].walk[Math.floor(elapsed * 4 + i) % SW_FRAMES];
+					s.material = SW_ART.gremlin[i].walk[Math.floor(GS.elapsed * 4 + i) % SW_FRAMES];
 					s.position.y = 2.3 + tor.position.y + Math.abs(Math.sin(a + i)) * .1 * k;
 				});
 			};
 		}
 	}
-	let safe = null;
+	GS.safe = null;
 	function buildSafe() {
 		const g = new THREE.Group(), body = new THREE.Group();
 		g.add(body);
@@ -61482,7 +61489,7 @@ var DATA_HASH = (() => {
 		}
 		for (const z of [-.2, .3]) P(new THREE.BoxGeometry(.06, .12, .1), metal, 1.1, .88 + (z > 0 ? .36 : 0), -.24);
 		door.userData.safe = true;
-		safe = {
+		GS.safe = {
 			g,
 			body
 		};
@@ -61564,7 +61571,7 @@ var DATA_HASH = (() => {
 			puffs
 		};
 	}
-	const cartFor = (c) => bug && c === bug.g ? "spider" : cloud && c === cloud.g ? "halo" : safe && c === safe.g ? "buggy" : null;
+	const cartFor = (c) => bug && c === bug.g ? "spider" : cloud && c === cloud.g ? "halo" : GS.safe && c === GS.safe.g ? "buggy" : null;
 	let bug = null, bugPhase = 0;
 	const bugPrev = new THREE.Vector3();
 	function buildBug() {
@@ -61611,7 +61618,7 @@ var DATA_HASH = (() => {
 		};
 	}
 	function setRide(k) {
-		ride = k;
+		GS.ride = k;
 		abDirty = true;
 		const b = k === "buggy";
 		buggyParts.forEach((m) => m.visible = b);
@@ -61627,7 +61634,7 @@ var DATA_HASH = (() => {
 		car.hp = car.maxHp;
 		if (k === "spider" && !bug) buildBug();
 		if (k === "halo" && !cloud) buildCloud();
-		if (k === "buggy" && !safe) buildSafe();
+		if (k === "buggy" && !GS.safe) buildSafe();
 		for (const c of cartG.children) c.visible = cartFor(c) ? cartFor(c) === k : k === "unicorn";
 		carBub.mats = bubbleMats(k);
 		carBub.vee.material = carBub.mats.q1;
@@ -61655,9 +61662,9 @@ var DATA_HASH = (() => {
 		} else {
 			if (!rideG[k]) {
 				buildRide(k);
-				rideG[k].body.visible = rideG[k].tur.visible = ride === k;
+				rideG[k].body.visible = rideG[k].tur.visible = GS.ride === k;
 			}
-			if (k === "spider" && ride !== "spider" && rideG[k].pose) {
+			if (k === "spider" && GS.ride !== "spider" && rideG[k].pose) {
 				const q = carGroup.quaternion.clone();
 				carGroup.quaternion.identity();
 				rideG[k].pose();
@@ -61669,15 +61676,15 @@ var DATA_HASH = (() => {
 		const cartM = new THREE.Group();
 		if (k === "spider" && !bug) {
 			buildBug();
-			bug.g.visible = ride === "spider";
+			bug.g.visible = GS.ride === "spider";
 		}
 		if (k === "halo" && !cloud) {
 			buildCloud();
-			cloud.g.visible = ride === "halo";
+			cloud.g.visible = GS.ride === "halo";
 		}
-		if (k === "buggy" && !safe) {
+		if (k === "buggy" && !GS.safe) {
 			buildSafe();
-			safe.g.visible = ride === "buggy";
+			GS.safe.g.visible = GS.ride === "buggy";
 		}
 		for (const c of cartG.children) if (cartFor(c) ? cartFor(c) === k : k === "unicorn") take(c, cartM);
 		const anim = [];
@@ -61718,14 +61725,14 @@ var DATA_HASH = (() => {
 		const fx = Math.sin(car.heading), fz = Math.cos(car.heading), dmg = sp > 18 ? 6 : 4;
 		const gore = (t, r, y) => {
 			const dx = t.pos.x - car.pos.x, dz = t.pos.z - car.pos.z, d = Math.hypot(dx, dz) || .001;
-			if (d > car.radius + r + 1.3 || (dx * fx + dz * fz) / d < .55 || Math.abs(y - car.y) > 3.2 || (t.hornT || 0) > elapsed) return false;
-			t.hornT = elapsed + .45;
+			if (d > car.radius + r + 1.3 || (dx * fx + dz * fz) / d < .55 || Math.abs(y - car.y) > 3.2 || (t.hornT || 0) > GS.elapsed) return false;
+			t.hornT = GS.elapsed + .45;
 			hornV.set(fx, 0, fz);
 			tmp.set(car.pos.x + fx * 2.4, 2.6, car.pos.z + fz * 2.4);
 			spawnParticles(tmp, 15774760, 5, 7);
 			flash(tmp, 16767322, 2.2, .14, 2, false);
 			SFX.play("hit_flesh", tmp, { rate: .8 });
-			shake = Math.max(shake, .2);
+			GS.shake = Math.max(GS.shake, .2);
 			return true;
 		};
 		for (const m of swarm) if (!m.dead && gore(m, m.r, m.K.fly || 0)) hitCritter(m, dmg, hornV, 12);
@@ -61733,17 +61740,17 @@ var DATA_HASH = (() => {
 	}
 	function updateRide(dt) {
 		const sp = Math.hypot(car.vel.x, car.vel.z);
-		ridePhase += sp * dt * .45;
-		if (rideG[ride]) rideG[ride].anim(dt, sp);
+		GS.ridePhase += sp * dt * .45;
+		if (rideG[GS.ride]) rideG[GS.ride].anim(dt, sp);
 		if (hoverShadow.visible) hoverShadow.position.y = .04 - carGroup.position.y;
-		if (ride === "halo" && cloud) {
-			cloud.g.position.y = .12 + Math.sin(elapsed * 2) * .08;
+		if (GS.ride === "halo" && cloud) {
+			cloud.g.position.y = .12 + Math.sin(GS.elapsed * 2) * .08;
 			cloud.g.rotation.z = cart.phi * .6;
 			cloud.puffs.forEach((m, i) => {
-				if (i < 7) m.scale.x = m.scale.z = 1 + Math.sin(elapsed * 1.7 + i * 1.3) * .06;
+				if (i < 7) m.scale.x = m.scale.z = 1 + Math.sin(GS.elapsed * 1.7 + i * 1.3) * .06;
 			});
 		}
-		if (ride === "spider" && bug) {
+		if (GS.ride === "spider" && bug) {
 			bugPhase += Math.hypot(cart.pos.x - bugPrev.x, cart.pos.z - bugPrev.z) * 1.6;
 			bugPrev.copy(cart.pos);
 			bug.g.rotation.z = cartBody.rotation.z;
@@ -61798,7 +61805,8 @@ var DATA_HASH = (() => {
 			});
 		}
 	}
-	let fireCooldown = 0, muzzleTimer = 0;
+	GS.fireCooldown = 0;
+	GS.muzzleTimer = 0;
 	const mouseNdc = new THREE.Vector2(0, .3);
 	const raycaster = new THREE.Raycaster();
 	const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -.9);
@@ -61817,7 +61825,7 @@ var DATA_HASH = (() => {
 		if (performance.now() - touch.last > 800) touch.aiming = false;
 	});
 	function updateAim(dt) {
-		autoTarget = null;
+		GS.autoTarget = null;
 		if (touch.aiming) {
 			if (touch.aim.mag > .15) {
 				stickWorld(touch.aim.x, touch.aim.y, touch.aimDir);
@@ -61825,9 +61833,9 @@ var DATA_HASH = (() => {
 			}
 			groundAim.set(car.pos.x + touch.aimDir.x * touch.aimDist, 0, car.pos.z + touch.aimDir.z * touch.aimDist);
 			if (touch.enabled && touch.aim.mag <= .15 && car.alive && car.depth < .3) {
-				autoTarget = pickAutoTarget();
-				if (autoTarget) {
-					const tp = autoTargetPos(autoTarget);
+				GS.autoTarget = pickAutoTarget();
+				if (GS.autoTarget) {
+					const tp = autoTargetPos(GS.autoTarget);
 					groundAim.set(tp.x, 0, tp.z);
 				}
 			}
@@ -61854,13 +61862,13 @@ var DATA_HASH = (() => {
 			raycaster.setFromCamera(mouseNdc, camera);
 			raycaster.ray.intersectPlane(aimPlane, aimPoint);
 			raycaster.ray.intersectPlane(groundPlane, groundAim);
-			if (!mouseFire && car.alive && car.depth < .3) autoTarget = pickAutoTarget();
+			if (!GS.mouseFire && car.alive && car.depth < .3) GS.autoTarget = pickAutoTarget();
 		}
 		aimRing.position.set(groundAim.x, .04, groundAim.z);
 		aimRing.rotation.y += dt * 1.5;
 		const tw = new THREE.Vector3();
 		turret.getWorldPosition(tw);
-		const tgt = autoTarget ? autoTargetPos(autoTarget) : aimPoint;
+		const tgt = GS.autoTarget ? autoTargetPos(GS.autoTarget) : aimPoint;
 		let d = Math.atan2(tgt.x - tw.x, tgt.z - tw.z) - car.heading - turret.rotation.y;
 		d = Math.atan2(Math.sin(d), Math.cos(d));
 		turret.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 14 * dt);
@@ -61894,20 +61902,20 @@ var DATA_HASH = (() => {
 		const tip = new THREE.Vector3();
 		muzzle.getWorldPosition(tip);
 		const yaw = car.heading + turret.rotation.y;
-		const ap = autoTarget ? fireV.copy(autoTargetPos(autoTarget)).setY(.9) : aimPoint;
+		const ap = GS.autoTarget ? fireV.copy(autoTargetPos(GS.autoTarget)).setY(.9) : aimPoint;
 		const hd = Math.hypot(ap.x - tip.x, ap.z - tip.z);
 		const pitch = THREE.MathUtils.clamp(Math.atan2(ap.y - tip.y, Math.max(hd, 3)), -.5, .1);
 		const fwd = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-		const lv = weapons.spread, n = lv ? ride === "halo" ? Math.max(1, Math.round(W_STATS.spread.n[lv - 1] * .7)) : W_STATS.spread.n[lv - 1] : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
+		const lv = weapons.spread, n = lv ? GS.ride === "halo" ? Math.max(1, Math.round(W_STATS.spread.n[lv - 1] * .7)) : W_STATS.spread.n[lv - 1] : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
 		for (let i = 0; i < n; i++) {
 			const spread = (n > 1 ? (i / (n - 1) - .5) * arc : 0) + rand(-.02, .02);
 			const dir = fwd.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), spread);
-			const star = ride === "spider";
+			const star = GS.ride === "spider";
 			const m = new THREE.Mesh(star ? starGeo : bulletGeo, star ? starMat : bulletMat);
 			m.position.copy(tip);
 			m.lookAt(tip.x + dir.x, tip.y + dir.y, tip.z + dir.z);
 			scene.add(m);
-			const holy = ride === "halo";
+			const holy = GS.ride === "halo";
 			bullets.push({
 				m,
 				v: dir.multiplyScalar(BULLET.speed[star ? "star" : holy ? "holy" : "base"]),
@@ -61916,14 +61924,14 @@ var DATA_HASH = (() => {
 				dmg: BULLET.dmg
 			});
 		}
-		muzzleTimer = .04;
+		GS.muzzleTimer = .04;
 		muzzleLight.position.copy(tip);
 		muzzleLight.intensity = Math.max(muzzleLight.intensity, .55 * LIGHT);
 		SFX.play("shot", tip);
 		NET.fireSeq = (NET.fireSeq + 1) % 1e5;
 	}
 	const keys = {};
-	let mouseFire = false;
+	GS.mouseFire = false;
 	addEventListener("keydown", (e) => {
 		if (e.target && e.target.tagName === "INPUT") return;
 		keys[e.code] = true;
@@ -61944,35 +61952,35 @@ var DATA_HASH = (() => {
 			if (e.code === "Digit2") useUlt("hands");
 			if (e.code === "KeyC") convertCoins();
 		}
-		if (e.code === "KeyE" && !e.repeat && unloadAltar) doUnload();
+		if (e.code === "KeyE" && !e.repeat && GS.unloadAltar) doUnload();
 	});
 	addEventListener("keyup", (e) => {
 		keys[e.code] = false;
 	});
-	let rmb = false;
+	GS.rmb = false;
 	addEventListener("blur", () => {
 		for (const k in keys) keys[k] = false;
-		mouseFire = false;
-		rmb = false;
+		GS.mouseFire = false;
+		GS.rmb = false;
 	});
 	renderer.domElement.addEventListener("mousedown", (e) => {
-		if (e.button === 0) mouseFire = true;
+		if (e.button === 0) GS.mouseFire = true;
 		if (e.button === 2) special();
 	});
 	addEventListener("mouseup", (e) => {
-		if (e.button === 0) mouseFire = false;
-		if (e.button === 2) rmb = false;
+		if (e.button === 0) GS.mouseFire = false;
+		if (e.button === 2) GS.rmb = false;
 	});
 	addEventListener("contextmenu", (e) => e.preventDefault());
 	addEventListener("wheel", (e) => {
-		viewSize = THREE.MathUtils.clamp(viewSize * (e.deltaY > 0 ? 1.1 : .9), 10, 55);
+		GS.viewSize = THREE.MathUtils.clamp(GS.viewSize * (e.deltaY > 0 ? 1.1 : .9), 10, 55);
 		resizeCam();
 	}, { passive: true });
 	addEventListener("resize", () => {
 		renderer.setSize(innerWidth, innerHeight);
 		resizeCam();
-		if (composer) composer.setSize(innerWidth, innerHeight);
-		if (fxaaPass) fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
+		if (GS.composer) GS.composer.setSize(innerWidth, innerHeight);
+		if (GS.fxaaPass) GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
 	});
 	const STICK_R = 56;
 	const ISO_SQUASH = Math.sin(Math.atan(1 / Math.SQRT2));
@@ -62275,7 +62283,7 @@ var DATA_HASH = (() => {
 		addPillar(x, z);
 	}
 	for (let i = 0; i < 80; i++) addCrate();
-	let kills = 0;
+	GS.kills = 0;
 	const killsEl = document.getElementById("kills");
 	const spdEl = document.getElementById("spd");
 	const respawnQueue = [];
@@ -62323,7 +62331,7 @@ var DATA_HASH = (() => {
 	const mouthMat = new THREE.MeshBasicMaterial({ color: 2753800 });
 	const enemies = [];
 	const RED_COUNT = 20, ELITE_COUNT = 7, WAKE_DIST = 20;
-	let enemyKills = 0;
+	GS.enemyKills = 0;
 	const ekillsEl = document.getElementById("ekills");
 	function makeEnemy(elite = false) {
 		const s = elite ? rand(2.9, 3.4) : rand(1.9, 2.4), lowH = s * .45, upH = s * .55;
@@ -62434,7 +62442,7 @@ var DATA_HASH = (() => {
 				color: 9050726,
 				roughness: .28,
 				metalness: .65,
-				envMap: ENV,
+				envMap: GS.ENV,
 				envMapIntensity: 1.6
 			}) : enemyRed,
 			matDormant: elite ? new THREE.MeshStandardMaterial({
@@ -62453,7 +62461,7 @@ var DATA_HASH = (() => {
 		e.upper.material = mat;
 	}
 	function flickerElite(e) {
-		const t = elapsed * 6 + e.phase, spark = Math.random() < .07 ? 1 : 0;
+		const t = GS.elapsed * 6 + e.phase, spark = Math.random() < .07 ? 1 : 0;
 		if (e.awake) {
 			e.matAwake.color.setHSL((.84 + .08 * Math.sin(t * .45)) % 1, .8, .2, THREE.SRGBColorSpace);
 			e.matAwake.emissive.setHSL((.8 + .12 * Math.sin(t)) % 1, 1, .5, THREE.SRGBColorSpace).multiplyScalar(.015 + .045 * (.5 + .5 * Math.sin(t * 2.3)) + spark * .9);
@@ -62495,8 +62503,8 @@ var DATA_HASH = (() => {
 		if (!car.alive || car.burrow !== "up") return;
 		if (domes.length && inDome(car.pos.x, car.pos.z)) return;
 		if (haloHoly()) {
-			if ((car.holyT || 0) < elapsed) {
-				car.holyT = elapsed + .25;
+			if ((car.holyT || 0) < GS.elapsed) {
+				car.holyT = GS.elapsed + .25;
 				SFX.play("pickup", car.pos, {
 					vol: .25,
 					rate: 2
@@ -62506,9 +62514,9 @@ var DATA_HASH = (() => {
 			return;
 		}
 		car.hp -= dmg;
-		car.lastHurt = elapsed;
-		hurtFlash = .18;
-		shake = .6;
+		car.lastHurt = GS.elapsed;
+		GS.hurtFlash = .18;
+		GS.shake = .6;
 		if (car.hp > 0) crewSay(car.hp < car.maxHp * .35 ? "lowhp" : "hurt", .7);
 		cartKick(5);
 		cartFling(safeCount(cart.riders.length > 6 ? 2 : 1), 0);
@@ -62527,7 +62535,7 @@ var DATA_HASH = (() => {
 			flash(tmp, 16748608, 14, .4, 4);
 			burst(tmp, 3814964, 10, 2.6, 5, .55);
 			spawnParticles(tmp.copy(car.pos).setY(1), 16751164, 14, 10);
-			shake = 1.2;
+			GS.shake = 1.2;
 			SFX.play("explode", car.pos);
 			document.getElementById("dead").style.display = "flex";
 		}
@@ -62548,7 +62556,7 @@ var DATA_HASH = (() => {
 		}
 	}
 	const enemyQueue = [];
-	let diggers = 0;
+	GS.diggers = 0;
 	function enemyBump(e) {
 		const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist, minD = car.radius + e.r;
 		if (!(car.alive && car.depth < .3 && car.y < e.s * .8 && dist < minD)) return;
@@ -62560,12 +62568,12 @@ var DATA_HASH = (() => {
 			e.pos.z -= nz * push * .5;
 		}
 		const vn = car.vel.x * -nx + car.vel.z * -nz;
-		if (!e.awake && vn > RAM_SPEED && (e.ramT || 0) < elapsed) {
-			e.ramT = elapsed + .5;
+		if (!e.awake && vn > RAM_SPEED && (e.ramT || 0) < GS.elapsed) {
+			e.ramT = GS.elapsed + .5;
 			hitEnemy(e, tmp.set(-nx, 0, -nz), 1, 14);
 			SFX.play("hit_flesh", e.pos);
 			e.stun = .6;
-			shake = Math.max(shake, .3);
+			GS.shake = Math.max(GS.shake, .3);
 			car.speed *= .7;
 		} else if (vn > 0) {
 			car.vel.x += nx * vn;
@@ -62590,7 +62598,7 @@ var DATA_HASH = (() => {
 		if (e.elite) flickerElite(e);
 		e.root.position.set(e.pos.x, e.hostCarry ? 1.6 : 0, e.pos.z);
 		if (!e.awake) {
-			e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * .025;
+			e.hop.scale.y = 1 + Math.sin(GS.elapsed * 2.2 + e.phase) * .025;
 			e.root.rotation.y = e.yaw;
 			return;
 		}
@@ -62616,7 +62624,7 @@ var DATA_HASH = (() => {
 		SFX.play(e.elite ? "elite_die" : "biter_die", e.pos);
 	}
 	function updateEnemies(dt) {
-		diggers = 0;
+		GS.diggers = 0;
 		for (let ei = 0; ei < enemies.length; ei++) {
 			const e = enemies[ei];
 			if (NET.client) {
@@ -62651,7 +62659,7 @@ var DATA_HASH = (() => {
 			const minD = car.radius + e.r;
 			if (e.elite) flickerElite(e);
 			if (!e.awake) {
-				e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * .025;
+				e.hop.scale.y = 1 + Math.sin(GS.elapsed * 2.2 + e.phase) * .025;
 				if (seen && dist < WAKE_DIST) wakeEnemy(e);
 				continue;
 			}
@@ -62673,7 +62681,7 @@ var DATA_HASH = (() => {
 					tz = nz * e.speed;
 				} else if (e.stun <= 0) {
 					digging = true;
-					diggers++;
+					GS.diggers++;
 					e.vel.multiplyScalar(.8);
 				}
 			} else if (scared && dist < 42) {
@@ -62720,7 +62728,7 @@ var DATA_HASH = (() => {
 			e.hop.position.y = h * .55 + surprise;
 			const squash = 1 - (1 - h) * .18;
 			e.hop.scale.set(1 + (1 - squash) * .6, squash, 1 + (1 - squash) * .6);
-			const targetOpen = e.charge > 0 ? .95 : digging ? .2 + .6 * (.5 + .5 * Math.sin(elapsed * 22 + e.phase)) : scared ? .6 : !seen ? .1 : dist < 7 ? .25 + .5 * (.5 + .5 * Math.sin(elapsed * 18 + e.phase)) : .18;
+			const targetOpen = e.charge > 0 ? .95 : digging ? .2 + .6 * (.5 + .5 * Math.sin(GS.elapsed * 22 + e.phase)) : scared ? .6 : !seen ? .1 : dist < 7 ? .25 + .5 * (.5 + .5 * Math.sin(GS.elapsed * 18 + e.phase)) : .18;
 			e.open += (targetOpen - e.open) * Math.min(1, 14 * dt);
 			e.pivot.rotation.x = -e.open;
 			e.biteCd -= dt;
@@ -62887,7 +62895,7 @@ var DATA_HASH = (() => {
 		gloop: 2,
 		oculon: 2
 	};
-	let mobShots = 0;
+	GS.mobShots = 0;
 	const mobGeo = [
 		(() => {
 			const g = new THREE.OctahedronGeometry(.3, 0);
@@ -62951,8 +62959,8 @@ var DATA_HASH = (() => {
 	}
 	function updateEShots(dt) {
 		const sh = shield();
-		mobShots = 0;
-		for (const s of eshots) if (s.small) mobShots++;
+		GS.mobShots = 0;
+		for (const s of eshots) if (s.small) GS.mobShots++;
 		for (let i = eshots.length - 1; i >= 0; i--) {
 			const s = eshots[i], p = s.m.position;
 			s.life -= dt;
@@ -63015,7 +63023,7 @@ var DATA_HASH = (() => {
 	function hitEnemy(e, dir, dmg = 1, push = 4) {
 		if (NET.client) {
 			e.flash = .07;
-			e.myHit = elapsed;
+			e.myHit = GS.elapsed;
 			netEv({
 				t: "eh",
 				i: enemies.indexOf(e),
@@ -63039,15 +63047,15 @@ var DATA_HASH = (() => {
 			e.root.visible = false;
 			enemyDieFx(e);
 			if (!NET.applying) {
-				enemyKills++;
-				ekillsEl.textContent = enemyKills;
+				GS.enemyKills++;
+				ekillsEl.textContent = GS.enemyKills;
 				crewKill(e.elite);
 				e.pos.x, e.pos.z;
 				lootFrom(e.elite ? "elite" : "enemy", e.pos.x, e.pos.z);
 			}
 			if (e.elite) {
 				dropLoot(e.pos);
-				shake = Math.max(shake, .5);
+				GS.shake = Math.max(GS.shake, .5);
 			}
 			enemyQueue.push({
 				e,
@@ -63093,7 +63101,7 @@ var DATA_HASH = (() => {
 				rate: .8
 			});
 		}
-		shake = Math.max(shake, Math.min(.18, -vn * .008));
+		GS.shake = Math.max(GS.shake, Math.min(.18, -vn * .008));
 	}
 	function resolveCarVsBox(o) {
 		if (o.rock) return resolveCarVsRock(o);
@@ -63135,7 +63143,7 @@ var DATA_HASH = (() => {
 			}
 			car.speed *= .85;
 			car.vel.multiplyScalar(.9);
-			shake = Math.max(shake, .3);
+			GS.shake = Math.max(GS.shake, .3);
 			return;
 		}
 		const push = car.radius - d;
@@ -63160,11 +63168,11 @@ var DATA_HASH = (() => {
 		new THREE.BoxGeometry(1.3, 1, 1.1),
 		new THREE.DodecahedronGeometry(.9, 0)
 	];
-	let pillarsSmashed = 0;
+	GS.pillarsSmashed = 0;
 	function smashPillar(o, vel) {
 		if (!o.mesh.visible || o.rock) return;
 		o.mesh.visible = false;
-		pillarsSmashed++;
+		GS.pillarsSmashed++;
 		if (!NET.applying) netEv({
 			t: "smash",
 			i: obstacles.indexOf(o),
@@ -63197,7 +63205,7 @@ var DATA_HASH = (() => {
 		burst(tmp, 10130828, 10, 2.6, 6, .5);
 		spawnParticles(tmp, 11843778, 16, 10);
 		flash(tmp, 16773328, 5, .15, 1.6, false);
-		shake = Math.max(shake, .55);
+		GS.shake = Math.max(GS.shake, .55);
 		SFX.play("hit_stone", p, { vol: 1 });
 		SFX.play("crate_break", p, { rate: .6 });
 		crewSay("smash", .6);
@@ -63303,8 +63311,8 @@ var DATA_HASH = (() => {
 			SFX.play("crate_break", o.mesh.position);
 			flash(o.mesh.position, 16756832, 4.5, .18, 1.6, false);
 			burst(o.mesh.position, 10521194, 5, 1.6, 3.5, .35);
-			kills++;
-			killsEl.textContent = kills;
+			GS.kills++;
+			killsEl.textContent = GS.kills;
 			crateDrop(o);
 			if (!NET.applying) {
 				o.mesh.position.x, o.mesh.position.z;
@@ -63332,7 +63340,7 @@ var DATA_HASH = (() => {
 		const D = 1 + (abLv.drill >= 1 ? .5 : 0);
 		if (weapons.nova) {
 			const C = W_STATS.nova.cd[weapons.nova - 1];
-			return Math.abs(novaT - C / 2) < Math.min(C * .4, D / 2) && threatNear(16);
+			return Math.abs(GS.novaT - C / 2) < Math.min(C * .4, D / 2) && threatNear(16);
 		}
 		drillCyc = (drillCyc + dt) % 2.4;
 		return drillCyc < D && threatNear(16);
@@ -63374,7 +63382,7 @@ var DATA_HASH = (() => {
 	drillArc.visible = false;
 	scene.add(drillArc);
 	function updateDrill(dt) {
-		const on = abilities.drill && ride === "buggy" && car.alive && car.burrow === "up" && drillAuto(dt);
+		const on = abilities.drill && GS.ride === "buggy" && car.alive && car.burrow === "up" && drillAuto(dt);
 		drillRPM += ((on ? 1 : 0) - drillRPM) * Math.min(1, (on ? 5 : 2) * dt);
 		drillSpin.rotation.z += drillRPM * 45 * dt;
 		SFX.loop("drill", drillRPM > .02 ? .12 + .3 * drillRPM : 0, .45 + .75 * drillRPM);
@@ -63386,10 +63394,10 @@ var DATA_HASH = (() => {
 			drillArc.rotation.y = car.heading;
 			drillArc.scale.setScalar(drillRMul());
 			const k = Math.min(1, drillRPM / .55);
-			arcFillMat.opacity = .2 * k + (drillRPM >= .55 ? .04 * Math.sin(elapsed * 20) : 0);
+			arcFillMat.opacity = .2 * k + (drillRPM >= .55 ? .04 * Math.sin(GS.elapsed * 20) : 0);
 			arcEdgeMat.opacity = .75 * k;
 			for (const m of drillArc.children) if (m.userData.phase !== void 0) {
-				const t = (elapsed * 1.6 + m.userData.phase) % 1;
+				const t = (GS.elapsed * 1.6 + m.userData.phase) % 1;
 				const rad = 1 + t * (DRILL_ARC_R - 1.2);
 				m.scale.set(rad, 1, rad);
 				m.material.opacity = .35 * k * (1 - t);
@@ -63439,7 +63447,7 @@ var DATA_HASH = (() => {
 		drillMat.emissive.setHex(grinding ? 16730624 : 0);
 		arcEdgeMat.color.setHex(grinding ? 16771504 : 16760938).multiplyScalar(3.5);
 		if (grinding) {
-			shake = Math.max(shake, .18);
+			GS.shake = Math.max(GS.shake, .18);
 			car.speed *= 1 - 1.5 * dt;
 		}
 		SFX.loop("grind", grinding ? .4 * drillRPM : 0, .9 + .2 * drillRPM);
@@ -63510,10 +63518,10 @@ var DATA_HASH = (() => {
 			const e = h.ref;
 			e.pos.set(holdPos.x, 0, holdPos.z);
 			e.root.position.set(holdPos.x, holdPos.y - e.s / 2, holdPos.z);
-			e.root.rotation.set(Math.sin(elapsed * 25) * .15, car.heading + Math.PI, Math.sin(elapsed * 19) * .15);
+			e.root.rotation.set(Math.sin(GS.elapsed * 25) * .15, car.heading + Math.PI, Math.sin(GS.elapsed * 19) * .15);
 			e.hop.position.y = 0;
 			e.hop.scale.set(1, 1, 1);
-			e.open = .35 + .35 * Math.sin(elapsed * 22);
+			e.open = .35 + .35 * Math.sin(GS.elapsed * 22);
 			e.pivot.rotation.x = -e.open;
 		} else {
 			h.ref.mesh.position.copy(holdPos);
@@ -63547,7 +63555,7 @@ var DATA_HASH = (() => {
 			th.pos.x = THREE.MathUtils.clamp(th.pos.x, -lim, lim);
 			th.pos.z = THREE.MathUtils.clamp(th.pos.z, -lim, lim);
 		}
-		shake = Math.max(shake, .35);
+		GS.shake = Math.max(GS.shake, .35);
 		if (th.kind === "crate") {
 			const o = th.ref;
 			o.carried = false;
@@ -63579,7 +63587,7 @@ var DATA_HASH = (() => {
 			throwHeld(null);
 			grab.state = "retract";
 		}
-		const want = abilities.grab && car.alive && car.burrow === "up" && rmb;
+		const want = abilities.grab && car.alive && car.burrow === "up" && GS.rmb;
 		let targetOpen = .15, aimYaw = yawToward(groundAim.x, groundAim.z);
 		const cand = abilities.grab && car.alive && car.burrow === "up" && (grab.state === "idle" || grab.state === "reach") ? findCandidate() : null;
 		if (grab.state === "idle") {
@@ -63619,7 +63627,7 @@ var DATA_HASH = (() => {
 					e.biteCd = Math.max(e.biteCd, .6);
 					spawnParticles(tmp.set(e.pos.x, 2, e.pos.z), 13648032, 14, 9);
 					spawnParticles(new THREE.Vector3().copy(armW).addScaledVector(tmp.set(-ax / ad, 0, -az / ad), grab.len).setY(2), 16769162, 6, 8);
-					shake = Math.max(shake, .6);
+					GS.shake = Math.max(GS.shake, .6);
 					flashAlert("ARCH-BITER WON'T BUDGE!");
 					SFX.play("zap", e.pos);
 					SFX.play("growl_elite", e.pos, { delay: .05 });
@@ -63636,7 +63644,7 @@ var DATA_HASH = (() => {
 					grab.state = "pull";
 					SFX.play("slap", p);
 					holdPos.set(p.x, HOLD_Y, p.z);
-					shake = Math.max(shake, .2);
+					GS.shake = Math.max(GS.shake, .2);
 				}
 			}
 			if (grab.state === "reach" && (!want || grab.len >= ARM_MAX)) {
@@ -63651,7 +63659,7 @@ var DATA_HASH = (() => {
 			}
 		} else if (grab.state === "pull" || grab.state === "hold") {
 			const h = grab.held;
-			const dest = toWorld(0, 3.4 + h.r * .7, tmp).setY(HOLD_Y + car.y + Math.sin(elapsed * 9) * .05);
+			const dest = toWorld(0, 3.4 + h.r * .7, tmp).setY(HOLD_Y + car.y + Math.sin(GS.elapsed * 9) * .05);
 			const step = PULL_SPEED * dt, gap = holdPos.distanceTo(dest);
 			if (grab.state === "hold" || gap <= step) {
 				holdPos.copy(dest);
@@ -63679,7 +63687,7 @@ var DATA_HASH = (() => {
 					hitEnemy(e, tmp.set(dx / dd, 0, dz / dd), sp > 6 ? 1.5 : .5, 6 + sp * .6);
 					spawnParticles(tmp.copy(e.pos).setY(1), 16765562, 4, 6);
 					SFX.play("hit_flesh", e.pos);
-					shake = Math.max(shake, .25);
+					GS.shake = Math.max(GS.shake, .25);
 				}
 			}
 			if (!want && grab.held) {
@@ -63691,7 +63699,7 @@ var DATA_HASH = (() => {
 		targetMarker.visible = !!showT;
 		if (showT) {
 			const p = tgtPos(showT);
-			targetMarker.position.set(p.x, showT.s + 1.3 + Math.sin(elapsed * 6) * .15, p.z);
+			targetMarker.position.set(p.x, showT.s + 1.3 + Math.sin(GS.elapsed * 6) * .15, p.z);
 			targetMarker.rotation.y += dt * 4;
 		}
 		let dy = aimYaw - grab.yaw;
@@ -63786,13 +63794,13 @@ var DATA_HASH = (() => {
 	let dirtT = 0;
 	const carSeen = () => car.alive && car.depth < .5;
 	function special() {
-		if (ride === "spider") toggleBurrow();
-		else if (ride === "unicorn") bombDome();
-		else if (ride === "buggy") throwDecoys();
-		else if (ride === "halo") releaseCubes();
+		if (GS.ride === "spider") toggleBurrow();
+		else if (GS.ride === "unicorn") bombDome();
+		else if (GS.ride === "buggy") throwDecoys();
+		else if (GS.ride === "halo") releaseCubes();
 	}
 	function toggleBurrow() {
-		if (!abilities.burrow || ride !== "spider" || !car.alive || car.burrowCd > 0 || car.airborne) return;
+		if (!abilities.burrow || GS.ride !== "spider" || !car.alive || car.burrowCd > 0 || car.airborne) return;
 		if (car.burrow === "up" || car.burrow === "rising") {
 			car.burrow = "down";
 			SFX.play("dig_down", car.pos);
@@ -63802,7 +63810,7 @@ var DATA_HASH = (() => {
 			SFX.play("dig_up", car.pos);
 		}
 		car.burrowCd = .25;
-		shake = Math.max(shake, .3);
+		GS.shake = Math.max(GS.shake, .3);
 		spawnParticles(tmp.copy(car.pos).setY(.5), 7035454, 12, 8);
 	}
 	function updateBurrow(dt) {
@@ -63824,7 +63832,7 @@ var DATA_HASH = (() => {
 				dirtT = .03;
 				spawnParticles(tmp.copy(car.pos).setY(.3), Math.random() < .7 ? 7035454 : 4869957, 3, 9);
 			}
-			shake = Math.max(shake, .15);
+			GS.shake = Math.max(GS.shake, .15);
 		}
 		carGroup.position.y = car.y - car.depth * BURY_DEPTH;
 		carGroup.visible = car.alive && car.depth < .97;
@@ -63832,7 +63840,7 @@ var DATA_HASH = (() => {
 		if (mound.visible) {
 			const sc = Math.min(1, car.depth * 1.3);
 			mound.position.set(car.pos.x, 0, car.pos.z);
-			mound.scale.set(sc, sc * (car.burrow === "under" ? 1 + Math.sin(elapsed * 3) * .06 : 1), sc);
+			mound.scale.set(sc, sc * (car.burrow === "under" ? 1 + Math.sin(GS.elapsed * 3) * .06 : 1), sc);
 		}
 	}
 	const SKID_SLIP = 2.6, SKID_LIFE = 6, SKID_MAX = 360;
@@ -63850,7 +63858,7 @@ var DATA_HASH = (() => {
 		skidT -= dt;
 		dustT -= dt;
 		const gspd = Math.hypot(car.vel.x, car.vel.z);
-		if (ride === "buggy" && car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {
+		if (GS.ride === "buggy" && car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {
 			dustT = .045;
 			wheels[2 + (Math.random() < .5 ? 0 : 1)].pivot.getWorldPosition(wpos);
 			wpos.y = .3;
@@ -63911,7 +63919,7 @@ var DATA_HASH = (() => {
 	function ringBlast(x, z, r, dmg, push, col, stun) {
 		burst(tmp.set(x, .4, z), col, 12, r * .7, 9, .5);
 		flash(tmp, col, r, .25, 3, false);
-		shake = Math.max(shake, .3);
+		GS.shake = Math.max(GS.shake, .3);
 		if (NET.client) {
 			netEv({
 				t: "blast",
@@ -63952,7 +63960,7 @@ var DATA_HASH = (() => {
 	const domeGeo = new THREE.SphereGeometry(1, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), domeRingGeo = new THREE.RingGeometry(.95, 1, 64);
 	domeRingGeo.rotateX(-Math.PI / 2);
 	function bombDome() {
-		if (!abilities.bomb || ride !== "unicorn" || !car.alive || car.burrow !== "up" || bombCd > 0) return;
+		if (!abilities.bomb || GS.ride !== "unicorn" || !car.alive || car.burrow !== "up" || bombCd > 0) return;
 		const L = abLv.bomb;
 		bombCd = BOMB.cd[L];
 		const x = r1(car.pos.x), z = r1(car.pos.z), r = BOMB.r[L], T = BOMB.T[L];
@@ -64010,7 +64018,7 @@ var DATA_HASH = (() => {
 			vol: .6,
 			rate: 1.3
 		});
-		shake = Math.max(shake, .35);
+		GS.shake = Math.max(GS.shake, .35);
 	}
 	const inDome = (x, z) => domes.some((D) => Math.hypot(x - D.x, z - D.z) < D.r);
 	function updateDomes(dt) {
@@ -64020,7 +64028,7 @@ var DATA_HASH = (() => {
 			D.t += dt;
 			const k = Math.min(1, D.t / .18), fade = Math.min(1, (D.T - D.t) / .4);
 			D.m.scale.setScalar(D.r * (.4 + .6 * k));
-			D.m.material.opacity = .11 * fade * k + .03 * Math.sin(elapsed * 14) * fade;
+			D.m.material.opacity = .11 * fade * k + .03 * Math.sin(GS.elapsed * 14) * fade;
 			D.ring.material.opacity = .8 * fade;
 			if (!NET.client) {
 				for (const m of swarm) {
@@ -64053,11 +64061,11 @@ var DATA_HASH = (() => {
 			}
 		}
 	}
-	const activeCdK = () => ride === "unicorn" ? Math.max(0, bombCd) / BOMB.cd[abLv.bomb] : ride === "buggy" ? Math.max(0, decoyCd) / DECOY_CD : ride === "halo" ? Math.max(0, cubeCd) / CUBE_CD : 0;
+	const activeCdK = () => GS.ride === "unicorn" ? Math.max(0, bombCd) / BOMB.cd[abLv.bomb] : GS.ride === "buggy" ? Math.max(0, decoyCd) / DECOY_CD : GS.ride === "halo" ? Math.max(0, cubeCd) / CUBE_CD : 0;
 	const DECOY_CD = 9, DECOY_T = 3.2, decoys = [];
 	let decoyCd = 0;
 	function throwDecoys() {
-		if (!abilities.decoy || ride !== "buggy" || !car.alive || decoyCd > 0) return;
+		if (!abilities.decoy || GS.ride !== "buggy" || !car.alive || decoyCd > 0) return;
 		decoyCd = DECOY_CD;
 		const n = 1 + abLv.decoy, dx = groundAim.x - car.pos.x, dz = groundAim.z - car.pos.z, dd = Math.hypot(dx, dz) || 1;
 		const a0 = Math.atan2(dx / dd, dz / dd), L = THREE.MathUtils.clamp(dd, 7, 16);
@@ -64153,7 +64161,7 @@ var DATA_HASH = (() => {
 		12121536
 	];
 	function releaseCubes() {
-		if (!abilities.cubes || ride !== "halo" || !car.alive || cubeCd > 0) return;
+		if (!abilities.cubes || GS.ride !== "halo" || !car.alive || cubeCd > 0) return;
 		cubeCd = CUBE_CD;
 		const n = abLv.cubes >= 1 ? 5 : 3;
 		spawnCubes(n, null, abLv.cubes);
@@ -64370,7 +64378,7 @@ var DATA_HASH = (() => {
 		}
 	}
 	function updateTrails(dt) {
-		trailFor("me", car.pos, ride === "unicorn" && car.alive && Math.abs(car.speed) > 3, ride === "unicorn" && abilities.trail ? abLv.trail + 1 : 0, dt);
+		trailFor("me", car.pos, GS.ride === "unicorn" && car.alive && Math.abs(car.speed) > 3, GS.ride === "unicorn" && abilities.trail ? abLv.trail + 1 : 0, dt);
 		for (const R of NET.remotes.values()) trailFor(R.peer, R.pos, R.up && Math.hypot(R.vel.x, R.vel.z) > 3, R.ride === "unicorn" ? R.tl || 0 : 0, dt);
 		if (NET.client || (trailTick += dt) < .1) return;
 		trailTick = 0;
@@ -64383,13 +64391,14 @@ var DATA_HASH = (() => {
 		}
 	}
 	const pedestals = [];
-	let wbKilled = 0, wbSpawned = false;
+	GS.wbSpawned = false;
+	GS.wbKilled = 0;
 	const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({
 		color: 7300184,
 		roughness: .9
 	});
 	const PED_RISE_R = 25, PED_GUARD_R = 32;
-	const firstGun = () => pedestals.length ? pedestals[0].k : ride === "halo" ? "nova" : "spread";
+	const firstGun = () => pedestals.length ? pedestals[0].k : GS.ride === "halo" ? "nova" : "spread";
 	const pedIcon = (k) => k === "jump" ? "jump" : "w_" + k;
 	const pedHave = (k) => k === "jump" ? !!abilities.jump : weapons[k] > 0;
 	function addPedestal(k, x, z) {
@@ -64513,11 +64522,11 @@ var DATA_HASH = (() => {
 	}
 	const armFx = [];
 	function spawnWanderers() {
-		wbSpawned = true;
+		GS.wbSpawned = true;
 		wbCheckT = 0;
 		wbTopUp(0);
-		rigOwed = Math.max(0, 2 - swarm.filter((m) => m.rig && !m.dead).length);
-		rigT = 0;
+		GS.rigOwed = Math.max(0, 2 - swarm.filter((m) => m.rig && !m.dead).length);
+		GS.rigT = 0;
 		flashAlert("BOSS HUNT! LOG MACHINES ARE BOSSES TOO");
 		netEv({
 			t: "alert",
@@ -64572,9 +64581,9 @@ var DATA_HASH = (() => {
 				spr.material.map = pickupTex[gift];
 				spr.material.needsUpdate = true;
 			}
-			const s = 3.4 + Math.sin(elapsed * 4 + m.id) * .3;
+			const s = 3.4 + Math.sin(GS.elapsed * 4 + m.id) * .3;
 			spr.scale.set(s, s, 1);
-			spr.position.set(m.pos.x, (m.K.fly || 0) + m.K.size + 2.6 + Math.sin(elapsed * 2.2 + m.id) * .35, m.pos.z);
+			spr.position.set(m.pos.x, (m.K.fly || 0) + m.K.size + 2.6 + Math.sin(GS.elapsed * 2.2 + m.id) * .35, m.pos.z);
 		}
 	}
 	function makeWanderer(m) {
@@ -64633,13 +64642,13 @@ var DATA_HASH = (() => {
 			P.t += dt;
 			P.ring.rotation.y += dt;
 			if (P.state === "dormant") {
-				P.ring.material.opacity = .45 + Math.sin(elapsed * 4 + i) * .3;
+				P.ring.material.opacity = .45 + Math.sin(GS.elapsed * 4 + i) * .3;
 				if (car.alive && d < PED_RISE_R) {
 					P.state = "rising";
 					P.t = 0;
 					P.icon.visible = true;
 					P.dome.visible = true;
-					shake = Math.max(shake, .5);
+					GS.shake = Math.max(GS.shake, .5);
 					SFX.play("tent_slam", tmp.set(P.x, 0, P.z), { vol: .6 });
 					burst(tmp.set(P.x, .5, P.z), 9075300, 22, 3.5, 7, .6);
 					const big = P.k !== fg && P.k !== "jump";
@@ -64668,11 +64677,11 @@ var DATA_HASH = (() => {
 				}
 				continue;
 			}
-			P.icon.position.y = 3.4 + Math.sin(elapsed * 2.5 + i) * .35;
+			P.icon.position.y = 3.4 + Math.sin(GS.elapsed * 2.5 + i) * .35;
 			const guards = guardsNear(P);
 			P.guards = guards;
 			if (P.state === "sealed") {
-				P.dome.material.opacity = .18 + Math.sin(elapsed * 6) * .06;
+				P.dome.material.opacity = .18 + Math.sin(GS.elapsed * 6) * .06;
 				P.ring.material.opacity = .9;
 				if (P.t > 2 && guards === 0) {
 					P.state = "open";
@@ -64686,7 +64695,7 @@ var DATA_HASH = (() => {
 					abilities.jump = true;
 					applyAbilityVisuals();
 					abDirty = true;
-					abSig = "";
+					GS.abSig = "";
 					toast("jump");
 				} else {
 					gainWeapon("w_" + P.k);
@@ -64703,15 +64712,15 @@ var DATA_HASH = (() => {
 				});
 			}
 		}
-		if (!NET.client && !wbSpawned && crewArmed()) {
-			wbSpawned = true;
+		if (!NET.client && !GS.wbSpawned && crewArmed()) {
+			GS.wbSpawned = true;
 			if (!swarm.some((m) => m.wb && !m.dead)) spawnWanderers();
 		}
-		if (!NET.client && wbSpawned) wbTopUp(dt);
+		if (!NET.client && GS.wbSpawned) wbTopUp(dt);
 	}
 	const JUMP_V = 15, CAR_G = 32;
 	function jump() {
-		if (myTow && car.alive && car.burrow === "up") {
+		if (GS.myTow && car.alive && car.burrow === "up") {
 			throwBomb();
 			return;
 		}
@@ -64724,7 +64733,7 @@ var DATA_HASH = (() => {
 			car.airJumps = 0;
 			SFX.play("jump", car.pos);
 			crewSay("jump", .5);
-			if (ride === "spider" && SPD.n.y < .5) {
+			if (GS.ride === "spider" && SPD.n.y < .5) {
 				car.vel.addScaledVector(SPD.n, 10);
 				car.vy *= .6;
 			}
@@ -64736,7 +64745,7 @@ var DATA_HASH = (() => {
 			SFX.play("jump2", car.pos);
 			if (abLv.doubleJump >= 2) ringBlast(car.pos.x, car.pos.z, 4.5, 3, 12, 13215999, false);
 			spawnParticles(tmp.copy(car.pos).setY(car.y + .3), 13215999, 12, 6);
-			shake = Math.max(shake, .15);
+			GS.shake = Math.max(GS.shake, .15);
 		}
 	}
 	function updateJump(dt) {
@@ -64748,7 +64757,7 @@ var DATA_HASH = (() => {
 		car.y = car.ground || 0;
 		car.vy = 0;
 		car.airborne = false;
-		shake = Math.max(shake, .25 + impact * .02);
+		GS.shake = Math.max(GS.shake, .25 + impact * .02);
 		SFX.play("land", car.pos, { vol: Math.min(1, .4 + impact / 25) });
 		spawnParticles(tmp.copy(car.pos).setY(.2), 9079416, 14, 7);
 		burst(tmp.setY(.4), 10129276, 9, 1.5, 5, .3);
@@ -64835,7 +64844,7 @@ var DATA_HASH = (() => {
 		if (lv >= 2) waveFx(x, z, r * .62, 16774344, .32);
 		if (lv >= 3) waveFx(x, z, r * 1.05, 16751162, .6);
 		burst(tmp.set(x, .4, z), 16769162, 8 + lv * 4, r * .35, 9, .45);
-		shake = Math.max(shake, .25 + lv * .1);
+		GS.shake = Math.max(GS.shake, .25 + lv * .1);
 		for (const e of enemies) {
 			if (e.dead || e.carried) continue;
 			const dx = e.pos.x - x, dz = e.pos.z - z, d = Math.hypot(dx, dz) || .001;
@@ -65090,13 +65099,13 @@ var DATA_HASH = (() => {
 	}
 	function landPower(lv) {
 		const x = car.pos.x, z = car.pos.z;
-		if (ride === "buggy") stomp(lv);
-		else if (ride === "spider") spawnBrood(x, z, lv, true);
-		else if (ride === "halo") spawnSpikes(x, z, lv, true);
+		if (GS.ride === "buggy") stomp(lv);
+		else if (GS.ride === "spider") spawnBrood(x, z, lv, true);
+		else if (GS.ride === "halo") spawnSpikes(x, z, lv, true);
 		else starburst(lv);
 		netEv({
 			t: "jfx",
-			k: ride,
+			k: GS.ride,
 			l: lv,
 			x: r1(x),
 			z: r1(z)
@@ -65140,7 +65149,7 @@ var DATA_HASH = (() => {
 		cubes: false,
 		trail: false
 	};
-	const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
+	const kit = () => RIDE_KIT[GS.ride] || RIDE_KIT.buggy;
 	const abLv = {
 		drill: 0,
 		burrow: 0,
@@ -65152,7 +65161,10 @@ var DATA_HASH = (() => {
 		cubes: 0,
 		trail: 0
 	};
-	let coins = 0, gems = 0, lootId = 0, lootSfxT = 0;
+	let lootSfxT = 0;
+	GS.lootId = 0;
+	GS.coins = 0;
+	GS.gems = 0;
 	const loot = [], ult = {
 		sword: 0,
 		hands: 0
@@ -65194,10 +65206,10 @@ var DATA_HASH = (() => {
 		});
 	}
 	function dropCoins(at, nc, ng) {
-		if (NET.client || inRoom(at.x, at.z) && !gateOpen) return;
+		if (NET.client || inRoom(at.x, at.z) && !GS.gateOpen) return;
 		const a = [], wide = Math.min(4, (nc + ng) * .12);
 		for (let i = 0; i < nc + ng; i++) {
-			const an = Math.random() * 6.283, sp = 2.5 + Math.random() * (3.5 + wide), id = ++lootId, q = [
+			const an = Math.random() * 6.283, sp = 2.5 + Math.random() * (3.5 + wide), id = ++GS.lootId, q = [
 				id,
 				i < nc ? 0 : 1,
 				r1(at.x),
@@ -65300,8 +65312,8 @@ var DATA_HASH = (() => {
 				L.x += (car.pos.x - L.x) * k;
 				L.z += (car.pos.z - L.z) * k;
 			}
-			L.m.position.set(L.x, L.y + (L.vy === 0 ? Math.sin(elapsed * 3 + L.id) * .15 : 0), L.z);
-			L.m.rotation.y = L.spin + elapsed * (L.gem ? 2.2 : 4.5);
+			L.m.position.set(L.x, L.y + (L.vy === 0 ? Math.sin(GS.elapsed * 3 + L.id) * .15 : 0), L.z);
+			L.m.rotation.y = L.spin + GS.elapsed * (L.gem ? 2.2 : 4.5);
 			if (car.alive && L.t > .45 && d < 1.9) {
 				spawnParticles(tmp.set(L.x, 1, L.z), L.gem ? 9434367 : 16766554, 5, 5);
 				scene.remove(L.m);
@@ -65321,11 +65333,11 @@ var DATA_HASH = (() => {
 		}
 	}
 	function lootGain(gem) {
-		if (gem) gems++;
-		else coins++;
-		abSig = "";
-		if (elapsed - lootSfxT > .045) {
-			lootSfxT = elapsed;
+		if (gem) GS.gems++;
+		else GS.coins++;
+		GS.abSig = "";
+		if (GS.elapsed - lootSfxT > .045) {
+			lootSfxT = GS.elapsed;
 			SFX.play("pickup", null, {
 				vol: .3,
 				rate: gem ? 1.9 : 1.55 + Math.random() * .2
@@ -65367,7 +65379,7 @@ var DATA_HASH = (() => {
 			"a full starburst"
 		]
 	};
-	const upText = (t) => t === "jump" ? JUMP_UP[ride] : UP_TEXT[t];
+	const upText = (t) => t === "jump" ? JUMP_UP[GS.ride] : UP_TEXT[t];
 	const AB_INFO = {
 		drill: {
 			title: "Drill",
@@ -65845,10 +65857,10 @@ var DATA_HASH = (() => {
 		el.addEventListener("touchend", end);
 		el.addEventListener("touchcancel", end);
 	}
-	let abSig = "";
+	GS.abSig = "";
 	function buildAbBar() {
 		abDirty = false;
-		abSig = "";
+		GS.abSig = "";
 		abBar.innerHTML = "";
 		for (const t of kit()) {
 			const d = document.createElement("div");
@@ -65881,8 +65893,8 @@ var DATA_HASH = (() => {
 		updateAbHud();
 	}
 	function upgradeAb(t) {
-		if (!abilities[t] || abLv[t] >= abMax(t) || coins < abPrice(t)) return;
-		coins -= abPrice(t);
+		if (!abilities[t] || abLv[t] >= abMax(t) || GS.coins < abPrice(t)) return;
+		GS.coins -= abPrice(t);
 		abLv[t]++;
 		toast(t, "Lv " + (abLv[t] + 1), upText(t)[abLv[t] - 1]);
 		SFX.play("pickup", null, { rate: 1.3 });
@@ -65899,12 +65911,12 @@ var DATA_HASH = (() => {
 			buildAbBar();
 			return;
 		}
-		const act = RIDE_ACTIVE[ride], bk = act && abilities[act] ? activeCdK() : 0;
-		const sig = kit().map((t) => (abilities[t] ? 1 : 0) + "" + abLv[t]).join() + "|" + coins + "|" + gems + "|" + bk.toFixed(2);
-		if (sig === abSig) return;
-		abSig = sig;
-		if (wUpSeen !== gems) {
-			wUpSeen = gems;
+		const act = RIDE_ACTIVE[GS.ride], bk = act && abilities[act] ? activeCdK() : 0;
+		const sig = kit().map((t) => (abilities[t] ? 1 : 0) + "" + abLv[t]).join() + "|" + GS.coins + "|" + GS.gems + "|" + bk.toFixed(2);
+		if (sig === GS.abSig) return;
+		GS.abSig = sig;
+		if (GS.wUpSeen !== GS.gems) {
+			GS.wUpSeen = GS.gems;
 			updateWeaponHUD();
 		}
 		for (const t of kit()) {
@@ -65915,15 +65927,15 @@ var DATA_HASH = (() => {
 				el.classList.add("fresh");
 			}
 			const open = abilities[t] && abLv[t] < abMax(t);
-			el.classList.toggle("can", open && coins >= abPrice(t));
+			el.classList.toggle("can", open && GS.coins >= abPrice(t));
 			const ce = el.querySelector(".cost");
 			ce.textContent = open ? abPrice(t) + "●" : "";
-			ce.classList.toggle("ok", open && coins >= abPrice(t));
+			ce.classList.toggle("ok", open && GS.coins >= abPrice(t));
 			el.querySelector(".lv").textContent = abLv[t] ? "★".repeat(abLv[t]) : "";
 			if (t === act) el.style.setProperty("--cd", bk.toFixed(2));
 		}
 		const tag = document.getElementById("wallet");
-		if (tag) tag.innerHTML = "<b class=\"c\">● " + coins + "</b><b class=\"g\">◆ " + gems + "</b>";
+		if (tag) tag.innerHTML = "<b class=\"c\">● " + GS.coins + "</b><b class=\"g\">◆ " + GS.gems + "</b>";
 	}
 	const toastEl = document.getElementById("toast");
 	let toastTimer = 0;
@@ -65937,7 +65949,7 @@ var DATA_HASH = (() => {
 		drill.visible = abilities.drill;
 		bullbar.visible = !abilities.drill;
 		arm.visible = mast.visible = abilities.grab;
-		abSig = "";
+		GS.abSig = "";
 	}
 	applyAbilityVisuals();
 	const pickups = [];
@@ -66111,7 +66123,7 @@ var DATA_HASH = (() => {
 					upPts++;
 					upGot++;
 					extra = upGot + "/6";
-					abSig = "";
+					GS.abSig = "";
 				} else if (p.type.startsWith("x_")) fireToken(p.type);
 				else if (p.type.startsWith("w_")) {
 					gainWeapon(p.type);
@@ -66140,7 +66152,7 @@ var DATA_HASH = (() => {
 	let firstCrateDrop = true;
 	const wBar = document.getElementById("weapons");
 	function updateWeaponHUD(fresh) {
-		wBar.innerHTML = W_ORDER.filter((k) => weapons[k]).map((k) => `<div class="wslot${k === fresh ? " new" : ""}${weapons[k] < W_MAX && gems >= wPrice(k) ? " can" : ""}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS["w_" + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? "MAX" : "Lv" + wLv(k)}</b>${weapons[k] < W_MAX ? `<i class="cost${gems >= wPrice(k) ? " ok" : ""}">${wPrice(k)}◆</i>` : ""}</div>`).join("");
+		wBar.innerHTML = W_ORDER.filter((k) => weapons[k]).map((k) => `<div class="wslot${k === fresh ? " new" : ""}${weapons[k] < W_MAX && GS.gems >= wPrice(k) ? " can" : ""}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS["w_" + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? "MAX" : "Lv" + wLv(k)}</b>${weapons[k] < W_MAX ? `<i class="cost${GS.gems >= wPrice(k) ? " ok" : ""}">${wPrice(k)}◆</i>` : ""}</div>`).join("");
 	}
 	{
 		const spendW = (e) => {
@@ -66149,17 +66161,17 @@ var DATA_HASH = (() => {
 			e.preventDefault();
 			e.stopPropagation();
 			const k = u.dataset.k;
-			if (!weapons[k] || weapons[k] >= W_MAX || gems < wPrice(k)) return;
-			gems -= wPrice(k);
+			if (!weapons[k] || weapons[k] >= W_MAX || GS.gems < wPrice(k)) return;
+			GS.gems -= wPrice(k);
 			const lv = gainWeapon("w_" + k, true);
 			toast("w_" + k, lv >= W_MAX ? "MAX" : "Lv " + wLv(k));
 			SFX.play("pickup", null, { rate: 1.3 });
-			abSig = "";
+			GS.abSig = "";
 		};
 		wBar.addEventListener("mousedown", spendW);
 		wBar.addEventListener("touchstart", spendW, { passive: false });
 	}
-	let wUpSeen = -1;
+	GS.wUpSeen = -1;
 	function dropWeapon(at) {
 		if (pickups.filter((p) => p.type.startsWith("x_") && Math.hypot(p.x - at.x, p.z - at.z) < 45).length >= 2) return;
 		const r = Math.random(), xs = Object.keys(X_TOKENS);
@@ -66183,7 +66195,7 @@ var DATA_HASH = (() => {
 		return weapons[k];
 	}
 	const novaMat = glow(new THREE.MeshBasicMaterial({ color: 6288870 }), 3.5);
-	let novaT = 0;
+	GS.novaT = 0;
 	function fireNova() {
 		const L = weapons.nova - 1, n = W_STATS.nova.n[L], o = new THREE.Vector3(car.pos.x, 1 + car.y, car.pos.z), ph = Math.random() * 6.283;
 		for (let i = 0; i < n; i++) {
@@ -66270,7 +66282,7 @@ var DATA_HASH = (() => {
         gl_FragColor = vec4(col * a, 1.0) * alpha;
       }`
 	});
-	const haloHoly = () => ride === "halo" && beams.some((B) => B.kind === "halo" && !B.fx);
+	const haloHoly = () => GS.ride === "halo" && beams.some((B) => B.kind === "halo" && !B.fx);
 	const carSrc = {
 		get pos() {
 			return car.pos;
@@ -66279,7 +66291,7 @@ var DATA_HASH = (() => {
 		y: () => car.y,
 		alive: () => car.alive && car.depth < .3
 	};
-	function fireBeams(src = carSrc, kind = ride, L = weapons.nova - 1, fx = false) {
+	function fireBeams(src = carSrc, kind = GS.ride, L = weapons.nova - 1, fx = false) {
 		const dmg = W_STATS.nova.dmg[L];
 		if (kind === "halo") {
 			const n = HALO_SWORDS.n[L], len = HALO_SWORDS.len[L], ph = Math.random() * 6.283, dirs = [], mt = swordMat();
@@ -66370,7 +66382,7 @@ var DATA_HASH = (() => {
 			const a = Math.max(0, Math.min(1, B.t / .08) * Math.min(1, (B.T - B.t) / .25));
 			for (const mt of B.mats) {
 				mt.uniforms.alpha.value = a;
-				mt.uniforms.time.value = elapsed;
+				mt.uniforms.time.value = GS.elapsed;
 			}
 			const S = B.src, fx = Math.sin(S.h()), fz = Math.cos(S.h()), alive = S.alive(), grow = Math.min(1, B.t / .1);
 			for (const D of B.dirs) {
@@ -66573,7 +66585,7 @@ var DATA_HASH = (() => {
 		flatShading: true
 	}));
 	function trimSaws() {
-		const n = weapons.orbit ? W_STATS.orbit.n[weapons.orbit - 1] * (ride === "halo" ? 2 : 1) : 0;
+		const n = weapons.orbit ? W_STATS.orbit.n[weapons.orbit - 1] * (GS.ride === "halo" ? 2 : 1) : 0;
 		while (saws.length > n) scene.remove(saws.pop().m);
 	}
 	function deathToll() {
@@ -66604,7 +66616,7 @@ var DATA_HASH = (() => {
 			lost = [kind === "ab" ? k : "w_" + k, "LOST"];
 		}
 		abDirty = true;
-		abSig = "";
+		GS.abSig = "";
 		toast(lost[0], lost[1]);
 		lossFxStart(lost[0], lost[1] !== "LOST");
 	}
@@ -66702,9 +66714,9 @@ var DATA_HASH = (() => {
 		}
 	}
 	function buildSaws() {
-		const n = W_STATS.orbit.n[weapons.orbit - 1] * (ride === "halo" ? 2 : 1);
+		const n = W_STATS.orbit.n[weapons.orbit - 1] * (GS.ride === "halo" ? 2 : 1);
 		while (saws.length < n) {
-			const uni = ride === "unicorn", m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[saws.length % dodecaMats.length] : sawMat);
+			const uni = GS.ride === "unicorn", m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[saws.length % dodecaMats.length] : sawMat);
 			m.scale.setScalar(uni ? 1.1 : 1.4);
 			m.castShadow = true;
 			scene.add(m);
@@ -66738,13 +66750,13 @@ var DATA_HASH = (() => {
 		for (const o of obstacles) if (o.sawCd > 0) o.sawCd -= dt;
 		if (boss.sawCd > 0) boss.sawCd -= dt;
 		const L = weapons.orbit - 1, S = W_STATS.orbit, on = car.alive && car.depth < .3;
-		sawAngle += S.spd[L] * dt * (ride === "halo" ? 1.86 : 1);
+		sawAngle += S.spd[L] * dt * (GS.ride === "halo" ? 1.86 : 1);
 		saws.forEach((s, i) => {
 			const a = sawAngle + i / saws.length * Math.PI * 2;
 			s.pos.set(car.pos.x + Math.sin(a) * S.r[L], 1 + car.y, car.pos.z + Math.cos(a) * S.r[L]);
 			s.m.position.copy(s.pos);
 			s.m.visible = on;
-			if (ride === "unicorn") {
+			if (GS.ride === "unicorn") {
 				s.m.rotation.x += dt * 3;
 				s.m.rotation.y += dt * 4;
 				if (!on) return;
@@ -66885,7 +66897,7 @@ var DATA_HASH = (() => {
 			burst(p, 6969978, 10, 2.6, 7, .5);
 			spawnParticles(p, 11832575, 18, 11);
 			spawnParticles(p, 9079416, 10, 8);
-			shake = Math.max(shake, s.fx ? .2 : .5);
+			GS.shake = Math.max(GS.shake, s.fx ? .2 : .5);
 			SFX.play("blast", p);
 			if (s.fx) continue;
 			for (const e of enemies) {
@@ -66906,15 +66918,15 @@ var DATA_HASH = (() => {
 	function updateWeapons(dt) {
 		const ready = car.alive && car.depth < .3;
 		if (weapons.nova) {
-			novaT -= dt;
-			if (novaT <= 0 && ready) {
+			GS.novaT -= dt;
+			if (GS.novaT <= 0 && ready) {
 				if (threatNear(20)) {
-					novaT = W_STATS.nova.cd[weapons.nova - 1];
-					if (ride === "halo") novaT = Math.max(2, novaT) + SWORD_T[weapons.nova - 1];
-					if (ride === "halo" || ride === "unicorn") fireBeams();
-					else if (ride === "spider") fireWebs();
+					GS.novaT = W_STATS.nova.cd[weapons.nova - 1];
+					if (GS.ride === "halo") GS.novaT = Math.max(2, GS.novaT) + SWORD_T[weapons.nova - 1];
+					if (GS.ride === "halo" || GS.ride === "unicorn") fireBeams();
+					else if (GS.ride === "spider") fireWebs();
 					else fireNova();
-				} else novaT = .15;
+				} else GS.novaT = .15;
 			}
 		}
 		updateSaws(dt);
@@ -68120,7 +68132,7 @@ var DATA_HASH = (() => {
 	}
 	const swarm = [], globs = [];
 	const SW_CAP = 110;
-	let swId = 0;
+	GS.swId = 0;
 	const swById = /* @__PURE__ */ new Map(), SW_KEYS = Object.keys(SW_KINDS);
 	function spawnCritter(kind, x, z, variant, id) {
 		const v = variant == null ? Math.floor(Math.random() * 3) : variant, K = SW_KINDS[kind], art = SW_ART[kind][v];
@@ -68159,7 +68171,7 @@ var DATA_HASH = (() => {
 			swarm: true
 		};
 		m.v = v;
-		m.id = id == null ? ++swId : id;
+		m.id = id == null ? ++GS.swId : id;
 		swById.set(m.id, m);
 		swarm.push(m);
 		burst(tmp.set(x, .3, z), 9075306, 2, 1.2, 2, .3);
@@ -68178,14 +68190,14 @@ var DATA_HASH = (() => {
 		flash(p, m.art.color, m.K.heavy ? 6 : 3, .18, 1.6, false);
 		SFX.play("pop", p, { rate: m.K.heavy ? .7 : .9 + Math.random() * .3 });
 		if (!NET.applying) {
-			enemyKills++;
-			ekillsEl.textContent = enemyKills;
+			GS.enemyKills++;
+			ekillsEl.textContent = GS.enemyKills;
 			crewKill(false);
 			m.pos.x, m.pos.z;
 		}
 		waves.lastKill.copy(m.pos);
 		if (m.wb) {
-			wbKilled++;
+			GS.wbKilled++;
 			if (m.wbLoot) {
 				bossDrop(m.pos.x, m.pos.z);
 				if (!NET.client) netEv({
@@ -68194,10 +68206,10 @@ var DATA_HASH = (() => {
 					z: r1(m.pos.z)
 				});
 			}
-			shake = Math.max(shake, .6);
+			GS.shake = Math.max(GS.shake, .6);
 		} else if (m.mini && !NET.client) {
 			if (PH.i > 0) dropWeapon(m.pos);
-			shake = Math.max(shake, .4);
+			GS.shake = Math.max(GS.shake, .4);
 		}
 		if (!NET.client) lootFrom(m.rig ? "rig" : m.wb ? "wb" : m.mini ? "mini" : m.K.heavy ? "brute" : m.K.ranged || m.K.fly ? "tough" : "mob", m.pos.x, m.pos.z);
 		if (m.K.split && !m.mini) for (const sd of [-1, 1]) {
@@ -68211,7 +68223,7 @@ var DATA_HASH = (() => {
 		if (m.rig && RIG.tame) return;
 		if (m.net) {
 			m.flash = .08;
-			m.myHit = elapsed;
+			m.myHit = GS.elapsed;
 			netEv({
 				t: "hit",
 				i: m.id,
@@ -68343,7 +68355,8 @@ var DATA_HASH = (() => {
 		}
 		return srgbTex(c);
 	});
-	let rigT = 8, rigOwed = 0;
+	GS.rigT = 8;
+	GS.rigOwed = 0;
 	function makeRig(m) {
 		if (m.rig) return m;
 		makeMini(m);
@@ -68498,18 +68511,18 @@ var DATA_HASH = (() => {
 	function rigDirector(dt) {
 		if (NET.client || startEl.isConnected || PH.brk > 0) return;
 		const want = RIG.n[PHASES[PH.i].key] || 0, have = swarm.filter((m) => m.rig && !m.dead).length;
-		if (PH.i === 0 && wbSpawned) {
-			if (rigOwed > 0 && (rigT -= dt) <= 0) {
-				rigT = .5;
-				if (spawnRig()) rigOwed--;
+		if (PH.i === 0 && GS.wbSpawned) {
+			if (GS.rigOwed > 0 && (GS.rigT -= dt) <= 0) {
+				GS.rigT = .5;
+				if (spawnRig()) GS.rigOwed--;
 			}
 			return;
 		}
 		if (have >= want) {
-			rigT = Math.max(rigT, 6);
+			GS.rigT = Math.max(GS.rigT, 6);
 			return;
 		}
-		if ((rigT -= dt) <= 0) rigT = spawnRig() ? have < want / 2 ? 9 : 16 : 1;
+		if ((GS.rigT -= dt) <= 0) GS.rigT = spawnRig() ? have < want / 2 ? 9 : 16 : 1;
 	}
 	const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 	function rigAI(m, dt, T) {
@@ -68544,9 +68557,9 @@ var DATA_HASH = (() => {
 		m.pos.z = THREE.MathUtils.clamp(m.pos.z, -176, 176);
 		const f = rigLog(m);
 		for (const o of swarm) {
-			if (o === m || o.dead || o.rig || o.wb || o.K.fly || (o.rigCd || 0) > elapsed) continue;
+			if (o === m || o.dead || o.rig || o.wb || o.K.fly || (o.rigCd || 0) > GS.elapsed) continue;
 			if (rigDist(f, o.pos) < RIG.logR + o.r) {
-				o.rigCd = elapsed + .8;
+				o.rigCd = GS.elapsed + .8;
 				hitCritter(o, o.mini ? 2 : 6, rigFling(f, o.pos).clone(), 16);
 				o.stun = Math.max(o.stun || 0, .4);
 			}
@@ -68578,15 +68591,15 @@ var DATA_HASH = (() => {
 			const y = Math.max(0, R.fall) * 26;
 			R.g.position.set(m.pos.x, y, m.pos.z);
 			if (R.fall <= 0) {
-				shake = Math.max(shake, Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40 ? .9 : .2);
+				GS.shake = Math.max(GS.shake, Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40 ? .9 : .2);
 				burst(tmp.set(m.pos.x, .5, m.pos.z), 9075300, 26, 4.5, 9, .6);
 				SFX.play("tent_slam", m.pos);
 				if (car.alive && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < RIG.half + 1) rigToss(m, rigLog(m));
 			}
 			return;
 		}
-		R.a = (elapsed * RIG.spin + m.id * 1.7) % 6.283;
-		const t = elapsed + m.id;
+		R.a = (GS.elapsed * RIG.spin + m.id * 1.7) % 6.283;
+		const t = GS.elapsed + m.id;
 		R.bob = Math.abs(Math.sin(t * 10)) * .14 + Math.abs(Math.sin(t * 23)) * .05;
 		R.g.position.set(m.pos.x + Math.sin(t * 31) * .05, Math.abs(Math.sin(t * 13)) * .07, m.pos.z + Math.cos(t * 27) * .05);
 		R.g.rotation.z = Math.sin(t * 8.3) * .025;
@@ -68617,7 +68630,7 @@ var DATA_HASH = (() => {
 			if (Math.random() < dt * 14) spawnParticles(tmp.set(m.pos.x + rand(-1.6, 1.6), RIG.top + .6, m.pos.z + rand(-1.6, 1.6)), Math.random() < .5 ? 16742954 : 16760896, 2, 4);
 			R.booth.rotation.z += .12;
 		}
-		if ((R.hitCd -= dt) > 0 || elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== "up" || car.y > 2.6) return;
+		if ((R.hitCd -= dt) > 0 || GS.elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== "up" || car.y > 2.6) return;
 		const f = rigLog(m);
 		if (rigDist(f, car.pos) < RIG.logR + car.radius) {
 			rigToss(m, f);
@@ -68643,10 +68656,10 @@ var DATA_HASH = (() => {
 		car.vy = 10;
 		car.airborne = true;
 		m.rig.hitCd = 1;
-		car.rigCd = elapsed + 1.8;
-		if (myTow) bombOff(bombs.find((B) => B.id === myTow));
+		car.rigCd = GS.elapsed + 1.8;
+		if (GS.myTow) bombOff(bombs.find((B) => B.id === GS.myTow));
 		hurtCar(car.maxHp * .08, d.clone());
-		shake = Math.max(shake, .6);
+		GS.shake = Math.max(GS.shake, .6);
 		SFX.play("clang", car.pos, { rate: .8 });
 		spawnParticles(tmp.copy(car.pos).setY(1), 14208960, 10, 8);
 	}
@@ -68664,12 +68677,16 @@ var DATA_HASH = (() => {
 		flash(p, 16756832, 7, .3, 3, false);
 		const f = rigLog(m);
 		for (const sd of [-1, 1]) spawnParticles(tmp.set(f.cx + f.rx * sd * RIG.half * .6, 1.5, f.cz + f.rz * sd * RIG.half * .6), 7031338, 14, 11);
-		if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 50) shake = Math.max(shake, .6);
+		if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 50) GS.shake = Math.max(GS.shake, .6);
 		SFX.play("crate_break", m.pos, { rate: .6 });
 		SFX.play("clang", m.pos, { rate: .5 });
 	}
 	const bombs = [];
-	let bombId = 0, bombNetT = 0, myTow = 0, towCd = 0, bombSpawnT = 4;
+	GS.bombSpawnT = 4;
+	GS.towCd = 0;
+	GS.bombNetT = 0;
+	GS.bombId = 0;
+	GS.myTow = 0;
 	const bombGeo = new THREE.SphereGeometry(1.1, 16, 12), bombMat = new THREE.MeshStandardMaterial({
 		color: 1842210,
 		roughness: .35,
@@ -69091,32 +69108,32 @@ var DATA_HASH = (() => {
 	}
 	for (const ev of ["pointerdown", "click"]) shopEl.addEventListener(ev, (e) => e.stopPropagation());
 	function convertCoins() {
-		if (coins < SHOP.conv[0]) {
+		if (GS.coins < SHOP.conv[0]) {
 			SFX.play("hit_stone", null, {
 				vol: .35,
 				rate: .6
 			});
 			return;
 		}
-		coins -= SHOP.conv[0];
-		gems += SHOP.conv[1];
-		abSig = "";
+		GS.coins -= SHOP.conv[0];
+		GS.gems += SHOP.conv[1];
+		GS.abSig = "";
 		SFX.play("pickup", null, {
 			rate: 1.9,
 			vol: .6
 		});
 	}
 	function buyUlt(k) {
-		if (gems < SHOP.ult[k]) {
+		if (GS.gems < SHOP.ult[k]) {
 			SFX.play("hit_stone", null, {
 				vol: .35,
 				rate: .6
 			});
 			return false;
 		}
-		gems -= SHOP.ult[k];
+		GS.gems -= SHOP.ult[k];
 		ult[k]++;
-		abSig = "";
+		GS.abSig = "";
 		SFX.play("pickup", null, { rate: .8 });
 		flashAlert(ULT_NAME[k] + " READY");
 		return true;
@@ -69146,17 +69163,17 @@ var DATA_HASH = (() => {
 		const show = !startEl.isConnected;
 		if (shopEl.style.display !== (show ? "flex" : "none")) shopEl.style.display = show ? "flex" : "none";
 		if (!show) return;
-		const sig = coins + "|" + gems + "|" + ult.sword + "|" + ult.hands;
+		const sig = GS.coins + "|" + GS.gems + "|" + ult.sword + "|" + ult.hands;
 		if (sig === shopSig) return;
 		shopSig = sig;
 		for (const b of shopEl.querySelectorAll(".ult")) {
-			const k = b.dataset.u, n = ult[k], can = gems >= SHOP.ult[k];
+			const k = b.dataset.u, n = ult[k], can = GS.gems >= SHOP.ult[k];
 			b.classList.toggle("has", n > 0);
 			b.classList.toggle("buy", !n && can);
 			b.querySelector(".n").textContent = n > 0 ? "×" + n : "";
 			b.querySelector(".act").innerHTML = n > 0 ? "USE" : (can ? "BUY " : "") + "<span class=\"g\">◆" + SHOP.ult[k] + "</span>";
 		}
-		convEl.classList.toggle("can", coins >= SHOP.conv[0]);
+		convEl.classList.toggle("can", GS.coins >= SHOP.conv[0]);
 		convEl.innerHTML = "<span class=\"c\">●" + SHOP.conv[0] + "</span> ➜ <span class=\"g\">◆" + SHOP.conv[1] + "</span>";
 	}
 	function ultKillAt(x, z, R) {
@@ -69240,7 +69257,7 @@ var DATA_HASH = (() => {
 						vol: .55,
 						rate: 1.1 + Math.random() * .4
 					});
-					if (Math.hypot(it.x - car.pos.x, it.z - car.pos.z) < 40) shake = Math.max(shake, .35);
+					if (Math.hypot(it.x - car.pos.x, it.z - car.pos.z) < 40) GS.shake = Math.max(GS.shake, .35);
 					if (F.own) {
 						if (NET.client) netEv({
 							t: "blast",
@@ -69285,7 +69302,7 @@ var DATA_HASH = (() => {
 				rate: 1.3,
 				vol: .6
 			});
-			if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) shake = Math.max(shake, 1.6);
+			if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) GS.shake = Math.max(GS.shake, 1.6);
 			waveFx(F.x, F.z, U.R, 16752704, .45);
 			waveFx(F.x, F.z, U.R * .6, 16774344, .3);
 		}
@@ -69431,7 +69448,7 @@ var DATA_HASH = (() => {
 					vol: .9,
 					rate: .6
 				});
-				if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) shake = Math.max(shake, 1.5);
+				if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) GS.shake = Math.max(GS.shake, 1.5);
 				if (F.own) swordHits(F, U.R0, true);
 			}
 			const t = F.t - U.fall - U.hold;
@@ -69489,7 +69506,7 @@ var DATA_HASH = (() => {
 						rate: 1.6 + Math.random() * .5
 					});
 				}
-				if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 50) shake = Math.max(shake, .3);
+				if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 50) GS.shake = Math.max(GS.shake, .3);
 			}
 			if (F.run >= U.run) {
 				F.out = (F.out || 0) + dt;
@@ -69531,7 +69548,7 @@ var DATA_HASH = (() => {
 		scene.remove(B.g);
 		if (B.drop) scene.remove(B.drop.hand);
 		bombs.splice(bombs.indexOf(B), 1);
-		if (myTow === B.id) myTow = 0;
+		if (GS.myTow === B.id) GS.myTow = 0;
 	}
 	function bombSpot(m) {
 		for (let i = 0; i < 30; i++) {
@@ -69548,24 +69565,24 @@ var DATA_HASH = (() => {
 		dx /= d;
 		dz /= d;
 		const r = Math.max(d + 9, RIG.half + 3.5), x = THREE.MathUtils.clamp(m.pos.x + dx * r, -174, 174), z = THREE.MathUtils.clamp(m.pos.z + dz * r, -174, 174);
-		addBomb(++bombId, Math.round(x), Math.round(z), true);
-		bombSpawnT = 8;
+		addBomb(++GS.bombId, Math.round(x), Math.round(z), true);
+		GS.bombSpawnT = 8;
 	}
 	function carrierOf(B) {
-		if (myTow === B.id && car.alive) return cart.pos;
+		if (GS.myTow === B.id && car.alive) return cart.pos;
 		for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) return R.cpos;
 		return null;
 	}
 	function bombOff(B) {
-		myTow = 0;
-		towCd = 2;
+		GS.myTow = 0;
+		GS.towCd = 2;
 		if (!B) return;
 		B.x = B.tx = cart.pos.x;
 		B.z = B.tz = cart.pos.z;
 		for (let i = 0; i < 4; i++) puff(tmp.set(cart.pos.x + rand(-1, 1), 1, cart.pos.z + rand(-1, 1)), 15261904, 1.4, .6, rand(-2, 2), 2, rand(-2, 2));
 	}
 	function bombBoom(B, m) {
-		if (myTow === B.id) myTow = 0;
+		if (GS.myTow === B.id) GS.myTow = 0;
 		const sx = B.x, sz = B.z, tx = m ? m.pos.x : B.x, tz = m ? m.pos.z : B.z;
 		B.g.visible = true;
 		B.num.visible = false;
@@ -69580,13 +69597,13 @@ var DATA_HASH = (() => {
 	}
 	function updateBombs(dt) {
 		if (startEl.isConnected) return;
-		if ((towCd -= dt) < 0) towCd = 0;
+		if ((GS.towCd -= dt) < 0) GS.towCd = 0;
 		const rigs = swarm.filter((m) => m.rig && !m.dead && !m.rig.gone);
 		if (!NET.client) {
-			if (rigs.length > bombs.length && (bombSpawnT -= dt) <= 0) {
-				bombSpawnT = 3;
+			if (rigs.length > bombs.length && (GS.bombSpawnT -= dt) <= 0) {
+				GS.bombSpawnT = 3;
 				const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m);
-				if (sp) addBomb(++bombId, sp[0], sp[1], true);
+				if (sp) addBomb(++GS.bombId, sp[0], sp[1], true);
 			}
 			for (const B of bombs.slice()) {
 				if (B.leap || B.fly) continue;
@@ -69598,8 +69615,8 @@ var DATA_HASH = (() => {
 				}
 				if (!rigs.length && !C) dropBomb(B);
 			}
-			if ((bombNetT -= dt) <= 0 && NET.on && NET.game) {
-				bombNetT = .1;
+			if ((GS.bombNetT -= dt) <= 0 && NET.on && NET.game) {
+				GS.bombNetT = .1;
 				netEv({
 					t: "bm",
 					b: bombs.filter((B) => !B.leap).map((B) => [
@@ -69634,7 +69651,7 @@ var DATA_HASH = (() => {
 						vol: .5
 					});
 					SFX.play("crate_break", p, { rate: .4 });
-					if (Math.hypot(L.tx - car.pos.x, L.tz - car.pos.z) < 70) shake = Math.max(shake, 1.2);
+					if (Math.hypot(L.tx - car.pos.x, L.tz - car.pos.z) < 70) GS.shake = Math.max(GS.shake, 1.2);
 					if (!NET.client) {
 						const m = B.rigM;
 						if (m && !m.dead) {
@@ -69712,22 +69729,22 @@ var DATA_HASH = (() => {
 				continue;
 			}
 			let ride_ = null;
-			if (myTow === B.id) ride_ = [cart.pos, ride === "spider" ? 0 : car.y * .8];
+			if (GS.myTow === B.id) ride_ = [cart.pos, GS.ride === "spider" ? 0 : car.y * .8];
 			else for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) ride_ = [R.cpos, R.pos.y || 0];
 			if (ride_) {
 				B.x = ride_[0].x;
 				B.z = ride_[0].z;
-				B.g.position.set(B.x, 1 + ride_[1] + Math.abs(Math.sin(elapsed * 11 + B.id)) * .12, B.z);
+				B.g.position.set(B.x, 1 + ride_[1] + Math.abs(Math.sin(GS.elapsed * 11 + B.id)) * .12, B.z);
 				B.g.scale.setScalar(.8);
-				B.g.rotation.set(Math.sin(elapsed * 9) * .15, 0, Math.sin(elapsed * 7) * .15);
+				B.g.rotation.set(Math.sin(GS.elapsed * 9) * .15, 0, Math.sin(GS.elapsed * 7) * .15);
 			} else {
 				B.g.position.set(B.x, 0, B.z);
 				B.g.scale.setScalar(1);
 				B.g.rotation.set(0, 0, 0);
 			}
 			B.spark.scale.setScalar(.5 + Math.random() * .5);
-			if (!myTow && !towCd && !B.n && !(B.drop && B.drop.t < HAND.arrive + HAND.hold) && car.alive && car.burrow === "up" && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab)) {
-				myTow = B.id;
+			if (!GS.myTow && !GS.towCd && !B.n && !(B.drop && B.drop.t < HAND.arrive + HAND.hold) && car.alive && car.burrow === "up" && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab)) {
+				GS.myTow = B.id;
 				B.n = 1;
 				if (!cart.shown) {
 					cart.shown = true;
@@ -69739,8 +69756,8 @@ var DATA_HASH = (() => {
 				flashAlert("BOMB! JUMP TO THROW");
 			}
 		}
-		if (myTow && (!car.alive || car.burrow !== "up")) bombOff(bombs.find((B) => B.id === myTow));
-		if (myTow && !bombs.some((B) => B.id === myTow && !B.leap)) myTow = 0;
+		if (GS.myTow && (!car.alive || car.burrow !== "up")) bombOff(bombs.find((B) => B.id === GS.myTow));
+		if (GS.myTow && !bombs.some((B) => B.id === GS.myTow && !B.leap)) GS.myTow = 0;
 		for (const m of rigs) {
 			const R = m.rig;
 			if (!R.zone) {
@@ -69753,17 +69770,17 @@ var DATA_HASH = (() => {
 				R.zone.geometry.rotateX(-Math.PI / 2);
 				scene.add(R.zone);
 			}
-			R.zone.visible = !!myTow;
-			if (myTow) {
+			R.zone.visible = !!GS.myTow;
+			if (GS.myTow) {
 				R.zone.position.set(m.pos.x, .06, m.pos.z);
-				R.zone.material.opacity = .16 + Math.sin(elapsed * 6) * .08;
+				R.zone.material.opacity = .16 + Math.sin(GS.elapsed * 6) * .08;
 			}
 		}
 	}
 	function throwBomb() {
-		const B = bombs.find((B) => B.id === myTow);
+		const B = bombs.find((B) => B.id === GS.myTow);
 		if (!B) {
-			myTow = 0;
+			GS.myTow = 0;
 			return;
 		}
 		const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), x = cart.pos.x, z = cart.pos.z, y = 1.4 + car.y * .8;
@@ -69779,8 +69796,8 @@ var DATA_HASH = (() => {
 			break;
 		}
 		const vx = dx * vh + car.vel.x * .3, vz = dz * vh + car.vel.z * .3;
-		myTow = 0;
-		towCd = 1;
+		GS.myTow = 0;
+		GS.towCd = 1;
 		B.n = 0;
 		B.fly = {
 			x,
@@ -69810,7 +69827,7 @@ var DATA_HASH = (() => {
 		SFX.play("clang", cart.pos, { rate: 1.2 });
 	}
 	const towK = () => {
-		if (!myTow) return 1;
+		if (!GS.myTow) return 1;
 		for (const R of NET.remotes.values()) if (R.up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < TNT.help) return 1;
 		return .5;
 	};
@@ -70081,7 +70098,7 @@ var DATA_HASH = (() => {
 	}
 	const swA = new THREE.Vector3();
 	function updateSwarm(dt) {
-		const calm = !waveTargets().length || !gateOpen && (boss.state === "fight" || boss.state === "emerging") || angel.on;
+		const calm = !waveTargets().length || !GS.gateOpen && (boss.state === "fight" || boss.state === "emerging") || angel.on;
 		let alive = 0, mob = 0;
 		for (const m of swarm) if (!m.dead) {
 			if (!m.home && !m.rig) alive++;
@@ -70179,7 +70196,7 @@ var DATA_HASH = (() => {
 						tx = -nx * K.speed * .8;
 						tz = -nz * K.speed * .8;
 					} else if (inRoom(T.pos.x, T.pos.z) !== inRoom(m.pos.x, m.pos.z)) {
-						if (!gateOpen) {
+						if (!GS.gateOpen) {
 							tx = Math.sin(m.phase * .3) * 2;
 							tz = Math.cos(m.phase * .3) * 2;
 						} else {
@@ -70291,7 +70308,7 @@ var DATA_HASH = (() => {
 				}
 				if (!dazed && !m.rig && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {
 					const pat = MOB_PAT[m.kind] || 0;
-					if (mobShots > 44 || pat === 2 && dist > 13) m.throwT = .5 + Math.random() * .8;
+					if (GS.mobShots > 44 || pat === 2 && dist > 13) m.throwT = .5 + Math.random() * .8;
 					else {
 						m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
 						mobThrow(m, nx, nz, dist, pat);
@@ -70325,7 +70342,7 @@ var DATA_HASH = (() => {
 			if (m.rig) rigTick(m, dt);
 			if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
 			if (m.fire) {
-				const fl = 1 + .18 * Math.sin(elapsed * 17 + m.id);
+				const fl = 1 + .18 * Math.sin(GS.elapsed * 17 + m.id);
 				m.fire.scale.set(.5 * (2 - fl), .36 * fl, 1);
 			}
 			{
@@ -70341,7 +70358,7 @@ var DATA_HASH = (() => {
 						const s = K.size * .75;
 						m.stars.position.set(m.pos.x, (K.fly || 0) + K.size * 1.02, m.pos.z);
 						m.stars.scale.set(s, s * .5, 1);
-						m.stars.material.rotation = Math.sin(elapsed * 7) * .35;
+						m.stars.material.rotation = Math.sin(GS.elapsed * 7) * .35;
 					}
 				}
 			}
@@ -70529,7 +70546,9 @@ var DATA_HASH = (() => {
 		return m;
 	}));
 	const chubs = [];
-	let chubEaten = 0, chubSpawnT = 4, chubTick = 0;
+	GS.chubTick = 0;
+	GS.chubSpawnT = 4;
+	GS.chubEaten = 0;
 	const cartNEl = document.getElementById("cartN"), eatNEl = document.getElementById("eatN");
 	const chubVulnerable = (c) => !c.dead && !angel.on && (c.state === "roam" || c.state === "flee" || c.state === "tocar" || c.state === "dazed");
 	const carOK = () => car.alive && car.depth < .3 && car.y < 1;
@@ -70537,7 +70556,7 @@ var DATA_HASH = (() => {
 		const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * rock.top * .62;
 		return new THREE.Vector3(rock.mesh.position.x + Math.cos(a) * d, rock.h, rock.mesh.position.z + Math.sin(a) * d);
 	}
-	let chubId = 0;
+	GS.chubId = 0;
 	function spawnChub(rock, perched) {
 		const sprite = new THREE.Sprite(chubMats[0][0]);
 		sprite.center.set(.5, .04);
@@ -70575,7 +70594,7 @@ var DATA_HASH = (() => {
 			c.pos.set(rock.mesh.position.x + Math.cos(a) * d, 0, rock.mesh.position.z + Math.sin(a) * d);
 			c.goal.copy(c.pos);
 		}
-		c.id = ++chubId;
+		c.id = ++GS.chubId;
 		chubs.push(c);
 		return c;
 	}
@@ -70659,8 +70678,8 @@ var DATA_HASH = (() => {
 			vol: .7
 		});
 		SFX.play("chub", tmp, { rate: .6 });
-		chubEaten++;
-		eatNEl.textContent = chubEaten;
+		GS.chubEaten++;
+		eatNEl.textContent = GS.chubEaten;
 		if (!NET.client) netEv({
 			t: "eat",
 			x: r1(c.pos.x),
@@ -70745,7 +70764,7 @@ var DATA_HASH = (() => {
 		cart.heading = cart.prevH = h;
 		cart.phi = cart.phiV = 0;
 	}
-	const safeKeeps = () => ride === "buggy" && Math.random() < .5;
+	const safeKeeps = () => GS.ride === "buggy" && Math.random() < .5;
 	function safeClang() {
 		SFX.play("clang", cart.pos, {
 			vol: .45,
@@ -70761,8 +70780,8 @@ var DATA_HASH = (() => {
 	};
 	let spillT = 0;
 	function cartSpill(n) {
-		if (elapsed < spillT || !cart.riders.length) return;
-		spillT = elapsed + .6;
+		if (GS.elapsed < spillT || !cart.riders.length) return;
+		spillT = GS.elapsed + .6;
 		cartFling(safeCount(n), 0);
 	}
 	function cartFling(n, side) {
@@ -70799,14 +70818,14 @@ var DATA_HASH = (() => {
 		dh = Math.atan2(Math.sin(dh), Math.cos(dh));
 		cart.prevH = cart.heading;
 		const speed = Math.hypot(car.vel.x, car.vel.z);
-		const drive = THREE.MathUtils.clamp(dh / Math.max(dt, .001) * Math.max(speed, 6), -110, 110) * .085 * (1 + n * .12) + (speed > 12 ? Math.sin(elapsed * 7.3) * n * .7 * Math.min(1, (speed - 12) / 12) : 0);
+		const drive = THREE.MathUtils.clamp(dh / Math.max(dt, .001) * Math.max(speed, 6), -110, 110) * .085 * (1 + n * .12) + (speed > 12 ? Math.sin(GS.elapsed * 7.3) * n * .7 * Math.min(1, (speed - 12) / 12) : 0);
 		cart.phiV += (-42 * cart.phi - 5.5 / (1 + n * .22) * cart.phiV + drive) * dt;
 		cart.phi = THREE.MathUtils.clamp(cart.phi + cart.phiV * dt, -.75, .75);
 		Math.abs(cart.phi) - .33;
 		if (!car.alive && n) cartFling(n, 0);
 		const up = car.alive && car.depth < .5;
 		cartG.visible = up;
-		cartG.position.set(cart.pos.x, (ride === "spider" ? 0 : car.y * .8) - car.depth * 3, cart.pos.z);
+		cartG.position.set(cart.pos.x, (GS.ride === "spider" ? 0 : car.y * .8) - car.depth * 3, cart.pos.z);
 		{
 			const vx = (cart.pos.x - cart.prevX) / Math.max(dt, .001), vz = (cart.pos.z - cart.prevZ) / Math.max(dt, .001);
 			cart.prevX = cart.pos.x;
@@ -70815,19 +70834,19 @@ var DATA_HASH = (() => {
 				const d = Math.atan2(vx, vz) - cart.vis;
 				cart.vis += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-9 * dt));
 			}
-			cartG.rotation.y = (ride === "spider" ? cart.vis : cart.heading) + cart.phi * .35;
+			cartG.rotation.y = (GS.ride === "spider" ? cart.vis : cart.heading) + cart.phi * .35;
 		}
 		cartBody.rotation.z = cart.phi;
 		cartBody.position.y = Math.abs(cart.phi) * .25;
-		if (safe) {
-			safe.body.rotation.z = cart.phi;
-			safe.body.position.y = Math.abs(cart.phi) * .25;
+		if (GS.safe) {
+			GS.safe.body.rotation.z = cart.phi;
+			GS.safe.body.position.y = Math.abs(cart.phi) * .25;
 		}
 		const ch = cartG.rotation.y, rx = Math.cos(ch), rz = -Math.sin(ch), fx = Math.sin(ch), fz = Math.cos(ch), cp = Math.cos(cart.phi), sp = Math.sin(cart.phi);
 		cart.riders.forEach((c, i) => {
 			const lx = (i % 3 - 1) * .56, lz = (Math.floor(i / 3) % 3 - 1) * .66, ly = .2 + Math.floor(i / 9) * .5;
 			const x2 = lx * cp - ly * sp, y2 = ly * cp + lx * sp;
-			c.pos.set(cart.pos.x + rx * x2 + fx * lz, cartG.position.y + .68 + y2 + Math.abs(Math.sin(elapsed * 9 + i)) * .08 * Math.min(1, speed / 8 + Math.abs(cart.phi) * 3), cart.pos.z + rz * x2 + fz * lz);
+			c.pos.set(cart.pos.x + rx * x2 + fx * lz, cartG.position.y + .68 + y2 + Math.abs(Math.sin(GS.elapsed * 9 + i)) * .08 * Math.min(1, speed / 8 + Math.abs(cart.phi) * 3), cart.pos.z + rz * x2 + fz * lz);
 			c.sprite.visible = up;
 		});
 		if (up && n) {
@@ -70883,10 +70902,12 @@ var DATA_HASH = (() => {
 		g.setIndex(keep);
 		return g;
 	})();
-	let altarsDone = 0, gateOpen = false;
+	GS.gateSpawned = false;
+	GS.altarsDone = 0;
+	GS.gateOpen = false;
 	function openGate() {
-		if (gateOpen) return;
-		gateOpen = true;
+		if (GS.gateOpen) return;
+		GS.gateOpen = true;
 		flashAlert("THE GATE OPENS");
 		setDoor(false);
 		crewSay("gate", 1, true);
@@ -71000,7 +71021,7 @@ var DATA_HASH = (() => {
 		}
 	}
 	const sleepRocks = rocks.slice();
-	let worldUp = false;
+	GS.worldUp = false;
 	const rising = [];
 	for (const o of sleepRocks) {
 		o.dormant = true;
@@ -71012,7 +71033,7 @@ var DATA_HASH = (() => {
 		A.mesh.visible = false;
 	}
 	function worldWake() {
-		worldUp = true;
+		GS.worldUp = true;
 		for (const o of sleepRocks) {
 			if (!o.dormant) continue;
 			o.dormant = false;
@@ -71043,7 +71064,7 @@ var DATA_HASH = (() => {
 			vol: .7,
 			rate: .7
 		});
-		shake = Math.max(shake, .2);
+		GS.shake = Math.max(GS.shake, .2);
 	}
 	function updateRising(dt) {
 		for (let i = rising.length - 1; i >= 0; i--) {
@@ -71335,11 +71356,12 @@ var DATA_HASH = (() => {
 		altNEl.textContent = altars.map((A) => A.done ? "✔" : A.n + "/5").join(" · ");
 	};
 	const aliveNEl = document.getElementById("aliveN"), unloadBtn = document.getElementById("unload");
-	let unloadAltar = null, aliveT = 0;
+	let aliveT = 0;
+	GS.unloadAltar = null;
 	function doUnload() {
-		if (unloadAltar && carBub.t < 0) {
+		if (GS.unloadAltar && carBub.t < 0) {
 			carBub.t = 0;
-			carBub.altar = unloadAltar;
+			carBub.altar = GS.unloadAltar;
 			unloadBtn.style.display = "none";
 		}
 		unloadBtn.blur();
@@ -71388,7 +71410,7 @@ var DATA_HASH = (() => {
 		altHud();
 		if (A.n >= ALTAR_NEED && !A.done) {
 			A.done = true;
-			altarsDone++;
+			GS.altarsDone++;
 			altHud();
 			A.beam.material.color.setHex(16761418);
 			A.beam.material.opacity = .45;
@@ -71396,13 +71418,13 @@ var DATA_HASH = (() => {
 			tmp.set(A.x, 2, A.z);
 			flash(tmp, 16765562, 30, .6, 5);
 			burst(tmp, 16765562, 16, 3, 9, .5);
-			shake = Math.max(shake, .7);
+			GS.shake = Math.max(GS.shake, .7);
 			SFX.play("boss_roar", tmp, {
 				rate: 1.6,
 				vol: .6
 			});
 			SFX.play("loot", tmp);
-			flashAlert(altarsDone >= 3 ? "ALL ALTARS FED" : "ALTAR AWAKENED " + altarsDone + "/3");
+			flashAlert(GS.altarsDone >= 3 ? "ALL ALTARS FED" : "ALTAR AWAKENED " + GS.altarsDone + "/3");
 			crewSay("altar", 1, true);
 		}
 	}
@@ -71414,7 +71436,7 @@ var DATA_HASH = (() => {
 		return d;
 	}
 	function altarWave(A, kind) {
-		A.waveAt = elapsed;
+		A.waveAt = GS.elapsed;
 		A.pulse = 1;
 		if (!NET.client) altarGuards(A, Math.round(10 * waveMul()));
 		const near = Math.hypot(car.pos.x - A.x, car.pos.z - A.z) < 70;
@@ -71423,7 +71445,7 @@ var DATA_HASH = (() => {
 			if (near) {
 				SFX.play("laugh", null);
 				flashAlert("THE ALTAR HUNGERS");
-				shake = Math.max(shake, .5);
+				GS.shake = Math.max(GS.shake, .5);
 			}
 			flash(tmp, 16726618, 18, .5, 4);
 			burst(tmp, 5909066, 14, 3, 8, .5);
@@ -71438,10 +71460,10 @@ var DATA_HASH = (() => {
 			A.pulse = Math.max(0, A.pulse - dt * 2);
 			A.cd -= dt;
 			A.crystal.rotation.y += dt * (A.done ? 3 : .8 + A.n * .4);
-			A.crystal.position.y = 3.3 + Math.sin(elapsed * 2 + A.x) * .25;
+			A.crystal.position.y = 3.3 + Math.sin(GS.elapsed * 2 + A.x) * .25;
 			const lv = A.done ? 3.2 : .35 + A.n / ALTAR_NEED * 1.6 + A.pulse * 2;
 			A.crystal.material.color.setRGB(A.done ? lv : lv * .25, A.done ? lv * .72 : lv * .7, A.done ? lv * .25 : lv);
-			if (!worldUp) {
+			if (!GS.worldUp) {
 				A.bar.visible = A.zone.visible = false;
 				continue;
 			}
@@ -71463,7 +71485,7 @@ var DATA_HASH = (() => {
 				if (!A.awake && dP < 30) {
 					A.awake = true;
 					A.pulse = 1;
-					const since = elapsed - (A.waveAt == null ? -999 : A.waveAt);
+					const since = GS.elapsed - (A.waveAt == null ? -999 : A.waveAt);
 					if (since < ALTAR_WAVE) {
 						A.spawnT = ALTAR_WAVE - since;
 						netEv({
@@ -71540,7 +71562,7 @@ var DATA_HASH = (() => {
 			if (altTEl.textContent !== "next wave " + sec) altTEl.textContent = "next wave " + sec;
 			altTEl.classList.toggle("soon", sec <= 5);
 		} else altTEl.style.display = "none";
-		unloadAltar = offer;
+		GS.unloadAltar = offer;
 		if (offer) {
 			unloadV.set(offer.x, 7.6, offer.z).project(camera);
 			unloadBtn.style.display = "block";
@@ -71593,7 +71615,7 @@ var DATA_HASH = (() => {
 				if (carBub.altar) carBub.altar = null;
 			}
 		}
-		if (!gateOpen && boss.state === "idle" && door.targetY < 0) door.targetY = 2.3;
+		if (!GS.gateOpen && boss.state === "idle" && door.targetY < 0) door.targetY = 2.3;
 	}
 	const angel = {
 		on: false,
@@ -71796,17 +71818,17 @@ var DATA_HASH = (() => {
 			if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40) spawnParticles(tmp.set(m.pos.x, 1, m.pos.z), m.art.color, 6, 6);
 		}
 		waves.t = 1e9;
-		chubSpawnT = 1e9;
+		GS.chubSpawnT = 1e9;
 		SFX.play("choir", null);
 	}
 	function updateAngel(dt) {
 		if (!angel.on) return;
 		const t = angel.t += dt, g = angel.g;
 		const k = THREE.MathUtils.clamp((t - 1.5) / 4, 0, 1), e = 1 - Math.pow(1 - k, 3);
-		g.position.y = 80 + -65 * e + Math.sin(elapsed * 1.3) * .5;
+		g.position.y = 80 + -65 * e + Math.sin(GS.elapsed * 1.3) * .5;
 		angel.halo.rotation.z += dt * .8;
 		for (const w of angel.wings) {
-			const f = Math.sin(elapsed * 2.4);
+			const f = Math.sin(GS.elapsed * 2.4);
 			w.s.material.rotation = w.sd * (.15 + f * .28);
 			w.s.scale.set(9, 11 * (1 + f * .08), 1);
 		}
@@ -71863,7 +71885,7 @@ var DATA_HASH = (() => {
 				const u = Math.min(1, c.t / c.T), s = u * u * (3 - 2 * u);
 				c.pos.set(c.from.x + (angel.pos.x - c.from.x) * s, c.from.y + (g.position.y - c.from.y) * s + Math.sin(Math.PI * u) * 6, c.from.z + (angel.pos.z - c.from.z) * s);
 				c.sprite.position.copy(c.pos);
-				c.sprite.material = chubMats[0][Math.floor(elapsed * 8 + i) % CHUB_FR];
+				c.sprite.material = chubMats[0][Math.floor(GS.elapsed * 8 + i) % CHUB_FR];
 				const sc = CHUB_SIZE * (1 + .6 * Math.sin(Math.PI * u)) * (u > .85 ? (1 - u) / .15 : 1);
 				c.sprite.scale.set(sc, sc, 1);
 				if (u >= 1) {
@@ -71888,11 +71910,11 @@ var DATA_HASH = (() => {
 		if (angel.phase === "done" && !angel.shown && t > angel.doneT + 1.4) {
 			angel.shown = true;
 			ascEl.style.display = "none";
-			const fed = altars.reduce((a, A) => a + A.n, 0), mm = Math.floor(elapsed / 60), ss = String(Math.floor(elapsed % 60)).padStart(2, "0");
-			const verdict = angel.saved === 0 ? "The angel came for nothing." : angel.saved >= chubEaten + fed ? "More saved than lost. The angel beams." : angel.saved >= fed ? "A fair trade, by wasteland standards." : "The altars ate better than the angel.";
+			const fed = altars.reduce((a, A) => a + A.n, 0), mm = Math.floor(GS.elapsed / 60), ss = String(Math.floor(GS.elapsed % 60)).padStart(2, "0");
+			const verdict = angel.saved === 0 ? "The angel came for nothing." : angel.saved >= GS.chubEaten + fed ? "More saved than lost. The angel beams." : angel.saved >= fed ? "A fair trade, by wasteland standards." : "The altars ate better than the angel.";
 			resEl.innerHTML = `<h2>THE CHUBZIKS ASCEND</h2><div class="big">${angel.saved}</div><div class="sub">saved</div>
-        <table><tr><td>Fed to the altars</td><td>${fed}</td></tr><tr><td>Eaten by monsters</td><td>${chubEaten}</td></tr>
-        <tr><td>Monsters destroyed</td><td>${enemyKills}</td></tr><tr><td>Crates smashed</td><td>${kills}</td></tr><tr><td>Pillars and rocks flattened</td><td>${pillarsSmashed}</td></tr>
+        <table><tr><td>Fed to the altars</td><td>${fed}</td></tr><tr><td>Eaten by monsters</td><td>${GS.chubEaten}</td></tr>
+        <tr><td>Monsters destroyed</td><td>${GS.enemyKills}</td></tr><tr><td>Crates smashed</td><td>${GS.kills}</td></tr><tr><td>Pillars and rocks flattened</td><td>${GS.pillarsSmashed}</td></tr>
         <tr><td>Time</td><td>${mm}:${ss}</td></tr></table><p>${verdict}</p><button id="again">PLAY AGAIN</button>`;
 			resEl.style.display = "block";
 			document.getElementById("again").addEventListener("click", hardReload);
@@ -71927,19 +71949,19 @@ var DATA_HASH = (() => {
 		});
 	}
 	function updateChubs(dt) {
-		if (!resInit && !NET.client && worldUp) {
+		if (!resInit && !NET.client && GS.worldUp) {
 			resInit = true;
 			seedResidents();
 		}
-		if (!chubInit && !NET.client && PH.i >= 2) {
-			chubInit = true;
+		if (!GS.chubInit && !NET.client && PH.i >= 2) {
+			GS.chubInit = true;
 			for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4);
 		}
-		chubSpawnT -= dt;
-		if (chubSpawnT <= 0 && !NET.client) {
-			chubSpawnT = 3;
-			chubTick++;
-			if (worldUp && rocks.length < 8 && chubTick % 4 === 0) {
+		GS.chubSpawnT -= dt;
+		if (GS.chubSpawnT <= 0 && !NET.client) {
+			GS.chubSpawnT = 3;
+			GS.chubTick++;
+			if (GS.worldUp && rocks.length < 8 && GS.chubTick % 4 === 0) {
 				const far = (o) => {
 					if (Math.hypot(o.mesh.position.x - car.pos.x, o.mesh.position.z - car.pos.z) < 35) return false;
 					for (const R of NET.remotes.values()) if (Math.hypot(o.mesh.position.x - R.pos.x, o.mesh.position.z - R.pos.z) < 35) return false;
@@ -71961,7 +71983,7 @@ var DATA_HASH = (() => {
 			if (PH.i >= 2 && rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);
 			let res = 0;
 			for (const m of swarm) if (!m.dead && m.home) res++;
-			if (chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) {
+			if (GS.chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) {
 				const R = rocks[Math.floor(Math.random() * rocks.length)];
 				if (Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z) > 45) {
 					const a = Math.random() * 6.283;
@@ -72073,7 +72095,7 @@ var DATA_HASH = (() => {
 					}
 				}
 			} else if (c.state === "perch") {
-				if (ride === "spider" && !other && car.alive && dCar < car.radius + .7 && Math.abs(car.y - c.pos.y) < 1.3) {
+				if (GS.ride === "spider" && !other && car.alive && dCar < car.radius + .7 && Math.abs(car.y - c.pos.y) < 1.3) {
 					c.pos.y = 0;
 					cartAdd(c);
 					continue;
@@ -72178,8 +72200,8 @@ var DATA_HASH = (() => {
 		cartReset();
 		seedResidents();
 	}
-	let chubInit = false;
-	let autoTarget = null;
+	GS.chubInit = false;
+	GS.autoTarget = null;
 	const autoV = new THREE.Vector3();
 	function onScreen(x, z) {
 		autoV.set(x, 1, z).project(camera);
@@ -72187,7 +72209,7 @@ var DATA_HASH = (() => {
 	}
 	function pickAutoTarget() {
 		const ok = (e) => e && !e.dead && !e.carried && e.awake && Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z) < 30 && onScreen(e.pos.x, e.pos.z);
-		if (autoTarget && autoTarget !== boss && ok(autoTarget)) return autoTarget;
+		if (GS.autoTarget && GS.autoTarget !== boss && ok(GS.autoTarget)) return GS.autoTarget;
 		let best = null, bd = 26;
 		for (const e of enemies) if (ok(e)) {
 			const d = Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z);
@@ -72247,9 +72269,9 @@ var DATA_HASH = (() => {
 			return;
 		}
 		car.dig = car.dig || 0;
-		if (diggers > 0) {
+		if (GS.diggers > 0) {
 			crewSay("dig");
-			car.dig += dt * diggers;
+			car.dig += dt * GS.diggers;
 			digDirtT -= dt;
 			if (digDirtT <= 0) {
 				digDirtT = .06;
@@ -72258,7 +72280,7 @@ var DATA_HASH = (() => {
 			mound.position.x += rand(-.08, .08);
 			mound.position.z += rand(-.08, .08);
 			SFX.play("scratch", car.pos);
-			shake = Math.max(shake, .12);
+			GS.shake = Math.max(GS.shake, .12);
 		} else car.dig = Math.max(0, car.dig - dt * .5);
 		digBar.visible = car.dig > 0;
 		if (digBar.visible) {
@@ -72277,7 +72299,7 @@ var DATA_HASH = (() => {
 			car.usedDouble = true;
 			car.popped = true;
 			spawnParticles(tmp.copy(car.pos).setY(.5), 7035454, 26, 12);
-			shake = Math.max(shake, .7);
+			GS.shake = Math.max(GS.shake, .7);
 			flashAlert("DUG OUT!");
 			SFX.play("dig_up", car.pos);
 			SFX.play("growl_elite", car.pos, { delay: .1 });
@@ -72317,7 +72339,7 @@ var DATA_HASH = (() => {
 		SFX.play("chomp", e.pos);
 		SFX.play(h.kind === "crate" ? "hit_wood" : "hit_flesh", holdPos);
 		h.shieldHp -= e.bite;
-		shake = Math.max(shake, .2);
+		GS.shake = Math.max(GS.shake, .2);
 		spawnParticles(tmp.set((e.pos.x + holdPos.x) / 2, holdPos.y, (e.pos.z + holdPos.z) / 2), h.kind === "crate" ? 13797180 : 13120060, 5, 6);
 		if (h.kind === "crate") h.ref.flash = .08;
 		e.vel.set(0, 0, 0);
@@ -72325,7 +72347,7 @@ var DATA_HASH = (() => {
 			if (h.kind === "crate") damageCrate(h.ref, 99);
 			else hitEnemy(h.ref, tmp.set(0, 0, 0), 999, 0);
 			spawnParticles(tmp.copy(holdPos), h.kind === "crate" ? 13797180 : 13120060, 14, 9);
-			shake = Math.max(shake, .45);
+			GS.shake = Math.max(GS.shake, .45);
 		}
 	}
 	function updateShieldBar() {
@@ -72364,7 +72386,7 @@ var DATA_HASH = (() => {
 		flatShading: true,
 		metalness: .55,
 		roughness: .45,
-		envMap: ENV,
+		envMap: GS.ENV,
 		envMapIntensity: 1
 	});
 	const bossDark = new THREE.MeshStandardMaterial({
@@ -72436,7 +72458,7 @@ var DATA_HASH = (() => {
 			a: rand(0, Math.PI * 2),
 			r: rand(5.8, 7.4),
 			y: rand(1, 8),
-			sp: rand(.5, 1.3) * (worldRnd() < .5 ? -1 : 1)
+			sp: rand(.5, 1.3) * (GS.worldRnd() < .5 ? -1 : 1)
 		});
 	}
 	const bossCol = {
@@ -72505,7 +72527,7 @@ var DATA_HASH = (() => {
 	function updateTentacle(tn, dt) {
 		tn.t += dt;
 		const r = tentRoot(tn);
-		let tTheta = tn.a0 + .3 * Math.sin(elapsed * .7 + tn.k * 1.7), tReach = 1, tLift = .45, tWave = .45, tGlow = 0, rate = 2.5;
+		let tTheta = tn.a0 + .3 * Math.sin(GS.elapsed * .7 + tn.k * 1.7), tReach = 1, tLift = .45, tWave = .45, tGlow = 0, rate = 2.5;
 		if (tn.state === "wind") {
 			const tp = tn.tp || car.pos;
 			tn.aim = Math.atan2(tp.z - r.z, tp.x - r.x);
@@ -72531,7 +72553,7 @@ var DATA_HASH = (() => {
 			if (tn.t > .16) {
 				tn.state = "slam";
 				tn.t = 0;
-				shake = Math.max(shake, .35);
+				GS.shake = Math.max(GS.shake, .35);
 				SFX.play("tent_slam", tn.pts[tn.n - 1]);
 				for (let i = 0; i < tn.n; i += 3) {
 					spawnParticles(tn.pts[i], 6969978, 2, 5);
@@ -72572,9 +72594,9 @@ var DATA_HASH = (() => {
 				continue;
 			}
 			const f = (i + 1) / tn.n;
-			const ang = tn.theta + tn.wave * Math.sin(elapsed * 2.6 + i * .55 + tn.k) * f;
+			const ang = tn.theta + tn.wave * Math.sin(GS.elapsed * 2.6 + i * .55 + tn.k) * f;
 			const d = (i + 1) * TENT_SP * tn.reach;
-			p.set(r.x + Math.cos(ang) * d, .5 + tn.lift * Math.sin(Math.PI * Math.min(1, f * 1.1)) + .12 * Math.sin(elapsed * 4 + i), r.z + Math.sin(ang) * d);
+			p.set(r.x + Math.cos(ang) * d, .5 + tn.lift * Math.sin(Math.PI * Math.min(1, f * 1.1)) + .12 * Math.sin(GS.elapsed * 4 + i), r.z + Math.sin(ang) * d);
 			m.position.copy(p);
 			m.scale.setScalar(1.1 - .55 * f);
 			if (i === tn.n - 1) {
@@ -72873,7 +72895,7 @@ var DATA_HASH = (() => {
 		flash(tmp, 16732352, 46, .7, 6);
 		burst(tmp, 5910640, 22, 4, 9, .55);
 		spawnParticles(tmp.set(BOSS_POS.x, 5, BOSS_POS.z), 16720469, 20, 12);
-		shake = 1.2;
+		GS.shake = 1.2;
 		flashAlert("PYRAMIDON DEFEATED");
 		SFX.play("boss_die", BOSS_POS);
 		if (!NET.client) {
@@ -72945,7 +72967,7 @@ var DATA_HASH = (() => {
 			hideTent(tn);
 		}
 		bossBarEl.style.display = "none";
-		setDoor(!gateOpen);
+		setDoor(!GS.gateOpen);
 	}
 	const quakes = [], QUAKE_T = 2.4;
 	const quakeRingGeo = new THREE.RingGeometry(.955, 1, 72);
@@ -72996,13 +73018,13 @@ var DATA_HASH = (() => {
 			const k = Math.min(1, q.t / QUAKE_T);
 			q.disc.scale.setScalar(Math.max(.01, q.r * k));
 			q.ring.material.opacity = .55 + .4 * Math.sin(q.t * (6 + 14 * k));
-			shake = Math.max(shake, .08 + .12 * k);
+			GS.shake = Math.max(GS.shake, .08 + .12 * k);
 			if (k < 1) continue;
 			scene.remove(q.ring, q.disc);
 			q.ring.material.dispose();
 			q.disc.material.dispose();
 			quakes.splice(i, 1);
-			shake = Math.max(shake, 1);
+			GS.shake = Math.max(GS.shake, 1);
 			SFX.play("blast", tmp.set(q.x, 0, q.z));
 			SFX.play("tent_slam", tmp);
 			flash(tmp.set(q.x, 1, q.z), 16742954, q.r * 2.2, .45, 3);
@@ -73082,7 +73104,7 @@ var DATA_HASH = (() => {
 			burst(tmp.set(px + rand(-4, 4), .4, pz + rand(-4, 4)), 9075300, 5, 3, 8, .6);
 		}
 		const dc = Math.hypot(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z) || .001;
-		if (dc < 60) shake = Math.max(shake, .25);
+		if (dc < 60) GS.shake = Math.max(GS.shake, .25);
 		if (!M.hit && sp > 6 && car.alive && car.y < 1.5 && dc < 7.2) {
 			M.hit = true;
 			hurtCar(BOSS2.ram, tmp.set((car.pos.x - BOSS_POS.x) / dc, 0, (car.pos.z - BOSS_POS.z) / dc).clone());
@@ -73106,7 +73128,7 @@ var DATA_HASH = (() => {
 			vol: .9,
 			rate: .55
 		});
-		if (dc < 70) shake = Math.max(shake, .9);
+		if (dc < 70) GS.shake = Math.max(GS.shake, .9);
 		if (boss.state === "flee") {
 			boss.state = "fight";
 			boss.t = 0;
@@ -73307,8 +73329,8 @@ var DATA_HASH = (() => {
 				const a = a0 + rand(-.8, .8);
 				spawnParticles(tmp.set(L.x + Math.cos(a) * L.r, .5 + Math.random() * h, L.z + Math.sin(a) * L.r), Math.random() < .5 ? 16739040 : 11553535, 2, 5);
 			}
-			if (up > .6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + .5 && (car.lavaT || 0) < elapsed) {
-				car.lavaT = elapsed + .5;
+			if (up > .6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + .5 && (car.lavaT || 0) < GS.elapsed) {
+				car.lavaT = GS.elapsed + .5;
 				const sd = d < L.r ? -1 : 1;
 				hurtCar(BOSS2.lavaDmg, tmp.set(dx / d * sd, 0, dz / d * sd).clone());
 			}
@@ -73317,9 +73339,9 @@ var DATA_HASH = (() => {
 	function updateBoss(dt) {
 		updateQuakes(dt);
 		updateLava(dt);
-		const runeTarget = boss.state === "fight" ? 1.5 + .6 * Math.sin(elapsed * 3) : boss.state === "emerging" ? 3.2 : boss.state === "dead" ? .25 : .8;
-		runeLevel += (runeTarget - runeLevel) * Math.min(1, 3 * dt);
-		runeMat.color.setScalar(runeLevel);
+		const runeTarget = boss.state === "fight" ? 1.5 + .6 * Math.sin(GS.elapsed * 3) : boss.state === "emerging" ? 3.2 : boss.state === "dead" ? .25 : .8;
+		GS.runeLevel += (runeTarget - GS.runeLevel) * Math.min(1, 3 * dt);
+		runeMat.color.setScalar(GS.runeLevel);
 		const dy = door.targetY - doorMesh.position.y;
 		doorMesh.position.y += Math.sign(dy) * Math.min(Math.abs(dy), 9 * dt);
 		door.disabled = doorMesh.position.y < .3;
@@ -73350,7 +73372,7 @@ var DATA_HASH = (() => {
 		if (boss.state === "emerging") {
 			const k = Math.min(1, boss.t / 2.6), e = 1 - Math.pow(1 - k, 3);
 			bossGroup.position.y = -10.5 + BOSS_SINK * e;
-			shake = Math.max(shake, .3 * (1 - k) + .1);
+			GS.shake = Math.max(GS.shake, .3 * (1 - k) + .1);
 			boss.dirtT -= dt;
 			if (boss.dirtT <= 0) {
 				boss.dirtT = .05;
@@ -73373,19 +73395,19 @@ var DATA_HASH = (() => {
 		}
 		if (boss.mv) bossMoveTick(dt);
 		eye.lookAt(car.pos.x, 1, car.pos.z);
-		eye.position.y = 6 + .12 * Math.sin(elapsed * 2.3);
-		capstone.position.y = 7.15 + .22 * Math.sin(elapsed * 1.4);
+		eye.position.y = 6 + .12 * Math.sin(GS.elapsed * 2.3);
+		capstone.position.y = 7.15 + .22 * Math.sin(GS.elapsed * 1.4);
 		capstone.rotation.y += dt * .5;
 		for (const o of orbit) {
 			o.a += o.sp * dt;
-			o.m.position.set(Math.cos(o.a) * o.r, o.y + Math.sin(elapsed * 2 + o.a) * .4, Math.sin(o.a) * o.r);
+			o.m.position.set(Math.cos(o.a) * o.r, o.y + Math.sin(GS.elapsed * 2 + o.a) * .4, Math.sin(o.a) * o.r);
 			o.m.rotation.x += dt * 2;
 			o.m.rotation.y += dt * 3;
 		}
 		boss.flash -= dt;
 		if (boss.flash > 0) bossMat.emissive.setRGB(.55, .3, .55);
 		else {
-			const g = .02 + .012 * Math.sin(elapsed * 3);
+			const g = .02 + .012 * Math.sin(GS.elapsed * 3);
 			bossMat.emissive.setRGB(g * .7, g * .15, g * 1.6);
 		}
 		if (boss.state !== "fight") return;
@@ -73428,7 +73450,9 @@ var DATA_HASH = (() => {
 	const clock = new THREE.Timer();
 	const tmp = new THREE.Vector3();
 	let roll = 0, pitch = 0, wheelSpin = 0, prevSpeed = 0;
-	let elapsed = 0, hurtFlash = 0, shake = 0;
+	GS.hurtFlash = 0;
+	GS.elapsed = 0;
+	GS.shake = 0;
 	const lastValid = new THREE.Vector3();
 	const hpFill = document.getElementById("hpfill");
 	const SPL = {
@@ -73726,7 +73750,7 @@ var DATA_HASH = (() => {
 		SPD.quat.slerp(spQt, 1 - Math.exp(-(car.airborne ? 5 : 12) * dt));
 	}
 	function update(dt) {
-		elapsed += dt;
+		GS.elapsed += dt;
 		const ctl = car.alive && car.burrow === "up";
 		updateJump(dt);
 		updateBurrow(dt);
@@ -73742,11 +73766,11 @@ var DATA_HASH = (() => {
 		if (!car.alive) {
 			car.deadTimer -= dt;
 			if (car.deadTimer <= 0) respawn();
-		} else if (elapsed - car.lastHurt > 3 && car.hp < car.maxHp) car.hp = Math.min(car.maxHp, car.hp + car.maxHp * .06 * dt);
-		if (ride === "spider") spiderDrive(dt, ctl, stick);
-		else if (ride === "halo") haloDrive(dt, ctl, stick);
+		} else if (GS.elapsed - car.lastHurt > 3 && car.hp < car.maxHp) car.hp = Math.min(car.maxHp, car.hp + car.maxHp * .06 * dt);
+		if (GS.ride === "spider") spiderDrive(dt, ctl, stick);
+		else if (GS.ride === "halo") haloDrive(dt, ctl, stick);
 		else {
-			const RT = ride === "unicorn" ? UNI : BUG;
+			const RT = GS.ride === "unicorn" ? UNI : BUG;
 			if (up) car.speed += (car.speed < 0 ? RT.brake : RT.accel) * dt;
 			else if (down) car.speed -= (car.speed > 0 ? RT.brake : RT.reverseAccel) * dt;
 			else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), RT.coast * dt);
@@ -73779,13 +73803,13 @@ var DATA_HASH = (() => {
 			}
 		}
 		const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-		const k = car.airborne || ride === "spider" || ride === "halo" ? 0 : Math.min(1, (ride === "unicorn" ? UNI.grip : BUG.grip) * dt);
+		const k = car.airborne || GS.ride === "spider" || GS.ride === "halo" ? 0 : Math.min(1, (GS.ride === "unicorn" ? UNI.grip : BUG.grip) * dt);
 		car.vel.x += (fx * car.speed - car.vel.x) * k;
 		car.vel.z += (fz * car.speed - car.vel.z) * k;
 		car.vel.y = 0;
 		car.pos.y = 0;
-		if (!(ride === "spider" && !car.airborne)) car.pos.addScaledVector(car.vel, ride === "unicorn" && !car.airborne ? dt * (1 + .16 * Math.sin(ridePhase * 4.8)) : dt);
-		const crawler = ride === "spider";
+		if (!(GS.ride === "spider" && !car.airborne)) car.pos.addScaledVector(car.vel, GS.ride === "unicorn" && !car.airborne ? dt * (1 + .16 * Math.sin(GS.ridePhase * 4.8)) : dt);
+		const crawler = GS.ride === "spider";
 		for (const o of obstacles) if (active(o) && (o.wall || car.y < o.h - .2) && !(crawler && (o.pillar || o.rock))) resolveCarVsBox(o);
 		if (crawler) {
 			let gh = 0;
@@ -73804,7 +73828,7 @@ var DATA_HASH = (() => {
 		const accelNow = (car.speed - prevSpeed) / Math.max(dt, 1e-4);
 		prevSpeed = car.speed;
 		const lateral = car.vel.x * fz - car.vel.z * fx;
-		updateSkid(dt, ride === "buggy" ? lateral : 0);
+		updateSkid(dt, GS.ride === "buggy" ? lateral : 0);
 		roll += (THREE.MathUtils.clamp(-car.steer * Math.abs(car.speed) * .006 + lateral * .02, -.12, .12) - roll) * Math.min(1, 8 * dt);
 		pitch += (THREE.MathUtils.clamp(-accelNow * .002, -.06, .06) - pitch) * Math.min(1, 6 * dt);
 		body.rotation.z = roll;
@@ -73814,18 +73838,18 @@ var DATA_HASH = (() => {
 			w.mesh.rotation.x = wheelSpin;
 			w.pivot.rotation.y = w.front ? car.steer * .5 : 0;
 		}
-		fireCooldown -= dt;
+		GS.fireCooldown -= dt;
 		let autoFire = false;
-		if (autoTarget) {
-			const tp = autoTargetPos(autoTarget), want = Math.atan2(tp.x - car.pos.x, tp.z - car.pos.z) - car.heading - turret.rotation.y;
+		if (GS.autoTarget) {
+			const tp = autoTargetPos(GS.autoTarget), want = Math.atan2(tp.x - car.pos.x, tp.z - car.pos.z) - car.heading - turret.rotation.y;
 			autoFire = Math.abs(Math.atan2(Math.sin(want), Math.cos(want))) < .22;
 		}
-		if (ctl && (mouseFire || touch.aim.mag > .3 || autoFire) && fireCooldown <= 0) {
+		if (ctl && (GS.mouseFire || touch.aim.mag > .3 || autoFire) && GS.fireCooldown <= 0) {
 			fire();
-			fireCooldown = 1 / (11 * (weapons.spread ? W_STATS.spread.rate[weapons.spread - 1] : 1));
+			GS.fireCooldown = 1 / (11 * (weapons.spread ? W_STATS.spread.rate[weapons.spread - 1] : 1));
 		}
-		muzzleTimer -= dt;
-		muzzle.visible = muzzleTimer > 0;
+		GS.muzzleTimer -= dt;
+		muzzle.visible = GS.muzzleTimer > 0;
 		if (muzzle.visible) muzzle.scale.setScalar(rand(.7, 1.3));
 		for (let i = bullets.length - 1; i >= 0; i--) {
 			const b = bullets[i];
@@ -73945,14 +73969,14 @@ var DATA_HASH = (() => {
 		updateAltars(dt);
 		updateAngel(dt);
 		updateRide(dt);
-		if (ride === "unicorn") updateHorn();
+		if (GS.ride === "unicorn") updateHorn();
 		updateNet(dt);
 		updatePhases(dt);
 		updateHints(dt);
 		updateMinimap(dt);
 		updateDiag();
-		hurtFlash -= dt;
-		paint.emissive.setHex(hurtFlash > 0 ? 11145489 : 0);
+		GS.hurtFlash -= dt;
+		paint.emissive.setHex(GS.hurtFlash > 0 ? 11145489 : 0);
 		const hpK = car.hp / car.maxHp * 100;
 		hpFill.style.width = hpK + "%";
 		hpFill.style.background = hpK > 55 ? "#5fd36a" : hpK > 25 ? "#f0b43c" : "#e5484d";
@@ -73960,19 +73984,19 @@ var DATA_HASH = (() => {
 		camFocus.lerp(tmp, 1 - Math.exp(-5 * dt));
 		camera.position.copy(camFocus).add(ISO_OFFSET);
 		camera.lookAt(camFocus);
-		shake = Math.max(0, shake - dt * 2.5);
-		if (shake > 0) camera.position.add(tmp.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * .6));
+		GS.shake = Math.max(0, GS.shake - dt * 2.5);
+		if (GS.shake > 0) camera.position.add(tmp.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(GS.shake * .6));
 		sun.position.copy(camFocus).add(SUN_OFFSET);
 		sun.target.position.copy(camFocus);
 		spdEl.textContent = Math.round(Math.abs(car.speed) * 3.6 * 1.5);
 		{
 			const thr = up || down ? 1 : 0, spdK = Math.min(1, Math.abs(car.speed) / TUNE.maxSpeed);
 			const live = car.alive && car.depth < .6, vK = Math.min(1, Math.hypot(car.vel.x, car.vel.z) / TUNE.maxSpeed);
-			SFX.loop("hum", ride === "halo" && live ? .05 + .04 * vK : 0, 1);
-			SFX.loop("servo", ride === "spider" && live ? .11 * vK : 0, .8 + .5 * vK);
-			SFX.loop("engine", ride === "buggy" && live ? .16 + .2 * thr + .12 * spdK : 0, .72 + 1.3 * spdK + .12 * thr, 450 + 2300 * Math.min(1, .35 * thr + spdK));
+			SFX.loop("hum", GS.ride === "halo" && live ? .05 + .04 * vK : 0, 1);
+			SFX.loop("servo", GS.ride === "spider" && live ? .11 * vK : 0, .8 + .5 * vK);
+			SFX.loop("engine", GS.ride === "buggy" && live ? .16 + .2 * thr + .12 * spdK : 0, .72 + 1.3 * spdK + .12 * thr, 450 + 2300 * Math.min(1, .35 * thr + spdK));
 			const inBoss = inRoom(car.pos.x, car.pos.z);
-			SFX.loop("wind", (inBoss ? .05 : .13) + (ride === "halo" ? .05 * vK : 0), 1);
+			SFX.loop("wind", (inBoss ? .05 : .13) + (GS.ride === "halo" ? .05 * vK : 0), 1);
 			SFX.loop("drone", inBoss && (boss.state === "fight" || boss.state === "emerging") ? .32 : 0, 1);
 			SFX.setRoom(inBoss ? .12 : 0);
 		}
@@ -73992,15 +74016,15 @@ var DATA_HASH = (() => {
 		perfT = 0;
 		perfN = 0;
 		const floor = COARSE ? .5 : .6;
-		if (avg > 1 / 45 && PR > floor) {
-			PR = Math.max(floor, PR * .8);
-			renderer.setPixelRatio(PR);
-			if (composer) composer.setPixelRatio(PR);
-			if (fxaaPass) fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
-		} else if (avg > 1 / 38 && PR <= floor) {
-			if (shadowEvery < 3) shadowEvery = 3;
-			else if (fxaaPass && fxaaPass.enabled) fxaaPass.enabled = false;
-			else if (bloomPass && bloomPass.enabled) bloomPass.enabled = false;
+		if (avg > 1 / 45 && GS.PR > floor) {
+			GS.PR = Math.max(floor, GS.PR * .8);
+			renderer.setPixelRatio(GS.PR);
+			if (GS.composer) GS.composer.setPixelRatio(GS.PR);
+			if (GS.fxaaPass) GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
+		} else if (avg > 1 / 38 && GS.PR <= floor) {
+			if (GS.shadowEvery < 3) GS.shadowEvery = 3;
+			else if (GS.fxaaPass && GS.fxaaPass.enabled) GS.fxaaPass.enabled = false;
+			else if (GS.bloomPass && GS.bloomPass.enabled) GS.bloomPass.enabled = false;
 		}
 	}
 	const NET = {
@@ -74151,7 +74175,7 @@ var DATA_HASH = (() => {
 			al: altars.map((A) => A.n),
 			bd: Math.round(boss.dealt),
 			bk: boss.state === "dead" ? 1 : 0,
-			go: gateOpen ? 1 : 0,
+			go: GS.gateOpen ? 1 : 0,
 			bst: boss.state === "fight" || boss.state === "emerging" || boss.state === "flee" ? 1 : 0,
 			bp: [
 				boss.ph,
@@ -74237,14 +74261,14 @@ var DATA_HASH = (() => {
 				chubs.splice(i, 1);
 			}
 		}
-		chubInit = true;
+		GS.chubInit = true;
 		waves.pending = false;
 		NET.chMir = /* @__PURE__ */ new Map();
 	}
 	function netAdopt() {
 		netLog("host is gone: I took over the monsters (" + swarm.length + ") and chubziks");
 		for (const m of swarm) {
-			swId = Math.max(swId, m.id);
+			GS.swId = Math.max(GS.swId, m.id);
 			if (m.net) {
 				m.net = false;
 				m.think = Math.random() * .3;
@@ -74254,7 +74278,7 @@ var DATA_HASH = (() => {
 		for (const c of chubs) {
 			if (!c.net) continue;
 			c.net = false;
-			c.id = ++chubId;
+			c.id = ++GS.chubId;
 			c.rock = c.home = rockStub(c.pos.x, c.pos.z);
 			if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = "perch";
 			else {
@@ -74269,7 +74293,7 @@ var DATA_HASH = (() => {
 		NET.hostPeer = null;
 		NET.chMir = /* @__PURE__ */ new Map();
 		waves.t = Math.max(waves.t, 10);
-		wbSpawned = swarm.some((m) => m.wb && !m.dead);
+		GS.wbSpawned = swarm.some((m) => m.wb && !m.dead);
 	}
 	function netPick(m) {
 		if (NET.client || !NET.remotes.size) return null;
@@ -74285,9 +74309,9 @@ var DATA_HASH = (() => {
 	}
 	function waveTargets() {
 		const a = [];
-		if (carSeen() && (gateOpen || !inRoom(car.pos.x, car.pos.z))) a.push(car.pos);
+		if (carSeen() && (GS.gateOpen || !inRoom(car.pos.x, car.pos.z))) a.push(car.pos);
 		if (NET.on && NET.game && !NET.client) {
-			for (const R of NET.remotes.values()) if (R.up && (gateOpen || !inRoom(R.pos.x, R.pos.z))) a.push(R.pos);
+			for (const R of NET.remotes.values()) if (R.up && (GS.gateOpen || !inRoom(R.pos.x, R.pos.z))) a.push(R.pos);
 		}
 		return a;
 	}
@@ -74367,16 +74391,16 @@ var DATA_HASH = (() => {
 					}
 					if (e[4] & 64) makeRig(m);
 					if (e[4] & 128) m.guard = true;
-					if (e[4] & 4);
+					if (e[4] & 4) GS.gateSpawned = true;
 				}
 				m.tx = x;
 				m.tz = z;
 				m.q = q;
-				m.seenT = elapsed;
+				m.seenT = GS.elapsed;
 				if (e[4] & 1 && m.flash <= 0) m.flash = .1;
 				if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, .3);
 			}
-			for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {
+			for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : GS.elapsed - m.seenT > 3)) {
 				m.dead = true;
 				scene.remove(m.sprite, m.shadow);
 				if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 60) {
@@ -74385,9 +74409,9 @@ var DATA_HASH = (() => {
 					flash(p, m.art.color, m.K.heavy ? 6 : 3, .18, 1.6, false);
 					SFX.play("pop", p, { rate: m.K.heavy ? .7 : .9 + Math.random() * .3 });
 				}
-				if (elapsed - (m.myHit || -9) < 1.2) {
-					enemyKills++;
-					ekillsEl.textContent = enemyKills;
+				if (GS.elapsed - (m.myHit || -9) < 1.2) {
+					GS.enemyKills++;
+					ekillsEl.textContent = GS.enemyKills;
 					crewKill(false);
 					m.pos.x, m.pos.z;
 				}
@@ -74552,9 +74576,9 @@ var DATA_HASH = (() => {
 							e.dead = true;
 							e.root.visible = false;
 							if (!quiet) enemyDieFx(e);
-							if (elapsed - (e.myHit || -9) < 1.5) {
-								enemyKills++;
-								ekillsEl.textContent = enemyKills;
+							if (GS.elapsed - (e.myHit || -9) < 1.5) {
+								GS.enemyKills++;
+								ekillsEl.textContent = GS.enemyKills;
 								crewKill(e.elite);
 								e.pos.x, e.pos.z;
 							}
@@ -74650,8 +74674,8 @@ var DATA_HASH = (() => {
 				}
 			} else if (d.t === "guards") {
 				const A = altars[d.k];
-				if (!NET.client && A && (A.netG || 0) < elapsed) {
-					A.netG = elapsed + 5;
+				if (!NET.client && A && (A.netG || 0) < GS.elapsed) {
+					A.netG = GS.elapsed + 5;
 					NET.applying = false;
 					altarGuards(A, Math.round(num(d.n, 1, 8)));
 				}
@@ -74683,7 +74707,7 @@ var DATA_HASH = (() => {
 						B.tx = num(q[1], -180, 180);
 						B.tz = num(q[2], -180, 180);
 						B.n = num(q[4], 0, 8);
-						bombId = Math.max(bombId, q[0]);
+						GS.bombId = Math.max(GS.bombId, q[0]);
 					}
 					for (const B of bombs.slice()) if (!B.leap && !seen.has(B.id)) dropBomb(B);
 				}
@@ -74707,7 +74731,7 @@ var DATA_HASH = (() => {
 				if (NET.client && Array.isArray(d.a)) {
 					for (const q of d.a.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some((L) => L.id === q[0])) {
 						addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -260, 260), num(q[3], -180, 180), num(q[4], -12, 12), num(q[5], 0, 14), num(q[6], -12, 12));
-						lootId = Math.max(lootId, q[0]);
+						GS.lootId = Math.max(GS.lootId, q[0]);
 					}
 				}
 			} else if (d.t === "lootget") {
@@ -74797,7 +74821,7 @@ var DATA_HASH = (() => {
 				if (R && (W_GEAR.includes(d.k) || d.k === "jump")) armedFx(R, d.k);
 			} else if (d.t === "bdrop") {
 				if (NET.client) {
-					wbKilled++;
+					GS.wbKilled++;
 					bossDrop(num(d.x, -180, 180), num(d.z, -180, 180));
 				}
 			} else if (d.t === "decoy") addDecoy(num(d.a, -180, 180), num(d.b, -180, 180), num(d.x, -180, 180), num(d.z, -180, 180));
@@ -74852,7 +74876,7 @@ var DATA_HASH = (() => {
 				if (Array.isArray(d.lt)) {
 					for (const q of d.lt.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some((L) => L.id === q[0])) {
 						addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -260, 260), num(q[3], -180, 180), 0, 0, 0);
-						lootId = Math.max(lootId, q[0]);
+						GS.lootId = Math.max(GS.lootId, q[0]);
 					}
 				}
 				for (const i of Array.isArray(d.sm) ? d.sm.slice(0, 400) : []) {
@@ -74988,7 +75012,7 @@ var DATA_HASH = (() => {
 			hp: Math.round(car.hp),
 			x: Math.round(car.pos.x),
 			z: Math.round(car.pos.z),
-			ride,
+			ride: GS.ride,
 			pl: NET.remotes.size + 1,
 			age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0,
 			rx: DG.rxRate,
@@ -75187,14 +75211,14 @@ var DATA_HASH = (() => {
 				car.vel.x -= nx * vn * 1.3;
 				car.vel.z -= nz * vn * 1.3;
 				car.speed *= .8;
-				if (ride === "spider") {
+				if (GS.ride === "spider") {
 					SPD.vel.x -= nx * vn * 1.3;
 					SPD.vel.z -= nz * vn * 1.3;
 				}
-				if (-vn > 8 && (NET.bumpT || 0) < elapsed) {
-					NET.bumpT = elapsed + .4;
+				if (-vn > 8 && (NET.bumpT || 0) < GS.elapsed) {
+					NET.bumpT = GS.elapsed + .4;
 					cartSpill(1);
-					shake = Math.max(shake, .3);
+					GS.shake = Math.max(GS.shake, .3);
 					SFX.play("clang", car.pos, { vol: .5 });
 					spawnParticles(tmp.set(car.pos.x - nx * car.radius, 1, car.pos.z - nz * car.radius), 16765562, 6, 6);
 				}
@@ -75206,9 +75230,9 @@ var DATA_HASH = (() => {
 		const o = {
 			cp: r2(cart.phi),
 			dp: r2(car.depth),
-			ph: r2(ridePhase % 1e3)
+			ph: r2(GS.ridePhase % 1e3)
 		};
-		if (ride === "spider" && rideG.spider && rideG.spider.feet) {
+		if (GS.ride === "spider" && rideG.spider && rideG.spider.feet) {
 			const q = carGroup.quaternion;
 			o.q = [
 				r2(q.x),
@@ -75226,7 +75250,7 @@ var DATA_HASH = (() => {
 			game: NET.game,
 			hostNick: NET.hostNick,
 			nick: NET.nick,
-			ride,
+			ride: GS.ride,
 			x: r1(car.pos.x),
 			z: r1(car.pos.z),
 			y: r1(car.y),
@@ -75234,7 +75258,7 @@ var DATA_HASH = (() => {
 			t: r2(car.heading + turret.rotation.y),
 			cx: r1(cart.pos.x),
 			cz: r1(cart.pos.z),
-			ch: r2(ride === "spider" ? cart.vis : cart.heading),
+			ch: r2(GS.ride === "spider" ? cart.vis : cart.heading),
 			cn: cart.riders.length,
 			cs: cart.shown ? 1 : 0,
 			a: car.alive && car.depth < .5 ? 1 : 0,
@@ -75242,12 +75266,12 @@ var DATA_HASH = (() => {
 			hp: NET.isHost ? 1 : 0,
 			v: VER,
 			wo: weapons.orbit,
-			tw: myTow,
+			tw: GS.myTow,
 			pp: pedestals.filter((P) => P.state !== "gone").map((P) => [P.x, P.z]),
 			ak: gearDone() ? 1 : 0,
 			ks: kit().every((t) => abilities[t]) ? 1 : 0,
 			gd: W_GEAR.every((k) => weapons[k]) && abilities.jump ? 1 : 0,
-			tl: ride === "unicorn" && abilities.trail ? abLv.trail + 1 : 0,
+			tl: GS.ride === "unicorn" && abilities.trail ? abLv.trail + 1 : 0,
 			vw: r1(camera.right / camera.zoom),
 			vh: r1(camera.top / camera.zoom),
 			...netPose()
@@ -75554,8 +75578,8 @@ var DATA_HASH = (() => {
 					sp.visible = i < show;
 					if (i >= show) return;
 					const lx = (i % 3 - 1) * .56, lz = (Math.floor(i / 3) % 3 - 1) * .66, ly = .2 + Math.floor(i / 9) * .5;
-					sp.material = chubMats[0][Math.floor(elapsed * 3 + i) % CHUB_FR];
-					sp.position.set(R.cpos.x + rx * lx + fx * lz, .68 + ly + Math.abs(Math.sin(elapsed * 9 + i)) * .06, R.cpos.z + rz * lx + fz * lz);
+					sp.material = chubMats[0][Math.floor(GS.elapsed * 3 + i) % CHUB_FR];
+					sp.position.set(R.cpos.x + rx * lx + fx * lz, .68 + ly + Math.abs(Math.sin(GS.elapsed * 9 + i)) * .06, R.cpos.z + rz * lx + fz * lz);
 				});
 			}
 			{
@@ -75569,7 +75593,7 @@ var DATA_HASH = (() => {
 				sw.forEach((m, i) => {
 					m.visible = i < want;
 					if (i >= want) return;
-					const a = elapsed * W_STATS.orbit.spd[L] * (R.ride === "halo" ? 1.86 : 1) + i / want * 6.283, rr = W_STATS.orbit.r[L];
+					const a = GS.elapsed * W_STATS.orbit.spd[L] * (R.ride === "halo" ? 1.86 : 1) + i / want * 6.283, rr = W_STATS.orbit.r[L];
 					m.position.set(R.pos.x + Math.sin(a) * rr, 1 + R.pos.y, R.pos.z + Math.cos(a) * rr);
 					if (uni) {
 						m.rotation.x += dt * 3;
@@ -75657,7 +75681,7 @@ var DATA_HASH = (() => {
 		if (NET.on && NET.game) {
 			for (const R of NET.remotes.values()) if (R.up) o++;
 		}
-		return PHASES[PH.i].mul * (PHASES[PH.i].key === "save" ? 1 + .3 * altarsDone : 1) * (1 + .35 * Math.min(3, o));
+		return PHASES[PH.i].mul * (PHASES[PH.i].key === "save" ? 1 + .3 * GS.altarsDone : 1) * (1 + .35 * Math.min(3, o));
 	}
 	const hellTotal = () => {
 		let o = 0;
@@ -75677,9 +75701,9 @@ var DATA_HASH = (() => {
 	});
 	function phDone() {
 		const k = PHASES[PH.i].key, f = foundN();
-		if (k === "roll") return gearDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every((R) => R.ak)) && wbSpawned && rigOwed === 0 && !swarm.some((m) => m.rig && !m.dead);
+		if (k === "roll") return gearDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every((R) => R.ak)) && GS.wbSpawned && GS.rigOwed === 0 && !swarm.some((m) => m.rig && !m.dead);
 		if (k === "scout") return f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
-		if (k === "save") return altarsDone >= 3;
+		if (k === "save") return GS.altarsDone >= 3;
 		if (k === "hell") return PH.hellN >= hellTotal() && hellAlive() === 0;
 		return false;
 	}
@@ -75732,7 +75756,7 @@ var DATA_HASH = (() => {
 			for (const R of NET.remotes.values()) if (R.up) ps.push(R.pos);
 		}
 		const near = (x, z, r) => ps.some((p) => Math.hypot(p.x - x, p.z - z) < r);
-		if (worldUp) altars.forEach((A, i) => {
+		if (GS.worldUp) altars.forEach((A, i) => {
 			if (!A.found && near(A.x, A.z, FIND_R)) phFind("a", i);
 		});
 		for (const R of rocks) if (!R.found && R.mesh.visible && near(R.mesh.position.x, R.mesh.position.z, 26)) phFind("r", obstacles.indexOf(R));
@@ -75748,7 +75772,7 @@ var DATA_HASH = (() => {
 	}
 	function updatePhases(dt) {
 		if (startEl.isConnected) return;
-		if (!worldUp && PH.i >= 1) worldWake();
+		if (!GS.worldUp && PH.i >= 1) worldWake();
 		if (rising.length) updateRising(dt);
 		if ((PH.findT -= dt) <= 0) {
 			PH.findT = .4;
@@ -75812,7 +75836,7 @@ var DATA_HASH = (() => {
 				t += tk("Whole crew geared up", n >= rs.length + 1, n + "/" + (rs.length + 1));
 			}
 		} else if (P.key === "scout") t = tk("Find the altars", f.a >= altars.length, f.a + "/" + altars.length) + tk("Find chubzik nests", f.r >= nests, Math.min(f.r, nests) + "/" + nests) + tk("Find the boss gate", PH.gate);
-		else if (P.key === "save") t = tk("Fill the altars", altarsDone >= 3, altarsDone + "/3");
+		else if (P.key === "save") t = tk("Fill the altars", GS.altarsDone >= 3, GS.altarsDone + "/3");
 		else if (P.key === "hell") {
 			const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive());
 			t = tk("Kill the mini-bosses", PH.hellN >= tot && dead >= tot, dead + "/" + tot);
@@ -75912,7 +75936,7 @@ var DATA_HASH = (() => {
 		};
 		if (PH.gate) {
 			const [gx, gy] = f(180, 0);
-			label(gx, gy, boss.state === "dead" ? "✔" : gateOpen ? "☠" : "🔒", gateOpen ? "#ffd27a" : "#c8c0b8", 11);
+			label(gx, gy, boss.state === "dead" ? "✔" : GS.gateOpen ? "☠" : "🔒", GS.gateOpen ? "#ffd27a" : "#c8c0b8", 11);
 		}
 		if (boss.ph === 2 && boss.state !== "dead" && boss.state !== "idle") {
 			const [bx, by] = dot(BOSS_POS.x, BOSS_POS.z, 6, "#ff7a1a");
@@ -76020,7 +76044,7 @@ var DATA_HASH = (() => {
 					live: m,
 					grp: "wb"
 				});
-				if (!myTow) {
+				if (!GS.myTow) {
 					let nb = null, nd = 1e9;
 					for (const B of bombs) if (!B.leap) {
 						const d = Math.hypot(B.x - car.pos.x, B.z - car.pos.z);
@@ -76066,7 +76090,7 @@ var DATA_HASH = (() => {
 					text: "★",
 					cap: AB_INFO[p.type].title
 				});
-				if (worldUp) altars.forEach((A) => {
+				if (GS.worldUp) altars.forEach((A) => {
 					const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z);
 					if (!A.done && d < 60) hintList.push({
 						x: A.x,
@@ -76088,15 +76112,15 @@ var DATA_HASH = (() => {
 					cap: "kill boss"
 				});
 				else {
-					const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70;
+					const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = GS.gateOpen ? 150 : 70;
 					if (d < far && boss.state !== "dead") hintList.push({
 						x: ROOM_X1,
 						z: 0,
 						d,
 						range: far,
-						col: gateOpen ? "#ffd27a" : "#9a8f86",
-						text: gateOpen ? "BOSS" : "🔒",
-						cap: gateOpen ? "kill boss" : "boss gate"
+						col: GS.gateOpen ? "#ffd27a" : "#9a8f86",
+						text: GS.gateOpen ? "BOSS" : "🔒",
+						cap: GS.gateOpen ? "kill boss" : "boss gate"
 					});
 				}
 			}
@@ -76226,8 +76250,8 @@ var DATA_HASH = (() => {
 		};
 		const shot = (x, tx, ty, tz, half) => {
 			try {
-				if (!composer || HX) throw 0;
-				const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = composer.passes[0], keep = rp.camera;
+				if (!GS.composer || HX) throw 0;
+				const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = GS.composer.passes[0], keep = rp.camera;
 				tmp.set(tx, ty, tz);
 				cam.position.copy(tmp).add(ISO_OFFSET);
 				cam.lookAt(tmp);
@@ -76242,7 +76266,7 @@ var DATA_HASH = (() => {
 				sun.target.updateMatrixWorld();
 				renderer.shadowMap.needsUpdate = true;
 				rp.camera = cam;
-				composer.render();
+				GS.composer.render();
 				rp.camera = keep;
 				const sq = Math.min(cv.width, cv.height);
 				x.drawImage(cv, (cv.width - sq) / 2, (cv.height - sq) / 2, sq, sq, 0, 0, 160, 160);
@@ -76398,7 +76422,7 @@ var DATA_HASH = (() => {
 		}
 	};
 	(function rideCards() {
-		const keep = ride, rp = composer && !window.__noRender ? composer.passes[0] : null, el = (tag, cls, txt) => {
+		const keep = GS.ride, rp = GS.composer && !window.__noRender ? GS.composer.passes[0] : null, el = (tag, cls, txt) => {
 			const e = document.createElement(tag);
 			if (cls) e.className = cls;
 			if (txt !== void 0) e.textContent = txt;
@@ -76426,7 +76450,7 @@ var DATA_HASH = (() => {
 				sun.target.updateMatrixWorld();
 				renderer.shadowMap.needsUpdate = true;
 				rp.camera = cam;
-				composer.render();
+				GS.composer.render();
 				rp.camera = keepCam;
 				pic = mkCanvas(320, 200);
 				pic.className = "rc-pic";
@@ -76452,7 +76476,7 @@ var DATA_HASH = (() => {
 		}
 		if (rp) setRide(keep);
 	})();
-	worldRnd = trueRandom;
+	GS.worldRnd = trueRandom;
 	if (HX && HX.reseed) HX.reseed();
 	for (const e of earlyErrors.splice(0)) try {
 		netLog("error: " + e);
@@ -76483,15 +76507,15 @@ var DATA_HASH = (() => {
 		const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
 		adaptQuality(raw);
 		for (let k = 0, n = HX ? HX.sub : 1; k < n; k++) update(dt);
-		if (++shadowTick >= shadowEvery) {
-			shadowTick = 0;
+		if (++GS.shadowTick >= GS.shadowEvery) {
+			GS.shadowTick = 0;
 			renderer.shadowMap.needsUpdate = true;
 		}
-		if (HX && HX.skipRender()) {} else if (composer) {
-			gradePass.uniforms.time.value = elapsed;
-			gradePass.uniforms.hurt.value = Math.max(0, hurtFlash) / .18;
-			gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * .35)) : 0;
-			composer.render();
+		if (HX && HX.skipRender()) {} else if (GS.composer) {
+			GS.gradePass.uniforms.time.value = GS.elapsed;
+			GS.gradePass.uniforms.hurt.value = Math.max(0, GS.hurtFlash) / .18;
+			GS.gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * .35)) : 0;
+			GS.composer.render();
 		} else renderer.render(scene, camera);
 		requestAnimationFrame(frame);
 	}

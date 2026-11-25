@@ -12,12 +12,12 @@ addBomb
 addPedestal
 altarApply
 altars
-altarsDone
+altarsDone = GS.altarsDone
 ambush
 angel
 angelStart
 applyAbilityVisuals
-autoTarget
+autoTarget = GS.autoTarget
 beams
 bombRefill
 bombs
@@ -36,11 +36,11 @@ car
 carBub
 cart
 cartReset
-chubInit
+chubInit = GS.chubInit
 chubs
 chunks
 clearSwarm
-composer
+composer = GS.composer
 crew
 crewArmed
 crewSay
@@ -53,15 +53,15 @@ door
 drillRPM
 dropCoins
 dropLoot
-eaten = chubEaten
-rw elapsed
+eaten = GS.chubEaten
+! get elapsed(){return GS.elapsed}, set elapsed(v){GS.elapsed=v}
 enemies
 eshots
 firstGun
 gainWeapon
-gateOpen
+gateOpen = GS.gateOpen
 grab
-gradePass
+gradePass = GS.gradePass
 HAND
 handAxis
 handTick
@@ -80,10 +80,10 @@ makeRig
 miniStart
 MUSIC
 musicLevel
-myTow
+myTow = GS.myTow
 NET
 netEv
-novaT
+novaT = GS.novaT
 obstacles
 openGate
 pedestals
@@ -95,7 +95,7 @@ pickups
 quakes
 renderer
 resizeCam
-ride
+ride = GS.ride
 RIG
 rigBreak
 rigLog
@@ -127,22 +127,22 @@ updateHints
 upGot
 rw upPts
 VER
-viewSize
+viewSize = GS.viewSize
 W_GEAR
 W_STATS
 wakeEnemy
 waves
-wbKilled
-wbSpawned
+wbKilled = GS.wbKilled
+wbSpawned = GS.wbSpawned
 wbTopUp
 weapons
 webs
 wPrice
 
-! get coins(){return coins}, set coins(v){coins=v; abSig=""}
-! get gems(){return gems}, set gems(v){gems=v; abSig=""}
+! get coins(){return GS.coins}, set coins(v){GS.coins=v; GS.abSig=""}
+! get gems(){return GS.gems}, set gems(v){GS.gems=v; GS.abSig=""}
 ! bakeLog(){return bakeTextures.log}
-! setView(v){ viewSize = v; resizeCam(); }
+! setView(v){ GS.viewSize = v; resizeCam(); }
 ! special(){special()}
 wbMarks
 wbGift
@@ -161,7 +161,7 @@ STOMP
 SPIKE
 BROOD
 STARB
-rw fireCooldown
+! get fireCooldown(){return GS.fireCooldown}, set fireCooldown(v){GS.fireCooldown=v}
 
 ult
 SHOP
@@ -199,5 +199,5 @@ phEnter
 DG
 THREE
 # calm(): no camera shake, and every puff, flash and flying chip is gone by the next frame (frames.py stages scenes with it)
-! calm(){ shake = 0; for (const p of puffs) { p.life = 0; p.m.visible = false; } for (const f of flashes) { f.life = 0; f.m.visible = false; } for (const p of particles) { p.life = 0; p.m.visible = false; } }
+! calm(){ GS.shake = 0; for (const p of puffs) { p.life = 0; p.m.visible = false; } for (const f of flashes) { f.life = 0; f.m.visible = false; } for (const p of particles) { p.life = 0; p.m.visible = false; } }
 ISO_OFFSET

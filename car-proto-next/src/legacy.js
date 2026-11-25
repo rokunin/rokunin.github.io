@@ -1,6 +1,7 @@
 // CHUBZ: the whole game, as it was in the single index.html up to build 136 (ADR-0003: modules come out of here one by one).
 // THREE is the r128 namespace plus the post-processing addons, see three.js next to this file.
 import { THREE } from './three.js';
+import { GS } from './game/state.ts';
 import { createSfx } from './audio/sfx.ts';
 import { createMusic } from './audio/music.ts';
 import { createBaker } from './textures/bake.ts';
@@ -33,8 +34,8 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   // ---------- renderer / scene ----------
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const COARSE = matchMedia('(pointer: coarse)').matches;      // phone / tablet
-  let PR = Math.min(devicePixelRatio, COARSE ? 1.5 : 2);
-  renderer.setPixelRatio(PR);
+  GS.PR = Math.min(devicePixelRatio, COARSE ? 1.5 : 2);
+  renderer.setPixelRatio(GS.PR);
   // Lights as the game was tuned under Three r128: intensities carry the factor π that Three applied itself before r155,
   // and point and spot lights fade as (1 - d / distance) ^ decay, not the physical 1 / d ^ decay (which would need every light retuned).
   const LIGHT = Math.PI;
@@ -47,7 +48,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;      // r187 dropped PCFSoftShadowMap and uses this one in its place
   renderer.shadowMap.autoUpdate = false;                // refreshed from frame(): every frame on desktop, every 2nd-3rd on phones
-  let shadowEvery = COARSE ? 2 : 1, shadowTick = 0, bloomPass = null;
+  GS.shadowTick = 0; GS.bloomPass = null; GS.shadowEvery = COARSE ? 2 : 1;
   document.body.appendChild(renderer.domElement);
   const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 
@@ -56,11 +57,11 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   scene.fog = new THREE.Fog(0x241d30, 88, 190);
 
   // ---------- isometric camera ----------
-  let viewSize = COARSE ? 15 : 18;       // half-height of ortho frustum in world units
+  GS.viewSize = COARSE ? 15 : 18;       // half-height of ortho frustum in world units
   const ISO_OFFSET = new THREE.Vector3(30, 30, 30); // classic 45°/35° iso
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
   function resizeCam() {
-    const a = innerWidth / innerHeight, v = Math.max(viewSize, 11 / a);   // portrait: never show less than 22 units across
+    const a = innerWidth / innerHeight, v = Math.max(GS.viewSize, 11 / a);   // portrait: never show less than 22 units across
     camera.left = -v * a; camera.right = v * a;
     camera.top = v; camera.bottom = -v;
     camera.updateProjectionMatrix();
@@ -82,7 +83,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   // image-based lighting: a small sunset sky rendered once into a PMREM so paint, glass and puddles have something to reflect.
   // A material that wants more or less of it than 1 names ENV as its envMap: since r163 envMapIntensity scales only the material's own envMap
-  let ENV = null;
+  GS.ENV = null;
   {
     const envScene = new THREE.Scene();
     const geo = new THREE.SphereGeometry(50, 48, 24);
@@ -103,30 +104,30 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     const disc = new THREE.Mesh(new THREE.SphereGeometry(5, 16, 12), new THREE.MeshBasicMaterial());
     disc.material.color.setRGB(16, 8, 3); disc.position.copy(SUN_OFFSET).normalize().multiplyScalar(40); envScene.add(disc);
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = ENV = pmrem.fromScene(envScene, 0.03).texture;
+    scene.environment = GS.ENV = pmrem.fromScene(envScene, 0.03).texture;
     pmrem.dispose();
   }
 
   // ---------- post-processing: HDR bloom -> filmic grade -> FXAA ----------
-  let composer = null, gradePass = null, fxaaPass = null;
+  GS.gradePass = null; GS.fxaaPass = null; GS.composer = null;
   if (THREE.EffectComposer && THREE.RenderPass && THREE.ShaderPass && THREE.UnrealBloomPass) {
     const hdr = !!(renderer.capabilities.isWebGL2 && renderer.extensions.get('EXT_color_buffer_float')) ||
                 !!renderer.extensions.get('EXT_color_buffer_half_float');      // iOS exposes only the half-float one
     const rt = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
       format: THREE.RGBAFormat, type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType });
-    composer = new THREE.EffectComposer(renderer, rt);
-    composer.setPixelRatio(PR); composer.setSize(innerWidth, innerHeight);
-    composer.addPass(new THREE.RenderPass(scene, camera));
+    GS.composer = new THREE.EffectComposer(renderer, rt);
+    GS.composer.setPixelRatio(GS.PR); GS.composer.setSize(innerWidth, innerHeight);
+    GS.composer.addPass(new THREE.RenderPass(scene, camera));
     const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.36, 0.55, hdr ? 1.15 : 0.86);
-    bloomPass = bloom;
+    GS.bloomPass = bloom;
     { const hp = bloom.materialHighPassFilter, at = 'vec4 texel = texture2D( tDiffuse, vUv );';      // clamp what feeds the bloom: one hot pixel must not flare the screen
       if (hp.fragmentShader.includes(at)) { hp.fragmentShader = hp.fragmentShader.replace(at, at + ' texel.rgb = min(max(texel.rgb, vec3(0.0)), vec3(40.0));'); hp.needsUpdate = true; }
       else logError('bloom clamp: the high-pass shader changed, the clamp is not in'); }
-    { const ss = bloom.setSize.bind(bloom), k = COARSE ? 0.5 : 0.75; bloom.setSize = (w, h) => ss(Math.round(w * k), Math.round(h * k)); bloom.setSize(innerWidth * PR, innerHeight * PR); }   // blur chain on a smaller buffer
+    { const ss = bloom.setSize.bind(bloom), k = COARSE ? 0.5 : 0.75; bloom.setSize = (w, h) => ss(Math.round(w * k), Math.round(h * k)); bloom.setSize(innerWidth * GS.PR, innerHeight * GS.PR); }   // blur chain on a smaller buffer
     if (hdr) [bloom.renderTargetBright, ...bloom.renderTargetsHorizontal, ...bloom.renderTargetsVertical]
       .forEach(t => { t.texture.type = THREE.HalfFloatType; });
-    composer.addPass(bloom);
-    gradePass = new THREE.ShaderPass({
+    GS.composer.addPass(bloom);
+    GS.gradePass = new THREE.ShaderPass({
       uniforms: { tDiffuse: { value: null }, time: { value: 0 }, exposure: { value: 2.0 }, hurt: { value: 0 }, lowHp: { value: 0 } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: `
@@ -148,11 +149,11 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           c += (n - 0.5) * 0.022;                                     // film grain
           gl_FragColor = vec4(c, 1.0);
         }` });
-    composer.addPass(gradePass);
+    GS.composer.addPass(GS.gradePass);
     if (THREE.FXAAShader) {
-      fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
-      fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
-      composer.addPass(fxaaPass);
+      GS.fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+      GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
+      GS.composer.addPass(GS.fxaaPass);
     }
   } else {                                                           // post scripts failed to load: plain render, still tone-mapped
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -260,7 +261,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const ground = new THREE.Mesh(
     scaleUV(new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE), 38),
     wetGround(new THREE.MeshStandardMaterial({ map: groundTex.map, roughnessMap: groundTex.rough, normalMap: groundTex.normal,
-      roughness: 1, metalness: 1, envMap: ENV, envMapIntensity: 1.5 }), 0.293)
+      roughness: 1, metalness: 1, envMap: GS.ENV, envMapIntensity: 1.5 }), 0.293)
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -315,9 +316,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     return srgbTex(c);
   })();
   const roomFloorMat = wetGround(new THREE.MeshStandardMaterial({ color: 0xb49ad8, map: groundTex.map,
-    roughnessMap: groundTex.rough, normalMap: groundTex.normal, roughness: 0.8, metalness: 1, envMap: ENV, envMapIntensity: 1.5 }), 0.293);
+    roughnessMap: groundTex.rough, normalMap: groundTex.normal, roughness: 0.8, metalness: 1, envMap: GS.ENV, envMapIntensity: 1.5 }), 0.293);
   const runeMat = new THREE.MeshBasicMaterial({ map: runeTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-  let runeLevel = 0.7;
+  GS.runeLevel = 0.7;
   {
     const floor = new THREE.Mesh(scaleUV(new THREE.PlaneGeometry(ROOM_X2 - ROOM_X1, ROOM_HZ * 2), 4, 4.25), roomFloorMat);
     floor.rotation.x = -Math.PI / 2; floor.position.set(BOSS_POS.x, 0.012, 0); floor.receiveShadow = true; scene.add(floor);
@@ -406,12 +407,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const crateHitMat = new THREE.MeshStandardMaterial({ color: 0xf2d2b0, map: crateTex.map, normalMap: crateTex.normal, emissive: 0x3a200c, roughness: 0.8 });
   // World generation draws from worldRnd, never from Math.random (ADR-0009): Three.js takes Math.random for every object's id, so a shared stream
   // moved rocks and nests whenever code or the Three version changed the number of objects built. Outside generation worldRnd is Math.random.
-  let worldRnd = Math.random;
-  const rand = (a, b) => a + worldRnd() * (b - a);
+  GS.worldRnd = Math.random;
+  const rand = (a, b) => a + GS.worldRnd() * (b - a);
   // the map is generated from the UTC date, so everyone who opens the page on the same day gets the same pillars, rocks, crates and altars
   const SEED = (() => { const d = new Date(); return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate(); })();
   const trueRandom = Math.random;
-  function seedRandom(s0) { let s = s0 >>> 0; worldRnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function seedRandom(s0) { let s = s0 >>> 0; GS.worldRnd = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
   function freeSpot(r, minDist = 14) {
     for (let i = 0; i < 80; i++) {
@@ -479,10 +480,10 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   carGroup.add(body);
   scene.add(carGroup);
 
-  const paint = new THREE.MeshStandardMaterial({ color: 0x3a3532, metalness: 0.55, roughness: 0.55, envMap: ENV, envMapIntensity: 1.1, flatShading: true });   // scorched matte black
+  const paint = new THREE.MeshStandardMaterial({ color: 0x3a3532, metalness: 0.55, roughness: 0.55, envMap: GS.ENV, envMapIntensity: 1.1, flatShading: true });   // scorched matte black
   const paint2 = new THREE.MeshStandardMaterial({ color: 0x5e2c14, metalness: 0.45, roughness: 0.78, flatShading: true });                            // rust plates
   const dark = new THREE.MeshStandardMaterial({ color: 0x1c1e23, roughness: 0.7, metalness: 0.2, flatShading: true });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x3a2814, metalness: 0.9, roughness: 0.06, envMap: ENV, envMapIntensity: 2.2, flatShading: true });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x3a2814, metalness: 0.9, roughness: 0.06, envMap: GS.ENV, envMapIntensity: 2.2, flatShading: true });
   const metal = new THREE.MeshStandardMaterial({ color: 0x7c828c, metalness: 0.9, roughness: 0.38, flatShading: true });
   const tyreMat = new THREE.MeshStandardMaterial({ color: 0x131417, roughness: 0.95, flatShading: true });
 
@@ -617,7 +618,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const DRILL_LEN = 2.3, DRILL_R = 0.6;
   const coneGeo = new THREE.ConeGeometry(DRILL_R, DRILL_LEN, 7);
   coneGeo.translate(0, DRILL_LEN / 2, 0); coneGeo.rotateX(Math.PI / 2);
-  const drillMat = new THREE.MeshStandardMaterial({ color: 0xc4c9d2, emissive: 0x000000, metalness: 1, roughness: 0.25, envMap: ENV, envMapIntensity: 1.6, flatShading: true });
+  const drillMat = new THREE.MeshStandardMaterial({ color: 0xc4c9d2, emissive: 0x000000, metalness: 1, roughness: 0.25, envMap: GS.ENV, envMapIntensity: 1.6, flatShading: true });
   drillSpin.add(new THREE.Mesh(coneGeo, drillMat));
   const ridgeMat = new THREE.MeshStandardMaterial({ color: 0xf0b428, metalness: 0.7, roughness: 0.35 });
   for (let strand = 0; strand < 2; strand++) {   // две спирали
@@ -672,7 +673,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const buggyTurret = turret.children.filter(c => c !== muzzle);
   const RIDES = { buggy: { turret: [0, 2.04, -0.5] }, spider: { turret: [0, 3.0, 0] }, halo: { turret: [0, 2.0, 0] }, unicorn: { turret: [0, 2.95, -0.75] } };
   const rideG = {};
-  let ride = 'buggy', ridePhase = 0;
+  GS.ridePhase = 0; GS.ride = 'buggy';
   const hoverShadow = new THREE.Mesh(new THREE.CircleGeometry(1.9, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }));
   hoverShadow.rotation.x = -Math.PI / 2; hoverShadow.visible = false; carGroup.add(hoverShadow);
   function strut(a, b, w, mat, parent) {               // a box between two points
@@ -734,7 +735,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       { const q = pg.attributes.position, seen = {};               // knock the corners about so it reads as hand-cut
         for (let i = 0; i < q.count; i++) { const key = q.getX(i).toFixed(2) + q.getY(i).toFixed(2) + q.getZ(i).toFixed(2); const j = seen[key] || (seen[key] = [rand(-0.14, 0.14), rand(-0.1, 0.1), rand(-0.14, 0.14)]); q.setXYZ(i, q.getX(i) + j[0], q.getY(i) + j[1], q.getZ(i) + j[2]); }
         pg.computeVertexNormals(); }
-      pyr.add(new THREE.Mesh(pg, new THREE.MeshStandardMaterial({ color: 0x3a9ab0, transparent: true, opacity: 0.42, roughness: 0.6, metalness: 0, envMap: ENV, envMapIntensity: 0.2, flatShading: true, depthWrite: false, side: THREE.DoubleSide })));
+      pyr.add(new THREE.Mesh(pg, new THREE.MeshStandardMaterial({ color: 0x3a9ab0, transparent: true, opacity: 0.42, roughness: 0.6, metalness: 0, envMap: GS.ENV, envMapIntensity: 0.2, flatShading: true, depthWrite: false, side: THREE.DoubleSide })));
       pyr.add(new THREE.LineSegments(new THREE.EdgesGeometry(pg, 1), glow(new THREE.LineBasicMaterial({ color: 0x9af5ff }), 1.2)));
       const pilots = [-1, 1].map(sd => { const s = new THREE.Sprite(chubMats[0][0]); s.center.set(0.5, 0.05); s.scale.set(0.8, 0.8, 1); s.position.set(sd * 0.3, -0.62, 0); s.renderOrder = -1; pyr.add(s); return s; });
       // the eye: a flat burning oval with a slit pupil, scowling
@@ -755,7 +756,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       R.anim = (dt, sp) => {
         spdS += ((car.airborne ? 0 : SPD.vel.length()) - spdS) * Math.min(1, 8 * dt);
         const k = Math.min(1, spdS / 12);
-        legRoot.position.y = SPL.bodyH - 0.08 * k + Math.sin(ridePhase * 5) * 0.04 * k;
+        legRoot.position.y = SPL.bodyH - 0.08 * k + Math.sin(GS.ridePhase * 5) * 0.04 * k;
         carGroup.updateMatrixWorld(true);
         spBoxes.length = 0;                              // climbable boxes near enough for a foot to land on
         for (const o of obstacles) if (climbable(o) && Math.abs(o.mesh.position.x - car.pos.x) < o.hx + 6 && Math.abs(o.mesh.position.z - car.pos.z) < o.hz + 6) spBoxes.push(o);
@@ -779,12 +780,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           }
           legIK(L);
         }
-        pyr.position.y = 1.95 + Math.sin(elapsed * 2) * 0.08; pyr.rotation.y = Math.sin(elapsed * 0.7) * 0.2;
-        pilots.forEach((s, i) => { s.material = chubMats[car.hp < car.maxHp * 0.4 ? 1 : 0][Math.floor(elapsed * 3 + i * 2) % CHUB_FR]; });
-        eyeMat.uniforms.t.value = elapsed; eyeG.position.y = Math.sin(elapsed * 2.6) * 0.07;
+        pyr.position.y = 1.95 + Math.sin(GS.elapsed * 2) * 0.08; pyr.rotation.y = Math.sin(GS.elapsed * 0.7) * 0.2;
+        pilots.forEach((s, i) => { s.material = chubMats[car.hp < car.maxHp * 0.4 ? 1 : 0][Math.floor(GS.elapsed * 3 + i * 2) % CHUB_FR]; });
+        eyeMat.uniforms.t.value = GS.elapsed; eyeG.position.y = Math.sin(GS.elapsed * 2.6) * 0.07;
       };
     } else if (k === 'halo') {
-      const gold = new THREE.MeshStandardMaterial({ color: 0xe8d28a, metalness: 0.9, roughness: 0.25, envMap: ENV, envMapIntensity: 1.6, flatShading: true });
+      const gold = new THREE.MeshStandardMaterial({ color: 0xe8d28a, metalness: 0.9, roughness: 0.25, envMap: GS.ENV, envMapIntensity: 1.6, flatShading: true });
       const core = new THREE.Group(); core.position.y = 2.0; B.add(core);
       const t1 = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.2, 6, 20), gold), t2 = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.17, 6, 18), gold); t1.userData.spin = 1; t2.userData.spin = 2;
       t1.castShadow = t2.castShadow = true; core.add(t1, t2);
@@ -803,9 +804,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       P(new THREE.ConeGeometry(0.22, 1.5, 5), gold, 0, 0, 2.3, T).rotation.x = Math.PI / 2;      // a floating gilded spike does the shooting
       P(new THREE.TorusGeometry(0.4, 0.06, 5, 14), glow(new THREE.MeshBasicMaterial({ color: 0xffd95a }), 2.4), 0, 0, 1.75, T);
       R.anim = (dt, sp) => {
-        core.position.y = 2.0 + Math.sin(elapsed * 2.2) * 0.16;
-        t1.rotation.y += dt * (1.2 + sp * 0.12); t1.rotation.x = Math.sin(elapsed * 0.8) * 0.5;
-        t2.rotation.x += dt * (1.7 + sp * 0.15); t2.rotation.z = Math.cos(elapsed * 0.9) * 0.5;
+        core.position.y = 2.0 + Math.sin(GS.elapsed * 2.2) * 0.16;
+        t1.rotation.y += dt * (1.2 + sp * 0.12); t1.rotation.x = Math.sin(GS.elapsed * 0.8) * 0.5;
+        t2.rotation.x += dt * (1.7 + sp * 0.15); t2.rotation.z = Math.cos(GS.elapsed * 0.9) * 0.5;
       };
     } else if (k === 'unicorn') {
       const white = new THREE.MeshStandardMaterial({ color: 0xf2eef6, roughness: 0.6, flatShading: true }), gold = new THREE.MeshStandardMaterial({ color: 0xf0b428, metalness: 0.8, roughness: 0.3, flatShading: true });
@@ -831,7 +832,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       P(new THREE.BoxGeometry(0.3, 0.3, 0.5), dark, 0, 0, 0.1, T);
       P(new THREE.CylinderGeometry(0.07, 0.09, 1.3, 6), dark, 0, 0.05, 0.95, T).rotation.x = Math.PI / 2;
       R.anim = (dt, sp) => {
-        const k = Math.min(1, sp / 5), a = ridePhase * 2.4, beat = Math.floor(a / Math.PI);
+        const k = Math.min(1, sp / 5), a = GS.ridePhase * 2.4, beat = Math.floor(a / Math.PI);
         if (beat !== R.beat) { R.beat = beat;
           if (sp > 1.5 && car.alive && !car.airborne && car.depth === 0) {       // two hooves land almost together: ta-dam, ta-dam
             const v = Math.min(1, 0.35 + sp / 30); SFX.play('hoof', car.pos, { vol: v, rate: 0.9 + Math.random() * 0.2 }); SFX.play('hoof', car.pos, { vol: v * 0.8, rate: 1.05 + Math.random() * 0.2, delay: 0.07 });
@@ -839,12 +840,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           } }
         for (const L of legs) L.g.rotation.x = Math.sin(a + L.ph) * 0.7 * k;
         tor.position.y = Math.abs(Math.sin(a)) * 0.14 * k; head.rotation.x = Math.sin(a * 2) * 0.06 * k;
-        tail.forEach((m, i) => { m.position.x = Math.sin(elapsed * 5 + i * 0.7) * 0.08 * i; });
-        riders.forEach((s, i) => { s.material = SW_ART.gremlin[i].walk[Math.floor(elapsed * 4 + i) % SW_FRAMES]; s.position.y = 2.3 + tor.position.y + Math.abs(Math.sin(a + i)) * 0.1 * k; });
+        tail.forEach((m, i) => { m.position.x = Math.sin(GS.elapsed * 5 + i * 0.7) * 0.08 * i; });
+        riders.forEach((s, i) => { s.material = SW_ART.gremlin[i].walk[Math.floor(GS.elapsed * 4 + i) % SW_FRAMES]; s.position.y = 2.3 + tor.position.y + Math.abs(Math.sin(a + i)) * 0.1 * k; });
       };
     }
   }
-  let safe = null;
+  GS.safe = null;
   function buildSafe() {                               // the buggy's cart: a yellow steel milk-churn safe with the top sawn off, on a two-wheel trailer
     const g = new THREE.Group(), body = new THREE.Group(); g.add(body); cartG.add(g);
     const yel = new THREE.MeshStandardMaterial({ color: 0xf2b51c, metalness: 0.55, roughness: 0.42, flatShading: true });
@@ -871,7 +872,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     for (let i = 0; i < 3; i++) { const sp = P(new THREE.BoxGeometry(0.06, 0.04, 0.14), cut, 1.12, 1.1, 0.12); sp.rotation.x = i * Math.PI / 3; sp.position.x = 1.17; }   // handle spokes
     for (const z of [-0.2, 0.3]) P(new THREE.BoxGeometry(0.06, 0.12, 0.1), metal, 1.1, 0.88 + (z > 0 ? 0.36 : 0), -0.24);   // hinges
     door.userData.safe = true;
-    safe = { g, body };
+    GS.safe = { g, body };
   }
   let cloud = null;
   function buildCloud() {                              // the halo's cart: a little cloud for the chubziks to ride on, no wheels, no hitch
@@ -882,7 +883,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.05, 5, 24), glow(new THREE.MeshBasicMaterial({ color: 0xffe07a }), 2.2)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.2; g.add(ring);
     cloud = { g, puffs };
   }
-  const cartFor = c => (bug && c === bug.g) ? 'spider' : (cloud && c === cloud.g) ? 'halo' : (safe && c === safe.g) ? 'buggy' : null;      // which ride a cart model belongs to (null: the wooden cart, the unicorn's)
+  const cartFor = c => (bug && c === bug.g) ? 'spider' : (cloud && c === cloud.g) ? 'halo' : (GS.safe && c === GS.safe.g) ? 'buggy' : null;      // which ride a cart model belongs to (null: the wooden cart, the unicorn's)
   let bug = null, bugPhase = 0; const bugPrev = new THREE.Vector3();
   function buildBug() {                                // the spider's cart: a smaller bug trotting behind on its own, no hitch
     const g = new THREE.Group(); cartG.add(g);
@@ -904,7 +905,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     bug = { g, legs };
   }
   function setRide(k) {
-    ride = k; abDirty = true; const b = k === 'buggy';
+    GS.ride = k; abDirty = true; const b = k === 'buggy';
     buggyParts.forEach(m => m.visible = b); buggyTurret.forEach(m => m.visible = b);
     wheels.forEach(w => w.pivot.visible = b); bullbar.scale.setScalar(b ? 1 : 0.001);
     if (!b && !rideG[k]) buildRide(k);
@@ -914,7 +915,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     car.maxHp = k === 'spider' ? 50 : 100; car.hp = car.maxHp;      // the spider is quick and fragile
     if (k === 'spider' && !bug) buildBug();
     if (k === 'halo' && !cloud) buildCloud();
-    if (k === 'buggy' && !safe) buildSafe();
+    if (k === 'buggy' && !GS.safe) buildSafe();
     for (const c of cartG.children) c.visible = cartFor(c) ? cartFor(c) === k : k === 'unicorn';
     carBub.mats = bubbleMats(k); carBub.vee.material = carBub.mats.q1; carBub.roxy.material = carBub.mats.ok;
     try { localStorage.setItem('carproto.ride', k); } catch (e) {}
@@ -927,14 +928,14 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       for (const m of buggyParts) take(m, bd); for (const m of buggyTurret) take(m, tur); take(bullbar, bd).scale.setScalar(1);
       for (const w of wheels) take(w.pivot, g);
     } else {
-      if (!rideG[k]) { buildRide(k); rideG[k].body.visible = rideG[k].tur.visible = ride === k; }
-      if (k === 'spider' && ride !== 'spider' && rideG[k].pose) { const q = carGroup.quaternion.clone(); carGroup.quaternion.identity(); rideG[k].pose(); carGroup.quaternion.copy(q); }
+      if (!rideG[k]) { buildRide(k); rideG[k].body.visible = rideG[k].tur.visible = GS.ride === k; }
+      if (k === 'spider' && GS.ride !== 'spider' && rideG[k].pose) { const q = carGroup.quaternion.clone(); carGroup.quaternion.identity(); rideG[k].pose(); carGroup.quaternion.copy(q); }
       take(rideG[k].body, bd); take(rideG[k].tur, tur);
     }
     const cartM = new THREE.Group();
-    if (k === 'spider' && !bug) { buildBug(); bug.g.visible = ride === 'spider'; }
-    if (k === 'halo' && !cloud) { buildCloud(); cloud.g.visible = ride === 'halo'; }
-    if (k === 'buggy' && !safe) { buildSafe(); safe.g.visible = ride === 'buggy'; }
+    if (k === 'spider' && !bug) { buildBug(); bug.g.visible = GS.ride === 'spider'; }
+    if (k === 'halo' && !cloud) { buildCloud(); cloud.g.visible = GS.ride === 'halo'; }
+    if (k === 'buggy' && !GS.safe) { buildSafe(); GS.safe.g.visible = GS.ride === 'buggy'; }
     for (const c of cartG.children) if (cartFor(c) ? cartFor(c) === k : k === 'unicorn') take(c, cartM);
     const anim = [];                                     // moving parts of the copy: spider legs, unicorn legs, halo rings
     g.traverse(o => { const u = o.userData; if (u.leg) { const fem = o.children.find(c => c.isGroup); anim.push({ t: 'leg', o, fem, grp: u.leg - 1, by: o.rotation.y, bx: fem ? fem.rotation.x : 0 }); }
@@ -948,23 +949,23 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     const fx = Math.sin(car.heading), fz = Math.cos(car.heading), dmg = sp > 18 ? 6 : 4;
     const gore = (t, r, y) => {
       const dx = t.pos.x - car.pos.x, dz = t.pos.z - car.pos.z, d = Math.hypot(dx, dz) || 1e-3;
-      if (d > car.radius + r + 1.3 || (dx * fx + dz * fz) / d < 0.55 || Math.abs(y - car.y) > 3.2 || (t.hornT || 0) > elapsed) return false;
-      t.hornT = elapsed + 0.45; hornV.set(fx, 0, fz);
-      tmp.set(car.pos.x + fx * 2.4, 2.6, car.pos.z + fz * 2.4); spawnParticles(tmp, 0xf0b428, 5, 7); flash(tmp, 0xffd95a, 2.2, 0.14, 2, false); SFX.play('hit_flesh', tmp, { rate: 0.8 }); shake = Math.max(shake, 0.2);
+      if (d > car.radius + r + 1.3 || (dx * fx + dz * fz) / d < 0.55 || Math.abs(y - car.y) > 3.2 || (t.hornT || 0) > GS.elapsed) return false;
+      t.hornT = GS.elapsed + 0.45; hornV.set(fx, 0, fz);
+      tmp.set(car.pos.x + fx * 2.4, 2.6, car.pos.z + fz * 2.4); spawnParticles(tmp, 0xf0b428, 5, 7); flash(tmp, 0xffd95a, 2.2, 0.14, 2, false); SFX.play('hit_flesh', tmp, { rate: 0.8 }); GS.shake = Math.max(GS.shake, 0.2);
       return true;
     };
     for (const m of swarm) if (!m.dead && gore(m, m.r, m.K.fly || 0)) hitCritter(m, dmg, hornV, 12);
     for (const e of enemies) if (!e.dead && !e.carried && e.awake && gore(e, e.r, 0)) hitEnemy(e, hornV, dmg, 8);
   }
   function updateRide(dt) {
-    const sp = Math.hypot(car.vel.x, car.vel.z); ridePhase += sp * dt * 0.45;
-    if (rideG[ride]) rideG[ride].anim(dt, sp);
+    const sp = Math.hypot(car.vel.x, car.vel.z); GS.ridePhase += sp * dt * 0.45;
+    if (rideG[GS.ride]) rideG[GS.ride].anim(dt, sp);
     if (hoverShadow.visible) hoverShadow.position.y = 0.04 - carGroup.position.y;
-    if (ride === 'halo' && cloud) {                      // the cloud bobs, leans with the sway and breathes
-      cloud.g.position.y = 0.12 + Math.sin(elapsed * 2) * 0.08; cloud.g.rotation.z = cart.phi * 0.6;
-      cloud.puffs.forEach((m, i) => { if (i < 7) m.scale.x = m.scale.z = 1 + Math.sin(elapsed * 1.7 + i * 1.3) * 0.06; });
+    if (GS.ride === 'halo' && cloud) {                      // the cloud bobs, leans with the sway and breathes
+      cloud.g.position.y = 0.12 + Math.sin(GS.elapsed * 2) * 0.08; cloud.g.rotation.z = cart.phi * 0.6;
+      cloud.puffs.forEach((m, i) => { if (i < 7) m.scale.x = m.scale.z = 1 + Math.sin(GS.elapsed * 1.7 + i * 1.3) * 0.06; });
     }
-    if (ride === 'spider' && bug) {                      // the bug sways and tips exactly like the cart it replaces
+    if (GS.ride === 'spider' && bug) {                      // the bug sways and tips exactly like the cart it replaces
       bugPhase += Math.hypot(cart.pos.x - bugPrev.x, cart.pos.z - bugPrev.z) * 1.6; bugPrev.copy(cart.pos);
       bug.g.rotation.z = cartBody.rotation.z; bug.g.position.y = cartBody.position.y + Math.abs(Math.sin(bugPhase)) * 0.05;
       for (const L of bug.legs) { L.lg.rotation.y = Math.sin(bugPhase + L.ph) * 0.45; L.lg.position.y = 0.6 + Math.max(0, Math.cos(bugPhase + L.ph)) * 0.16; }
@@ -1005,7 +1006,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     }
   }
 
-  let fireCooldown = 0, muzzleTimer = 0;
+  GS.fireCooldown = 0; GS.muzzleTimer = 0;
   // ---------- aiming ----------
   const mouseNdc = new THREE.Vector2(0, 0.3);
   const raycaster = new THREE.Raycaster();
@@ -1021,13 +1022,13 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (performance.now() - touch.last > 800) touch.aiming = false;   // a real mouse, not the echo of a tap
   });
   function updateAim(dt) {
-    autoTarget = null;
+    GS.autoTarget = null;
     if (touch.aiming) {                                  // right stick: aim point sits at stick direction from the car
       if (touch.aim.mag > 0.15) { stickWorld(touch.aim.x, touch.aim.y, touch.aimDir); touch.aimDist = 5 + 13 * touch.aim.mag; }
       groundAim.set(car.pos.x + touch.aimDir.x * touch.aimDist, 0, car.pos.z + touch.aimDir.z * touch.aimDist);
       if (touch.enabled && touch.aim.mag <= 0.15 && car.alive && car.depth < 0.3) {     // no manual aim: lock on like a shmup
-        autoTarget = pickAutoTarget();
-        if (autoTarget) { const tp = autoTargetPos(autoTarget); groundAim.set(tp.x, 0, tp.z); }
+        GS.autoTarget = pickAutoTarget();
+        if (GS.autoTarget) { const tp = autoTargetPos(GS.autoTarget); groundAim.set(tp.x, 0, tp.z); }
       }
       if (touch.aim.mag > 0.3) {                         // light aim assist while firing: snap to a target within ~15 degrees
         let bd = 0.26, bx = 0, bz = 0, hit = false;
@@ -1047,13 +1048,13 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       raycaster.setFromCamera(mouseNdc, camera);
       raycaster.ray.intersectPlane(aimPlane, aimPoint);
       raycaster.ray.intersectPlane(groundPlane, groundAim);
-      if (!mouseFire && car.alive && car.depth < 0.3) autoTarget = pickAutoTarget();   // desktop: the gun locks on by itself, hold LMB to aim by hand
+      if (!GS.mouseFire && car.alive && car.depth < 0.3) GS.autoTarget = pickAutoTarget();   // desktop: the gun locks on by itself, hold LMB to aim by hand
     }
     aimRing.position.set(groundAim.x, 0.04, groundAim.z);
     aimRing.rotation.y += dt * 1.5;
     // турель поворачивается к курсору (в локальных координатах кузова)
     const tw = new THREE.Vector3(); turret.getWorldPosition(tw);
-    const tgt = autoTarget ? autoTargetPos(autoTarget) : aimPoint;      // the cursor still steers the grabber and throws
+    const tgt = GS.autoTarget ? autoTargetPos(GS.autoTarget) : aimPoint;      // the cursor still steers the grabber and throws
     const want = Math.atan2(tgt.x - tw.x, tgt.z - tw.z) - car.heading;
     let d = want - turret.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
     turret.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 14 * dt);
@@ -1073,23 +1074,23 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     const tip = new THREE.Vector3();
     muzzle.getWorldPosition(tip);
     const yaw = car.heading + turret.rotation.y;                     // куда реально смотрит ствол
-    const ap = autoTarget ? fireV.copy(autoTargetPos(autoTarget)).setY(0.9) : aimPoint;
+    const ap = GS.autoTarget ? fireV.copy(autoTargetPos(GS.autoTarget)).setY(0.9) : aimPoint;
     const hd = Math.hypot(ap.x - tip.x, ap.z - tip.z);
     const pitch = THREE.MathUtils.clamp(Math.atan2(ap.y - tip.y, Math.max(hd, 3)), -0.5, 0.1);
     const fwd = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-    const lv = weapons.spread, n = lv ? (ride === 'halo' ? Math.max(1, Math.round(W_STATS.spread.n[lv - 1] * 0.7)) : W_STATS.spread.n[lv - 1]) : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
+    const lv = weapons.spread, n = lv ? (GS.ride === 'halo' ? Math.max(1, Math.round(W_STATS.spread.n[lv - 1] * 0.7)) : W_STATS.spread.n[lv - 1]) : 1, arc = lv ? W_STATS.spread.arc[lv - 1] : 0;
     for (let i = 0; i < n; i++) {                       // fan gun: n tracers spread evenly across the arc
       const spread = (n > 1 ? (i / (n - 1) - 0.5) * arc : 0) + rand(-0.02, 0.02);
       const dir = fwd.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), spread);
-      const star = ride === 'spider';
+      const star = GS.ride === 'spider';
       const m = new THREE.Mesh(star ? starGeo : bulletGeo, star ? starMat : bulletMat);
       m.position.copy(tip);
       m.lookAt(tip.x + dir.x, tip.y + dir.y, tip.z + dir.z);
       scene.add(m);
-      const holy = ride === 'halo';                      // the halo's fan is thinner: its strength is the swords
+      const holy = GS.ride === 'halo';                      // the halo's fan is thinner: its strength is the swords
       bullets.push({ m, v: dir.multiplyScalar(BULLET.speed[star ? 'star' : holy ? 'holy' : 'base']), life: BULLET.life[star ? 'star' : 'base'] * (lv ? BULLET.fanLife : 1), spin: star, dmg: BULLET.dmg });      // the fan gun reaches shorter (the halo's a little shorter still); the halo's handicap is its 30% thinner fan, nothing stacked on top
     }
-    muzzleTimer = 0.04;
+    GS.muzzleTimer = 0.04;
     muzzleLight.position.copy(tip); muzzleLight.intensity = Math.max(muzzleLight.intensity, 0.55 * LIGHT);
     SFX.play('shot', tip); NET.fireSeq = (NET.fireSeq + 1) % 100000;
   }
@@ -1097,7 +1098,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   // ---------- input ----------
   // e.code — физические клавиши, работает на любой раскладке
   const keys = {};
-  let mouseFire = false;
+  GS.mouseFire = false;
   addEventListener('keydown', e => {
     if (e.target && e.target.tagName === 'INPUT') return;
     keys[e.code] = true;
@@ -1107,22 +1108,22 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (e.code === 'KeyL' && !e.repeat) diagToggle();
     if (e.code === 'KeyM' && !e.repeat) { SFX.init(); SFX.toggleMute(); syncMute(); }
     if (!e.repeat && !startEl.isConnected) { if (e.code === 'Digit1') useUlt('sword'); if (e.code === 'Digit2') useUlt('hands'); if (e.code === 'KeyC') convertCoins(); }      // the shop on the keyboard
-    if (e.code === 'KeyE' && !e.repeat && unloadAltar) doUnload();     // E sacrifices inside an altar's ring
+    if (e.code === 'KeyE' && !e.repeat && GS.unloadAltar) doUnload();     // E sacrifices inside an altar's ring
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
-  let rmb = false;
-  addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseFire = false; rmb = false; });
-  renderer.domElement.addEventListener('mousedown', e => { if (e.button === 0) mouseFire = true; if (e.button === 2) special(); });
-  addEventListener('mouseup', e => { if (e.button === 0) mouseFire = false; if (e.button === 2) rmb = false; });
+  GS.rmb = false;
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; GS.mouseFire = false; GS.rmb = false; });
+  renderer.domElement.addEventListener('mousedown', e => { if (e.button === 0) GS.mouseFire = true; if (e.button === 2) special(); });
+  addEventListener('mouseup', e => { if (e.button === 0) GS.mouseFire = false; if (e.button === 2) GS.rmb = false; });
   addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('wheel', e => {
-    viewSize = THREE.MathUtils.clamp(viewSize * (e.deltaY > 0 ? 1.1 : 0.9), 10, 55);
+    GS.viewSize = THREE.MathUtils.clamp(GS.viewSize * (e.deltaY > 0 ? 1.1 : 0.9), 10, 55);
     resizeCam();
   }, { passive: true });
   addEventListener('resize', () => {
     renderer.setSize(innerWidth, innerHeight); resizeCam();
-    if (composer) composer.setSize(innerWidth, innerHeight);
-    if (fxaaPass) fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
+    if (GS.composer) GS.composer.setSize(innerWidth, innerHeight);
+    if (GS.fxaaPass) GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
   });
   // ---------- touch input ----------
   // Left half of the screen: floating drive stick (the car turns toward the stick and accelerates).
@@ -1263,7 +1264,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   for (let i = 0; i < 18; i++) { const [x, z] = freeSpot(7, 24); addRock(x, z); }
   for (let i = 0; i < 64; i++) { const [x, z] = freeSpot(3); addPillar(x, z); }
   for (let i = 0; i < 80; i++) addCrate();
-  let kills = 0;
+  GS.kills = 0;
   const killsEl = document.getElementById('kills');
   const spdEl = document.getElementById('spd');
   const respawnQueue = [];
@@ -1284,7 +1285,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const mouthMat = new THREE.MeshBasicMaterial({ color: 0x2a0508 });
   const enemies = [];
   const RED_COUNT = 20, ELITE_COUNT = 7, WAKE_DIST = 20;
-  let enemyKills = 0;
+  GS.enemyKills = 0;
   const ekillsEl = document.getElementById('ekills');
 
   function makeEnemy(elite = false) {
@@ -1353,7 +1354,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
                 hp: 4, awake: false, dead: false, flash: 0, biteCd: 0, phase: rand(0, 6), wakeT: 0, open: 0,
                 speed: elite ? rand(8, 9.5) : rand(8.5, 11.5), carried: false, stun: 0, ramCd: 0,
                 elite, maxHp: elite ? 30 : 10, bite: elite ? 26 : 16, shotCd: rand(1, 3), charge: 0,
-                matAwake: elite ? new THREE.MeshStandardMaterial({ color: 0x8a1a66, roughness: 0.28, metalness: 0.65, envMap: ENV, envMapIntensity: 1.6 }) : enemyRed,
+                matAwake: elite ? new THREE.MeshStandardMaterial({ color: 0x8a1a66, roughness: 0.28, metalness: 0.65, envMap: GS.ENV, envMapIntensity: 1.6 }) : enemyRed,
                 matDormant: elite ? new THREE.MeshStandardMaterial({ color: 0xd8d8d8, map: crateTex.map, roughnessMap: crateTex.rough, normalMap: crateTex.normal, roughness: 1 }) : crateMat };
     placeEnemy(e);
     enemies.push(e);
@@ -1361,7 +1362,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   function setEnemyLook(e, mat) { e.lower.material = mat; e.upper.material = mat; }
   function flickerElite(e) {                       // мерцание: переливается и искрит
-    const t = elapsed * 6 + e.phase, spark = Math.random() < 0.07 ? 1 : 0;
+    const t = GS.elapsed * 6 + e.phase, spark = Math.random() < 0.07 ? 1 : 0;
     if (e.awake) {
       e.matAwake.color.setHSL((0.84 + 0.08 * Math.sin(t * 0.45)) % 1, 0.8, 0.2, THREE.SRGBColorSpace);
       e.matAwake.emissive.setHSL((0.8 + 0.12 * Math.sin(t)) % 1, 1, 0.5, THREE.SRGBColorSpace).multiplyScalar(0.015 + 0.045 * (0.5 + 0.5 * Math.sin(t * 2.3)) + spark * 0.9);
@@ -1396,8 +1397,8 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   function hurtCar(dmg, dir) {
     if (!car.alive || car.burrow !== 'up') return;
     if (domes.length && inDome(car.pos.x, car.pos.z)) return;      // under a dome: untouchable
-    if (haloHoly()) { if ((car.holyT || 0) < elapsed) { car.holyT = elapsed + 0.25; SFX.play('pickup', car.pos, { vol: 0.25, rate: 2 }); spawnParticles(tmp.set(car.pos.x, 2, car.pos.z), 0xffe9a8, 4, 6); } return; }   // swords out: untouchable
-    car.hp -= dmg; car.lastHurt = elapsed; hurtFlash = 0.18; shake = 0.6;
+    if (haloHoly()) { if ((car.holyT || 0) < GS.elapsed) { car.holyT = GS.elapsed + 0.25; SFX.play('pickup', car.pos, { vol: 0.25, rate: 2 }); spawnParticles(tmp.set(car.pos.x, 2, car.pos.z), 0xffe9a8, 4, 6); } return; }   // swords out: untouchable
+    car.hp -= dmg; car.lastHurt = GS.elapsed; GS.hurtFlash = 0.18; GS.shake = 0.6;
     if (car.hp > 0) crewSay(car.hp < car.maxHp * 0.35 ? 'lowhp' : 'hurt', 0.7);
     cartKick(5); cartFling(safeCount(cart.riders.length > 6 ? 2 : 1), 0);
     SFX.play('clang', car.pos);
@@ -1408,7 +1409,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       spawnParticles(tmp.copy(car.pos).setY(1), 0xc26a30, 22, 12);
       flash(tmp, 0xff9040, 14, 0.4, 4); burst(tmp, 0x3a3634, 10, 2.6, 5, 0.55);
       spawnParticles(tmp.copy(car.pos).setY(1), 0xff9a3c, 14, 10);
-      shake = 1.2; SFX.play('explode', car.pos);
+      GS.shake = 1.2; SFX.play('explode', car.pos);
       document.getElementById('dead').style.display = 'flex';
     }
   }
@@ -1428,7 +1429,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   }
 
   const enemyQueue = [];
-  let diggers = 0;
+  GS.diggers = 0;
   function enemyBump(e) {                               // the car pushes against a cube, asleep or awake; ramming a sleeping one hurts it
     const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z, dist = Math.hypot(dx, dz) || 1e-4, nx = dx / dist, nz = dz / dist, minD = car.radius + e.r;
     if (!(car.alive && car.depth < 0.3 && car.y < e.s * 0.8 && dist < minD)) return;
@@ -1436,10 +1437,10 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     car.pos.x += nx * push * share; car.pos.z += nz * push * share;
     if (e.awake && own) { e.pos.x -= nx * push * 0.5; e.pos.z -= nz * push * 0.5; }
     const vn = car.vel.x * -nx + car.vel.z * -nz;
-    if (!e.awake && vn > RAM_SPEED && (e.ramT || 0) < elapsed) {          // протаранили «ящик» — а он живой
-      e.ramT = elapsed + 0.5;
+    if (!e.awake && vn > RAM_SPEED && (e.ramT || 0) < GS.elapsed) {          // протаранили «ящик» — а он живой
+      e.ramT = GS.elapsed + 0.5;
       hitEnemy(e, tmp.set(-nx, 0, -nz), 1, 14); SFX.play('hit_flesh', e.pos);
-      e.stun = 0.6; shake = Math.max(shake, 0.3);
+      e.stun = 0.6; GS.shake = Math.max(GS.shake, 0.3);
       car.speed *= 0.7;
     } else if (vn > 0) { car.vel.x += nx * vn; car.vel.z += nz * vn; car.speed *= 0.6; }
   }
@@ -1449,7 +1450,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (Math.abs(e.tx - e.pos.x) + Math.abs(e.tz - e.pos.z) > 20) { e.pos.x = e.tx; e.pos.z = e.tz; } else { e.pos.x += (e.tx - e.pos.x) * k; e.pos.z += (e.tz - e.pos.z) * k; }
     if (e.elite) flickerElite(e);
     e.root.position.set(e.pos.x, e.hostCarry ? 1.6 : 0, e.pos.z);
-    if (!e.awake) { e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * 0.025; e.root.rotation.y = e.yaw; return; }
+    if (!e.awake) { e.hop.scale.y = 1 + Math.sin(GS.elapsed * 2.2 + e.phase) * 0.025; e.root.rotation.y = e.yaw; return; }
     e.yaw = angLerp(e.yaw, e.tyaw, Math.min(1, 10 * dt)); e.root.rotation.y = e.yaw;
     e.phase += dt * 9;
     const h = Math.abs(Math.sin(e.phase)); e.wakeT = Math.max(0, e.wakeT - dt);
@@ -1466,7 +1467,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     SFX.play(e.elite ? 'elite_die' : 'biter_die', e.pos);
   }
   function updateEnemies(dt) {
-    diggers = 0;
+    GS.diggers = 0;
     for (let ei = 0; ei < enemies.length; ei++) {
       const e = enemies[ei];
       if (NET.client) { if (!!e.carried !== !!e.gSent) { e.gSent = !!e.carried; e.tx = e.pos.x; e.tz = e.pos.z; netEv({ t: 'eg', i: ei, c: e.carried ? 1 : 0, x: r1(e.pos.x), z: r1(e.pos.z) }, NET.hostPeer); } }
@@ -1483,7 +1484,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
       if (e.elite) flickerElite(e);
       if (!e.awake) {
-        e.hop.scale.y = 1 + Math.sin(elapsed * 2.2 + e.phase) * 0.025;   // еле заметно дышит
+        e.hop.scale.y = 1 + Math.sin(GS.elapsed * 2.2 + e.phase) * 0.025;   // еле заметно дышит
         if (seen && dist < WAKE_DIST) wakeEnemy(e);
         continue;
       }
@@ -1498,7 +1499,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       else if (seen) { tx = nx * e.speed; tz = nz * e.speed; }
       else if (hunting) {
         if (dist > car.radius + e.r + 0.4) { tx = nx * e.speed; tz = nz * e.speed; }
-        else if (e.stun <= 0) { digging = true; diggers++; e.vel.multiplyScalar(0.8); }
+        else if (e.stun <= 0) { digging = true; GS.diggers++; e.vel.multiplyScalar(0.8); }
       }
       else if (scared && dist < 42) {                                   // разбегаются от норы
         const jit = Math.sin(e.phase * 0.37 + e.s * 10) * 0.6;          // каждый в свою сторону
@@ -1539,7 +1540,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       e.hop.scale.set(1 + (1 - squash) * 0.6, squash, 1 + (1 - squash) * 0.6);
 
       // чавканье
-      const targetOpen = e.charge > 0 ? 0.95 : digging ? 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 22 + e.phase)) : scared ? 0.6 : !seen ? 0.1 : dist < 7 ? 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(elapsed * 18 + e.phase)) : 0.18;
+      const targetOpen = e.charge > 0 ? 0.95 : digging ? 0.2 + 0.6 * (0.5 + 0.5 * Math.sin(GS.elapsed * 22 + e.phase)) : scared ? 0.6 : !seen ? 0.1 : dist < 7 ? 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(GS.elapsed * 18 + e.phase)) : 0.18;
       e.open += (targetOpen - e.open) * Math.min(1, 14 * dt);
       e.pivot.rotation.x = -e.open;
 
@@ -1634,7 +1635,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const mobMats = {};
   // monsters' own shots, in the shooter's colour: 0 = one straight shard, 1 = a fan, 2 = a ring all round
   const MOB_PAT = { gremlin: 0, maw: 0, stilt: 0, spike: 0, gloopling: 0, flapper: 1, wingmaw: 1, jelly: 1, lamprey: 1, brute: 2, grubber: 2, gloop: 2, oculon: 2 };
-  let mobShots = 0;                                      // small shards in the air right now: caps the whole thing
+  GS.mobShots = 0;                                      // small shards in the air right now: caps the whole thing
   const mobGeo = [(() => { const g = new THREE.OctahedronGeometry(0.3, 0); g.scale(0.55, 0.55, 2.1); return g; })(),      // 0: a dart
                   new THREE.TetrahedronGeometry(0.42, 0),                                                              // 1: a tumbling barb
                   new THREE.IcosahedronGeometry(0.3, 1)];                                                              // 2: an orb
@@ -1663,7 +1664,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   }
   function updateEShots(dt) {
     const sh = shield();
-    mobShots = 0; for (const s of eshots) if (s.small) mobShots++;
+    GS.mobShots = 0; for (const s of eshots) if (s.small) GS.mobShots++;
     for (let i = eshots.length - 1; i >= 0; i--) {
       const s = eshots[i], p = s.m.position;
       s.life -= dt; p.addScaledVector(s.v, dt);
@@ -1697,7 +1698,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   function clearEShots() { for (const s of eshots) scene.remove(s.m); eshots.length = 0; }
 
   function hitEnemy(e, dir, dmg = 1, push = 4) {
-    if (NET.client) { e.flash = 0.07; e.myHit = elapsed; netEv({ t: 'eh', i: enemies.indexOf(e), d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
+    if (NET.client) { e.flash = 0.07; e.myHit = GS.elapsed; netEv({ t: 'eh', i: enemies.indexOf(e), d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
     wakeEnemy(e);
     e.hp -= dmg; if (e.flash < -0.06) e.flash = 0.07;   // мигает, а не горит белым при постоянном уроне
     e.vel.addScaledVector(dir, push);
@@ -1705,8 +1706,8 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       if (e.carried) { releaseIfHeld(e); e.carried = false; }
       e.dead = true; e.root.visible = false;
       enemyDieFx(e);
-      if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); lootFrom(e.elite ? 'elite' : 'enemy', e.pos.x, e.pos.z); }
-      if (e.elite) { dropLoot(e.pos); shake = Math.max(shake, 0.5); }
+      if (!NET.applying) { GS.enemyKills++; ekillsEl.textContent = GS.enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); lootFrom(e.elite ? 'elite' : 'enemy', e.pos.x, e.pos.z); }
+      if (e.elite) { dropLoot(e.pos); GS.shake = Math.max(GS.shake, 0.5); }
       enemyQueue.push({ e, t: e.elite ? 8 : 5 });
     }
   }
@@ -1732,7 +1733,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     car.heading += THREE.MathUtils.clamp(turn, -1, 1) * Math.min(1, 0.05 + into * 0.16);      // the nose swings round the rock
     car.speed *= 1 - into * 0.22;
     if (-vn > PILLAR_RAM) { cartKick(4); cartSpill(1); SFX.play('land', car.pos, { vol: 0.5, rate: 0.8 }); }
-    shake = Math.max(shake, Math.min(0.18, -vn * 0.008));
+    GS.shake = Math.max(GS.shake, Math.min(0.18, -vn * 0.008));
   }
   function resolveCarVsBox(o) {
     if (o.rock) return resolveCarVsRock(o);
@@ -1763,7 +1764,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         particles[particles.length - 1].v.addScaledVector(car.vel, 0.6 / sp * 12);
       }
       car.speed *= 0.85; car.vel.multiplyScalar(0.9);
-      shake = Math.max(shake, 0.3);
+      GS.shake = Math.max(GS.shake, 0.3);
       return;
     }
     const push = car.radius - d;
@@ -1781,10 +1782,10 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const PILLAR_RAM = 6;
   const chunks = [];
   const chunkGeos = [new THREE.TetrahedronGeometry(1, 0), new THREE.BoxGeometry(1.3, 1, 1.1), new THREE.DodecahedronGeometry(0.9, 0)];
-  let pillarsSmashed = 0;
+  GS.pillarsSmashed = 0;
   function smashPillar(o, vel) {
     if (!o.mesh.visible || o.rock) return;              // nests are unbreakable
-    o.mesh.visible = false; pillarsSmashed++;
+    o.mesh.visible = false; GS.pillarsSmashed++;
     if (!NET.applying) netEv({ t: 'smash', i: obstacles.indexOf(o), vx: r1(vel.x), vz: r1(vel.z) });
     if (o.rock) rockSmashed(o);
     const chunkMat = o.rock ? rockMat : pillarMat;
@@ -1800,7 +1801,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     }
     tmp.set(p.x, 1.5, p.z);
     burst(tmp, 0x9a958c, 10, 2.6, 6, 0.5); spawnParticles(tmp, 0xb4b8c2, 16, 10); flash(tmp, 0xfff0d0, 5, 0.15, 1.6, false);
-    shake = Math.max(shake, 0.55); SFX.play('hit_stone', p, { vol: 1 }); SFX.play('crate_break', p, { rate: 0.6 });
+    GS.shake = Math.max(GS.shake, 0.55); SFX.play('hit_stone', p, { vol: 1 }); SFX.play('crate_break', p, { rate: 0.6 });
     crewSay('smash', 0.6);
   }
   const chunkDir = new THREE.Vector3();
@@ -1866,7 +1867,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       o.mesh.visible = false;
       spawnParticles(o.mesh.position, 0xd2873c, 16, 9); SFX.play('crate_break', o.mesh.position);
       flash(o.mesh.position, 0xffb060, 4.5, 0.18, 1.6, false); burst(o.mesh.position, 0xa08a6a, 5, 1.6, 3.5, 0.35);
-      kills++; killsEl.textContent = kills; crateDrop(o); if (!NET.applying) { myKill(o.mesh.position.x, o.mesh.position.z, 3); lootFrom('crate', o.mesh.position.x, o.mesh.position.z); }
+      GS.kills++; killsEl.textContent = GS.kills; crateDrop(o); if (!NET.applying) { myKill(o.mesh.position.x, o.mesh.position.z, 3); lootFrom('crate', o.mesh.position.x, o.mesh.position.z); }
       respawnQueue.push({ o, t: 4 });
       if (!o.room) netEv({ t: 'crate', i: obstacles.indexOf(o) });
     }
@@ -1882,7 +1883,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   let drillCyc = 0;
   function drillAuto(dt) {                                 // on for a moment each cycle, half a cycle away from the nova burst
     const D = 1.0 + (abLv.drill >= 1 ? 0.5 : 0);
-    if (weapons.nova) { const C = W_STATS.nova.cd[weapons.nova - 1]; return Math.abs(novaT - C / 2) < Math.min(C * 0.4, D / 2) && threatNear(16); }
+    if (weapons.nova) { const C = W_STATS.nova.cd[weapons.nova - 1]; return Math.abs(GS.novaT - C / 2) < Math.min(C * 0.4, D / 2) && threatNear(16); }
     drillCyc = (drillCyc + dt) % 2.4; return drillCyc < D && threatNear(16);
   }
   // подсветка арки на земле
@@ -1903,7 +1904,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   drillArc.visible = false; scene.add(drillArc);
 
   function updateDrill(dt) {
-    const on = abilities.drill && ride === 'buggy' && car.alive && car.burrow === 'up' && drillAuto(dt);
+    const on = abilities.drill && GS.ride === 'buggy' && car.alive && car.burrow === 'up' && drillAuto(dt);
     drillRPM += ((on ? 1 : 0) - drillRPM) * Math.min(1, (on ? 5 : 2) * dt);
     drillSpin.rotation.z += drillRPM * 45 * dt;
     SFX.loop('drill', drillRPM > 0.02 ? 0.12 + 0.3 * drillRPM : 0, 0.45 + 0.75 * drillRPM);
@@ -1916,10 +1917,10 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       drillArc.position.set(car.pos.x, 0.04, car.pos.z);
       drillArc.rotation.y = car.heading; drillArc.scale.setScalar(drillRMul());
       const k = Math.min(1, drillRPM / 0.55);
-      arcFillMat.opacity = 0.2 * k + (drillRPM >= 0.55 ? 0.04 * Math.sin(elapsed * 20) : 0);
+      arcFillMat.opacity = 0.2 * k + (drillRPM >= 0.55 ? 0.04 * Math.sin(GS.elapsed * 20) : 0);
       arcEdgeMat.opacity = 0.75 * k;
       for (const m of drillArc.children) if (m.userData.phase !== undefined) {
-        const t = (elapsed * 1.6 + m.userData.phase) % 1;               // полоска бежит от машины к краю
+        const t = (GS.elapsed * 1.6 + m.userData.phase) % 1;               // полоска бежит от машины к краю
         const rad = 1 + t * (DRILL_ARC_R - 1.2);
         m.scale.set(rad, 1, rad);
         m.material.opacity = 0.35 * k * (1 - t);
@@ -1964,7 +1965,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     }
     drillMat.emissive.setHex(grinding ? 0xff4a00 : 0x000000);
     arcEdgeMat.color.setHex(grinding ? 0xffe9b0 : 0xffc06a).multiplyScalar(3.5);
-    if (grinding) { shake = Math.max(shake, 0.18); car.speed *= 1 - 1.5 * dt; }
+    if (grinding) { GS.shake = Math.max(GS.shake, 0.18); car.speed *= 1 - 1.5 * dt; }
     SFX.loop('grind', grinding ? 0.4 * drillRPM : 0, 0.9 + 0.2 * drillRPM);
   }
 
@@ -2023,9 +2024,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       const e = h.ref;
       e.pos.set(holdPos.x, 0, holdPos.z);
       e.root.position.set(holdPos.x, holdPos.y - e.s / 2, holdPos.z);
-      e.root.rotation.set(Math.sin(elapsed * 25) * 0.15, car.heading + Math.PI, Math.sin(elapsed * 19) * 0.15); // мордой к буру, дёргается
+      e.root.rotation.set(Math.sin(GS.elapsed * 25) * 0.15, car.heading + Math.PI, Math.sin(GS.elapsed * 19) * 0.15); // мордой к буру, дёргается
       e.hop.position.y = 0; e.hop.scale.set(1, 1, 1);
-      e.open = 0.35 + 0.35 * Math.sin(elapsed * 22);
+      e.open = 0.35 + 0.35 * Math.sin(GS.elapsed * 22);
       e.pivot.rotation.x = -e.open;
     } else {
       h.ref.mesh.position.copy(holdPos);
@@ -2055,7 +2056,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       th.pos.x = THREE.MathUtils.clamp(th.pos.x, -lim, lim);
       th.pos.z = THREE.MathUtils.clamp(th.pos.z, -lim, lim);
     }
-    shake = Math.max(shake, 0.35);
+    GS.shake = Math.max(GS.shake, 0.35);
     if (th.kind === 'crate') {
       const o = th.ref;
       o.carried = false;
@@ -2078,7 +2079,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (restDir.lengthSq() < 1e-4) restDir.set(Math.sin(car.heading), 0, Math.cos(car.heading));
     restDir.normalize();
     if ((!car.alive || car.burrow !== 'up') && grab.held) { throwHeld(null); grab.state = 'retract'; }
-    const want = abilities.grab && car.alive && car.burrow === 'up' && rmb;
+    const want = abilities.grab && car.alive && car.burrow === 'up' && GS.rmb;
     let targetOpen = 0.15, aimYaw = yawToward(groundAim.x, groundAim.z);
     const cand = abilities.grab && car.alive && car.burrow === 'up' && (grab.state === 'idle' || grab.state === 'reach') ? findCandidate() : null;
 
@@ -2108,7 +2109,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           e.open = 1; e.wakeT = 0.45; e.biteCd = Math.max(e.biteCd, 0.6);
           spawnParticles(tmp.set(e.pos.x, 2, e.pos.z), 0xd040a0, 14, 9);
           spawnParticles(new THREE.Vector3().copy(armW).addScaledVector(tmp.set(-ax / ad, 0, -az / ad), grab.len).setY(2), 0xffe08a, 6, 8);
-          shake = Math.max(shake, 0.6);
+          GS.shake = Math.max(GS.shake, 0.6);
           flashAlert('ARCH-BITER WON\'T BUDGE!'); SFX.play('zap', e.pos); SFX.play('growl_elite', e.pos, { delay: 0.05 });
           grab.target = null; grab.state = 'retract'; grab.cd = 1.2;
         }
@@ -2119,7 +2120,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           t.shieldMax = t.shieldHp = t.kind === 'crate' ? 60 : (t.ref.elite ? 90 : 50);
           grab.held = t; grab.target = null; grab.state = 'pull'; SFX.play('slap', p);
           holdPos.set(p.x, HOLD_Y, p.z);
-          shake = Math.max(shake, 0.2);
+          GS.shake = Math.max(GS.shake, 0.2);
         }
       }
       if (grab.state === 'reach' && (!want || grab.len >= ARM_MAX)) { grab.state = 'retract'; grab.target = null; }
@@ -2131,7 +2132,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     else if (grab.state === 'pull' || grab.state === 'hold') {
       const h = grab.held;
       // точка на буре: объект насажен на остриё
-      const dest = toWorld(0, 3.4 + h.r * 0.7, tmp).setY(HOLD_Y + car.y + Math.sin(elapsed * 9) * 0.05);   // прыгает вместе с машиной
+      const dest = toWorld(0, 3.4 + h.r * 0.7, tmp).setY(HOLD_Y + car.y + Math.sin(GS.elapsed * 9) * 0.05);   // прыгает вместе с машиной
       const step = PULL_SPEED * dt, gap = holdPos.distanceTo(dest);
       if (grab.state === 'hold' || gap <= step) { holdPos.copy(dest); grab.state = 'hold'; }
       else holdPos.addScaledVector(dest.sub(holdPos).normalize(), step);
@@ -2154,7 +2155,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
           e.ramCd = 0.4;
           hitEnemy(e, tmp.set(dx / dd, 0, dz / dd), sp > 6 ? 1.5 : 0.5, 6 + sp * 0.6);
           spawnParticles(tmp.copy(e.pos).setY(1), 0xffd27a, 4, 6); SFX.play('hit_flesh', e.pos);
-          shake = Math.max(shake, 0.25);
+          GS.shake = Math.max(GS.shake, 0.25);
         }
       }
       if (!want && grab.held) { throwHeld(car.alive ? groundAim : null); grab.state = 'retract'; }
@@ -2165,7 +2166,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     targetMarker.visible = !!showT;
     if (showT) {
       const p = tgtPos(showT);
-      targetMarker.position.set(p.x, showT.s + 1.3 + Math.sin(elapsed * 6) * 0.15, p.z);
+      targetMarker.position.set(p.x, showT.s + 1.3 + Math.sin(GS.elapsed * 6) * 0.15, p.z);
       targetMarker.rotation.y += dt * 4;
     }
 
@@ -2247,13 +2248,13 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   const carSeen = () => car.alive && car.depth < 0.5;
 
-  function special() { if (ride === 'spider') toggleBurrow(); else if (ride === 'unicorn') bombDome(); else if (ride === 'buggy') throwDecoys(); else if (ride === 'halo') releaseCubes(); }
+  function special() { if (GS.ride === 'spider') toggleBurrow(); else if (GS.ride === 'unicorn') bombDome(); else if (GS.ride === 'buggy') throwDecoys(); else if (GS.ride === 'halo') releaseCubes(); }
   function toggleBurrow() {
-    if (!abilities.burrow || ride !== 'spider' || !car.alive || car.burrowCd > 0 || car.airborne) return;
+    if (!abilities.burrow || GS.ride !== 'spider' || !car.alive || car.burrowCd > 0 || car.airborne) return;
     if (car.burrow === 'up' || car.burrow === 'rising') { car.burrow = 'down'; SFX.play('dig_down', car.pos); crewSay('burrow', 0.7); }
     else { car.burrow = 'rising'; SFX.play('dig_up', car.pos); }
     car.burrowCd = 0.25;
-    shake = Math.max(shake, 0.3);
+    GS.shake = Math.max(GS.shake, 0.3);
     spawnParticles(tmp.copy(car.pos).setY(0.5), 0x6b5a3e, 12, 8);
   }
 
@@ -2271,7 +2272,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       drillSpin.rotation.z += 40 * dt;               // бур роет
       dirtT -= dt;
       if (dirtT <= 0) { dirtT = 0.03; spawnParticles(tmp.copy(car.pos).setY(0.3), Math.random() < 0.7 ? 0x6b5a3e : 0x4a4f45, 3, 9); }
-      shake = Math.max(shake, 0.15);
+      GS.shake = Math.max(GS.shake, 0.15);
     }
     carGroup.position.y = car.y - car.depth * BURY_DEPTH;
     carGroup.visible = car.alive && car.depth < 0.97;
@@ -2279,7 +2280,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (mound.visible) {
       const sc = Math.min(1, car.depth * 1.3);
       mound.position.set(car.pos.x, 0, car.pos.z);
-      mound.scale.set(sc, sc * (car.burrow === 'under' ? 1 + Math.sin(elapsed * 3) * 0.06 : 1), sc); // нора дышит
+      mound.scale.set(sc, sc * (car.burrow === 'under' ? 1 + Math.sin(GS.elapsed * 3) * 0.06 : 1), sc); // нора дышит
     }
   }
 
@@ -2295,7 +2296,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     SFX.loop('skid', car.alive && car.depth === 0 && !car.airborne && slip > SKID_SLIP ? Math.min(0.35, (slip - SKID_SLIP) / 14) : 0, 0.9 + Math.min(0.3, slip / 40));
     skidT -= dt; dustT -= dt;
     const gspd = Math.hypot(car.vel.x, car.vel.z);
-    if (ride === 'buggy' && car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {   // dust trail
+    if (GS.ride === 'buggy' && car.alive && car.depth === 0 && !car.airborne && gspd > 8 && dustT <= 0) {   // dust trail
       dustT = 0.045;
       wheels[2 + (Math.random() < 0.5 ? 0 : 1)].pivot.getWorldPosition(wpos); wpos.y = 0.3;
       puff(wpos, 0xa8977c, 0.9, 0.8, rand(-0.5, 0.5), rand(0.3, 0.9), rand(-0.5, 0.5), 0.2 * Math.min(1, gspd / 20), 2.4);
@@ -2336,7 +2337,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   const throwMul = () => abLv.grab >= 2 ? 3 : abLv.grab >= 1 ? 2 : 1;
   function ringBlast(x, z, r, dmg, push, col, stun) {      // a knock-back ring from the ride (upgrades); critters are the host's, so a client asks it
-    burst(tmp.set(x, 0.4, z), col, 12, r * 0.7, 9, 0.5); flash(tmp, col, r, 0.25, 3, false); shake = Math.max(shake, 0.3);
+    burst(tmp.set(x, 0.4, z), col, 12, r * 0.7, 9, 0.5); flash(tmp, col, r, 0.25, 3, false); GS.shake = Math.max(GS.shake, 0.3);
     if (NET.client) { netEv({ t: 'blast', x: r1(x), z: r1(z), r, d: dmg, p: push, s: stun ? 1 : 0 }, NET.hostPeer); return; }
     blastAt(x, z, r, dmg, push, stun);
   }
@@ -2348,7 +2349,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   let bombCd = 0; const domes = [];
   const domeGeo = new THREE.SphereGeometry(1, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), domeRingGeo = new THREE.RingGeometry(0.95, 1, 64); domeRingGeo.rotateX(-Math.PI / 2);
   function bombDome() {
-    if (!abilities.bomb || ride !== 'unicorn' || !car.alive || car.burrow !== 'up' || bombCd > 0) return;
+    if (!abilities.bomb || GS.ride !== 'unicorn' || !car.alive || car.burrow !== 'up' || bombCd > 0) return;
     const L = abLv.bomb; bombCd = BOMB.cd[L];
     const x = r1(car.pos.x), z = r1(car.pos.z), r = BOMB.r[L], T = BOMB.T[L];
     addDome(x, z, r, T);
@@ -2361,7 +2362,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     m.position.set(x, 0, z); ring.position.set(x, 0.06, z); ring.scale.setScalar(r); scene.add(m, ring);
     domes.push({ x, z, r, T, t: 0, m, ring });
     burst(tmp.set(x, 0.5, z), 0xff9ae0, 16, r * 0.8, 12, 0.6); flash(tmp, 0xff9ae0, r * 1.2, 0.35, 4, false);
-    SFX.play('explode', tmp, { vol: 0.6, rate: 1.3 }); shake = Math.max(shake, 0.35);
+    SFX.play('explode', tmp, { vol: 0.6, rate: 1.3 }); GS.shake = Math.max(GS.shake, 0.35);
   }
   const inDome = (x, z) => domes.some(D => Math.hypot(x - D.x, z - D.z) < D.r);
   function updateDomes(dt) {
@@ -2369,7 +2370,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     for (let i = domes.length - 1; i >= 0; i--) {
       const D = domes[i]; D.t += dt;
       const k = Math.min(1, D.t / 0.18), fade = Math.min(1, (D.T - D.t) / 0.4);
-      D.m.scale.setScalar(D.r * (0.4 + 0.6 * k)); D.m.material.opacity = 0.11 * fade * k + 0.03 * Math.sin(elapsed * 14) * fade; D.ring.material.opacity = 0.8 * fade;
+      D.m.scale.setScalar(D.r * (0.4 + 0.6 * k)); D.m.material.opacity = 0.11 * fade * k + 0.03 * Math.sin(GS.elapsed * 14) * fade; D.ring.material.opacity = 0.8 * fade;
       if (!NET.client) {                                   // nobody gets in while it stands
         for (const m of swarm) { if (m.dead) continue; const dx = m.pos.x - D.x, dz = m.pos.z - D.z, d = Math.hypot(dx, dz) || 1e-3, R = D.r + m.r;
           if (d < R) { m.pos.x = D.x + dx / d * R; m.pos.z = D.z + dz / d * R; const vn = m.vel.x * dx / d + m.vel.z * dz / d; if (vn < 0) { m.vel.x -= dx / d * vn; m.vel.z -= dz / d * vn; } } }
@@ -2379,11 +2380,11 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       if (D.t >= D.T) { scene.remove(D.m, D.ring); D.m.material.dispose(); D.ring.material.dispose(); domes.splice(i, 1); }
     }
   }
-  const activeCdK = () => ride === 'unicorn' ? Math.max(0, bombCd) / BOMB.cd[abLv.bomb] : ride === 'buggy' ? Math.max(0, decoyCd) / DECOY_CD : ride === 'halo' ? Math.max(0, cubeCd) / CUBE_CD : 0;
+  const activeCdK = () => GS.ride === 'unicorn' ? Math.max(0, bombCd) / BOMB.cd[abLv.bomb] : GS.ride === 'buggy' ? Math.max(0, decoyCd) / DECOY_CD : GS.ride === 'halo' ? Math.max(0, cubeCd) / CUBE_CD : 0;
   // ----- Decoy Chubz (buggy): a squeaky fake chubzik; on the host every monster nearby goes for it, then it blows up -----
   const DECOY_CD = 9, DECOY_T = 3.2, decoys = []; let decoyCd = 0;
   function throwDecoys() {
-    if (!abilities.decoy || ride !== 'buggy' || !car.alive || decoyCd > 0) return;
+    if (!abilities.decoy || GS.ride !== 'buggy' || !car.alive || decoyCd > 0) return;
     decoyCd = DECOY_CD;
     const n = 1 + abLv.decoy, dx = groundAim.x - car.pos.x, dz = groundAim.z - car.pos.z, dd = Math.hypot(dx, dz) || 1;
     const a0 = Math.atan2(dx / dd, dz / dd), L = THREE.MathUtils.clamp(dd, 7, 16);
@@ -2424,7 +2425,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const wingMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   const CUBE_COLS = [0xffb3c7, 0xa8e6ff, 0xfff0a0, 0xc8b3ff, 0xb8f5c0];
   function releaseCubes() {
-    if (!abilities.cubes || ride !== 'halo' || !car.alive || cubeCd > 0) return;
+    if (!abilities.cubes || GS.ride !== 'halo' || !car.alive || cubeCd > 0) return;
     cubeCd = CUBE_CD; const n = abLv.cubes >= 1 ? 5 : 3;
     spawnCubes(n, null, abLv.cubes); netEv({ t: 'cubes', n, l: abLv.cubes });
     SFX.play('jump2', car.pos, { rate: 1.6 });
@@ -2495,7 +2496,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       if (q.t >= q.T) { scene.remove(q.m); q.m.material.dispose(); T.pts.splice(i, 1); } }
   }
   function updateTrails(dt) {
-    trailFor('me', car.pos, ride === 'unicorn' && car.alive && Math.abs(car.speed) > 3, ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, dt);
+    trailFor('me', car.pos, GS.ride === 'unicorn' && car.alive && Math.abs(car.speed) > 3, GS.ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, dt);
     for (const R of NET.remotes.values()) trailFor(R.peer, R.pos, R.up && Math.hypot(R.vel.x, R.vel.z) > 3, R.ride === 'unicorn' ? R.tl || 0 : 0, dt);
     if (NET.client || (trailTick += dt) < 0.1) return; trailTick = 0;
     for (const T of trails.values()) for (const q of T.pts)
@@ -2503,10 +2504,10 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   }
   // ----- the warm-up: everybody has their own weapon pedestals; one rises out of the ground when you come close and has to be fought for.
   //       When the whole crew holds all three guns, wandering bosses come out carrying the skills -----
-  const pedestals = []; let wbKilled = 0, wbSpawned = false;
+  const pedestals = []; GS.wbSpawned = false; GS.wbKilled = 0;
   const pedBaseGeo = new THREE.CylinderGeometry(1.7, 2.3, 1.4, 8), pedMat = new THREE.MeshStandardMaterial({ color: 0x6f6458, roughness: 0.9 });
   const PED_RISE_R = 25, PED_GUARD_R = 32;
-  const firstGun = () => pedestals.length ? pedestals[0].k : (ride === 'halo' ? 'nova' : 'spread');      // the halo's own gun is weak: it starts with the nova
+  const firstGun = () => pedestals.length ? pedestals[0].k : (GS.ride === 'halo' ? 'nova' : 'spread');      // the halo's own gun is weak: it starts with the nova
   const pedIcon = k => k === 'jump' ? 'jump' : 'w_' + k;
   const pedHave = k => k === 'jump' ? !!abilities.jump : weapons[k] > 0;
   function addPedestal(k, x, z) {
@@ -2544,9 +2545,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   }
   const armFx = [];
   function spawnWanderers() {                              // host: three big wandering bosses, each carries a skill for everyone
-    wbSpawned = true;
+    GS.wbSpawned = true;
     wbCheckT = 0; wbTopUp(0);                              // as many as the crew still lacks skills
-    rigOwed = Math.max(0, 2 - swarm.filter(m => m.rig && !m.dead).length); rigT = 0;
+    GS.rigOwed = Math.max(0, 2 - swarm.filter(m => m.rig && !m.dead).length); GS.rigT = 0;
     flashAlert('BOSS HUNT! LOG MACHINES ARE BOSSES TOO'); netEv({ t: 'alert', s: 'BOSS HUNT! LOG MACHINES ARE BOSSES TOO' }); SFX.play('boss_roar', null, { vol: 0.6 });
   }
   function spawnWanderer(a, loot) {
@@ -2573,7 +2574,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     for (let i = wbMarks.length - 1; i >= 0; i--) { const m = wbMarks[i], spr = m.mark;
       if (m.dead || !swarm.includes(m)) { scene.remove(spr); spr.material.dispose(); m.mark = null; wbMarks.splice(i, 1); continue; }
       if (spr.gift !== gift) { spr.gift = gift; if (!pickupTex[gift]) pickupTex[gift] = srgbTex(ICONS[gift]); spr.material.map = pickupTex[gift]; spr.material.needsUpdate = true; }
-      const s = 3.4 + Math.sin(elapsed * 4 + m.id) * 0.3; spr.scale.set(s, s, 1); spr.position.set(m.pos.x, (m.K.fly || 0) + m.K.size + 2.6 + Math.sin(elapsed * 2.2 + m.id) * 0.35, m.pos.z); }
+      const s = 3.4 + Math.sin(GS.elapsed * 4 + m.id) * 0.3; spr.scale.set(s, s, 1); spr.position.set(m.pos.x, (m.K.fly || 0) + m.K.size + 2.6 + Math.sin(GS.elapsed * 2.2 + m.id) * 0.35, m.pos.z); }
   }
   function makeWanderer(m) {
     if (m.wb) return m; m.wb = true; m.K = { ...m.K, size: m.K.size * 1.4, r: Math.min(2.6, m.K.r * 1.3) }; m.r = m.K.r; m.hp *= 3; m.wp = null;
@@ -2597,8 +2598,8 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       if (pedHave(P.k) && P.state !== 'gone') { P.state = 'gone'; P.g.visible = false; continue; }
       const d = Math.hypot(car.pos.x - P.x, car.pos.z - P.z); P.t += dt; P.ring.rotation.y += dt;
       if (P.state === 'dormant') {
-        P.ring.material.opacity = 0.45 + Math.sin(elapsed * 4 + i) * 0.3;
-        if (car.alive && d < PED_RISE_R) { P.state = 'rising'; P.t = 0; P.icon.visible = true; P.dome.visible = true; shake = Math.max(shake, 0.5);
+        P.ring.material.opacity = 0.45 + Math.sin(GS.elapsed * 4 + i) * 0.3;
+        if (car.alive && d < PED_RISE_R) { P.state = 'rising'; P.t = 0; P.icon.visible = true; P.dome.visible = true; GS.shake = Math.max(GS.shake, 0.5);
           SFX.play('tent_slam', tmp.set(P.x, 0, P.z), { vol: 0.6 }); burst(tmp.set(P.x, 0.5, P.z), 0x8a7a64, 22, 3.5, 7, 0.6);
           const big = P.k !== fg && P.k !== 'jump'; if (NET.client) netEv({ t: 'ambush', x: P.x, z: P.z, b: big ? 1 : 0 }, NET.hostPeer); else ambush(P.x, P.z, big);
           flashAlert('GUARDED! CLEAR IT OUT'); }
@@ -2608,12 +2609,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         P.g.position.x = P.x + Math.sin(P.t * 60) * 0.12 * (1 - k); if (Math.random() < dt * 14) burst(tmp.set(P.x + rand(-2, 2), 0.3, P.z + rand(-2, 2)), 0x8a7a64, 3, 1.6, 4, 0.5);
         P.icon.position.y = -1 + 4.4 * k; if (k >= 1) { P.state = 'sealed'; P.t = 0; P.g.position.x = P.x; }
         continue; }
-      P.icon.position.y = 3.4 + Math.sin(elapsed * 2.5 + i) * 0.35;
+      P.icon.position.y = 3.4 + Math.sin(GS.elapsed * 2.5 + i) * 0.35;
       const guards = guardsNear(P); P.guards = guards;
-      if (P.state === 'sealed') { P.dome.material.opacity = 0.18 + Math.sin(elapsed * 6) * 0.06; P.ring.material.opacity = 0.9;
+      if (P.state === 'sealed') { P.dome.material.opacity = 0.18 + Math.sin(GS.elapsed * 6) * 0.06; P.ring.material.opacity = 0.9;
         if (P.t > 2 && guards === 0) { P.state = 'open'; P.dome.visible = false; flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); SFX.play('pickup', null, { rate: 0.7 }); } }
       if (P.state === 'open' && car.alive && d < 3.4) {
-        if (P.k === 'jump') { abilities.jump = true; applyAbilityVisuals(); abDirty = true; abSig = ''; toast('jump'); }
+        if (P.k === 'jump') { abilities.jump = true; applyAbilityVisuals(); abDirty = true; GS.abSig = ''; toast('jump'); }
         else { gainWeapon('w_' + P.k); toast('w_' + P.k, '— level it up with upgrades'); }
         SFX.play('pickup', null);
         flash(tmp.set(P.x, 2, P.z), 0xffd23a, 8, 0.35, 3.5); burst(tmp.set(P.x, 0.5, P.z), 0xffd23a, 16, 3, 8, 0.6);
@@ -2621,24 +2622,24 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         if (NET.on && NET.game) netEv({ t: 'armed', k: P.k });
       }
     }
-    if (!NET.client && !wbSpawned && crewArmed()) { wbSpawned = true; if (!swarm.some(m => m.wb && !m.dead)) spawnWanderers(); }
-    if (!NET.client && wbSpawned) wbTopUp(dt);
+    if (!NET.client && !GS.wbSpawned && crewArmed()) { GS.wbSpawned = true; if (!swarm.some(m => m.wb && !m.dead)) spawnWanderers(); }
+    if (!NET.client && GS.wbSpawned) wbTopUp(dt);
   }
   // ---------- jump ----------
   const JUMP_V = 15, CAR_G = 32;                    // ~0.95 с в воздухе, высота ~3.5 — перелетает ящики и злюк
   function jump() {
-    if (myTow && car.alive && car.burrow === 'up') { throwBomb(); return; }      // with the bomb aboard the jump throws it
+    if (GS.myTow && car.alive && car.burrow === 'up') { throwBomb(); return; }      // with the bomb aboard the jump throws it
     if (!car.alive || car.burrow !== 'up') return;
     if (!car.airborne) {
       if (!abilities.jump) return;
       car.vy = JUMP_V; car.airborne = true; car.usedDouble = false; car.airJumps = 0; SFX.play('jump', car.pos); crewSay('jump', 0.5);
-      if (ride === 'spider' && SPD.n.y < 0.5) { car.vel.addScaledVector(SPD.n, 10); car.vy *= 0.6; }      // kick off the wall
+      if (GS.ride === 'spider' && SPD.n.y < 0.5) { car.vel.addScaledVector(SPD.n, 10); car.vy *= 0.6; }      // kick off the wall
       spawnParticles(tmp.copy(car.pos).setY(0.2), 0x8a8a78, 8, 5);
     } else if (abilities.doubleJump && !car.usedDouble) {   // второй толчок прямо в воздухе (the angel's; an upgrade adds a third)
       car.vy = JUMP_V * 0.95; car.airJumps = (car.airJumps || 0) + 1; if (car.airJumps >= 1 + (abLv.doubleJump >= 1 ? 1 : 0)) car.usedDouble = true; SFX.play('jump2', car.pos);
       if (abLv.doubleJump >= 2) ringBlast(car.pos.x, car.pos.z, 4.5, 3, 12, 0xc9a8ff, false);
       spawnParticles(tmp.copy(car.pos).setY(car.y + 0.3), 0xc9a8ff, 12, 6);
-      shake = Math.max(shake, 0.15);
+      GS.shake = Math.max(GS.shake, 0.15);
     }
   }
   function updateJump(dt) {
@@ -2649,7 +2650,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     // приземление
     const impact = -car.vy;
     car.y = car.ground || 0; car.vy = 0; car.airborne = false;
-    shake = Math.max(shake, 0.25 + impact * 0.02);
+    GS.shake = Math.max(GS.shake, 0.25 + impact * 0.02);
     SFX.play('land', car.pos, { vol: Math.min(1, 0.4 + impact / 25) });
     spawnParticles(tmp.copy(car.pos).setY(0.2), 0x8a8a78, 14, 7); burst(tmp.setY(0.4), 0x9a8f7c, 9, 1.5, 5, 0.3);
     const popped = car.popped; car.popped = false;
@@ -2699,7 +2700,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   function stomp(lv) {
     const x = car.pos.x, z = car.pos.z, r = STOMP.r[lv - 1], st = STOMP.stun[lv - 1];
     waveFx(x, z, r, 0xffe08a); if (lv >= 2) waveFx(x, z, r * 0.62, 0xfff4c8, 0.32); if (lv >= 3) waveFx(x, z, r * 1.05, 0xff9a3a, 0.6);
-    burst(tmp.set(x, 0.4, z), 0xffe08a, 8 + lv * 4, r * 0.35, 9, 0.45); shake = Math.max(shake, 0.25 + lv * 0.1);
+    burst(tmp.set(x, 0.4, z), 0xffe08a, 8 + lv * 4, r * 0.35, 9, 0.45); GS.shake = Math.max(GS.shake, 0.25 + lv * 0.1);
     for (const e of enemies) { if (e.dead || e.carried) continue; const dx = e.pos.x - x, dz = e.pos.z - z, d = Math.hypot(dx, dz) || 1e-3; if (d > r + e.r) continue;      // the evil cubes are each player's own: they shoot, so they count as shooters
       if (!e.elite || lv >= 3) e.stun = Math.max(e.stun || 0, st);
       if (lv >= 2 && !e.elite) hitEnemy(e, tmp.set(dx / d, 0, dz / d).clone(), lv === 2 ? Math.ceil(e.maxHp * 0.5) : 99, 6); }
@@ -2776,8 +2777,8 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   }
   function landPower(lv) {                                 // my ride came down from a jump with a levelled jump skill
     const x = car.pos.x, z = car.pos.z;
-    if (ride === 'buggy') stomp(lv); else if (ride === 'spider') spawnBrood(x, z, lv, true); else if (ride === 'halo') spawnSpikes(x, z, lv, true); else starburst(lv);
-    netEv({ t: 'jfx', k: ride, l: lv, x: r1(x), z: r1(z) });
+    if (GS.ride === 'buggy') stomp(lv); else if (GS.ride === 'spider') spawnBrood(x, z, lv, true); else if (GS.ride === 'halo') spawnSpikes(x, z, lv, true); else starburst(lv);
+    netEv({ t: 'jfx', k: GS.ride, l: lv, x: r1(x), z: r1(z) });
   }
   function landFxRemote(k, lv, x, z) {                     // a friend's landing: the picture only, the damage is theirs
     if (k === 'buggy') { waveFx(x, z, STOMP.r[lv - 1], 0xffe08a); if (lv >= 2) waveFx(x, z, STOMP.r[lv - 1] * 0.62, 0xfff4c8, 0.32); }
@@ -2793,12 +2794,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   // ---------- abilities & loot ----------
   const abilities = { drill: false, burrow: false, grab: false, jump: true, doubleJump: false, bomb: false, decoy: false, cubes: false, trail: false };
   // every ride has its own kit; the specials sit on Shift, the drill runs by itself
-  const kit = () => RIDE_KIT[ride] || RIDE_KIT.buggy;
+  const kit = () => RIDE_KIT[GS.ride] || RIDE_KIT.buggy;
   const kitDone = () => kit().every(t => abilities[t]);
   const abLv = { drill: 0, burrow: 0, grab: 0, jump: 0, doubleJump: 0, bomb: 0, decoy: 0, cubes: 0, trail: 0 };      // upgrades spent on each, 0..AB_LV_MAX
   // Loot: coins level the ride's skills, crystals level the guns and buy the level's ultimates. Coins pour out of everything that breaks or dies, with no ceiling.
   // Crystals are rare: bosses and log machines drop them, and the shop turns coins into them at a steep rate (SHOP.conv).
-  let coins = 0, gems = 0, lootId = 0, lootSfxT = 0; const loot = [], ult = { sword: 0, hands: 0 };
+  let lootSfxT = 0; GS.lootId = 0; GS.coins = 0; GS.gems = 0; const loot = [], ult = { sword: 0, hands: 0 };
   const coinGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.16, 18); coinGeo.rotateX(Math.PI / 2);
   const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc62e, metalness: 0.85, roughness: 0.28, emissive: 0x7a4a00 });
   const gemGeo = new THREE.OctahedronGeometry(0.62); gemGeo.scale(1, 1.5, 1);
@@ -2808,9 +2809,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     loot.push({ id, gem, x, y: 0.8, z, vx, vy, vz, m, t: 0, spin: Math.random() * 6 });
   }
   function dropCoins(at, nc, ng) {                           // host: scatter nc coins and ng crystals
-    if (NET.client || (inRoom(at.x, at.z) && !gateOpen)) return;
+    if (NET.client || (inRoom(at.x, at.z) && !GS.gateOpen)) return;
     const a = [], wide = Math.min(4, (nc + ng) * 0.12);
-    for (let i = 0; i < nc + ng; i++) { const an = Math.random() * 6.283, sp = 2.5 + Math.random() * (3.5 + wide), id = ++lootId, q = [id, i < nc ? 0 : 1, r1(at.x), r1(at.z), r1(Math.cos(an) * sp), r1(7 + Math.random() * 4), r1(Math.sin(an) * sp)];
+    for (let i = 0; i < nc + ng; i++) { const an = Math.random() * 6.283, sp = 2.5 + Math.random() * (3.5 + wide), id = ++GS.lootId, q = [id, i < nc ? 0 : 1, r1(at.x), r1(at.z), r1(Math.cos(an) * sp), r1(7 + Math.random() * 4), r1(Math.sin(an) * sp)];
       addLoot(id, q[1], q[2], q[3], q[4], q[5], q[6]); a.push(q); }
     if (a.length) { netEv({ t: 'loot', a }); SFX.play('loot', at, { vol: 0.5, rate: 1.4 }); }
     while (loot.length > LOOT.max) { const L = loot[0]; netEv({ t: 'lootx', i: L.id }); lootRemove(L); }      // the oldest pieces go when the field is full of them
@@ -2840,14 +2841,14 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         if (inRoom(q.x, q.z)) { L.x = q.x; L.z = q.z; } else { L.x = THREE.MathUtils.clamp(q.x, -ARENA + 2, ARENA - 2); L.z = THREE.MathUtils.clamp(q.z, -ARENA + 2, ARENA - 2); } }
       const d = Math.hypot(car.pos.x - L.x, car.pos.z - L.z);
       if (car.alive && L.t > 0.45 && d < LOOT.pull && d > 0.01) { const k = Math.min(1, (LOOT.pullV[0] + (LOOT.pullV[1] - LOOT.pullV[0]) * (1 - d / LOOT.pull)) * dt / d); L.x += (car.pos.x - L.x) * k; L.z += (car.pos.z - L.z) * k; }      // a strong magnet: no circling over the pile
-      L.m.position.set(L.x, L.y + (L.vy === 0 ? Math.sin(elapsed * 3 + L.id) * 0.15 : 0), L.z); L.m.rotation.y = L.spin + elapsed * (L.gem ? 2.2 : 4.5);
+      L.m.position.set(L.x, L.y + (L.vy === 0 ? Math.sin(GS.elapsed * 3 + L.id) * 0.15 : 0), L.z); L.m.rotation.y = L.spin + GS.elapsed * (L.gem ? 2.2 : 4.5);
       if (car.alive && L.t > 0.45 && d < 1.9) {
         spawnParticles(tmp.set(L.x, 1, L.z), L.gem ? 0x8ff4ff : 0xffd65a, 5, 5); scene.remove(L.m); loot.splice(i, 1);
         if (NET.client) netEv({ t: 'lootget', i: L.id }, NET.hostPeer); else { lootGain(L.gem); netEv({ t: 'lootx', i: L.id }); } }      // the host decides who got it: one piece, one owner
     }
   }
-  function lootGain(gem) { if (gem) gems++; else coins++; abSig = '';
-    if (elapsed - lootSfxT > 0.045) { lootSfxT = elapsed; SFX.play('pickup', null, { vol: 0.3, rate: gem ? 1.9 : 1.55 + Math.random() * 0.2 }); } }      // a handful at once must not be a wall of sound
+  function lootGain(gem) { if (gem) GS.gems++; else GS.coins++; GS.abSig = '';
+    if (GS.elapsed - lootSfxT > 0.045) { lootSfxT = GS.elapsed; SFX.play('pickup', null, { vol: 0.3, rate: gem ? 1.9 : 1.55 + Math.random() * 0.2 }); } }      // a handful at once must not be a wall of sound
   const abPrice = t => LOOT.abCost[abLv[t]], wPrice = k => LOOT.wCost[(weapons[k] - 1) >> 1];
   const AB_LV_MAX = 2, UP_MAX = 6, abMax = t => t === 'jump' ? 3 : AB_LV_MAX;      // the jump has three levels: it is the one skill every ride has, and each ride's does its own thing                         // ~6 upgrades a run against 12 possible levels (3 skills + 3 guns, 2 each): you pick a build
   let upPts = 0, upGot = 0;
@@ -2858,7 +2859,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
                     spider: ['landing scatters spiderlings that slow', 'more spiderlings, longer slow', 'the spiderlings blow up'],
                     halo: ['light spikes where you land', 'more spikes, they last longer', 'a field of tall spikes'],
                     unicorn: ['a small star ring on landing', 'more stars, further', 'a full starburst'] };
-  const upText = t => t === 'jump' ? JUMP_UP[ride] : UP_TEXT[t];
+  const upText = t => t === 'jump' ? JUMP_UP[GS.ride] : UP_TEXT[t];
   const AB_INFO = {
     drill:      { title: 'Drill',            key: 'auto',  hint: 'spins up by itself between nova pulses, grinds a 180° arc ahead', bg: '#ff8c32' },
     burrow:     { title: 'Mole',             key: 'RMB',   hint: 'RMB — dig in / pop out, biters scatter', bg: '#8a6a44' },
@@ -2997,9 +2998,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     const end = e => { for (const tc of e.changedTouches) if (tc.identifier === id) { id = null; el.classList.remove('down'); if (up) up(); } };
     el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
   }
-  let abSig = '';
+  GS.abSig = '';
   function buildAbBar() {
-    abDirty = false; abSig = ''; abBar.innerHTML = '';
+    abDirty = false; GS.abSig = ''; abBar.innerHTML = '';
     for (const t of kit()) {
       const d = document.createElement('div'); d.className = 'ab locked'; d.id = 'ab-' + t;
       d.innerHTML = `<b class="up">+</b><img src="${ICON_URLS[t]}" draggable="false"><span>${AB_INFO[t].key}</span><i class="lv"></i><i class="cdv"></i><i class="cost"></i>`;
@@ -3016,28 +3017,28 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     layoutTouch(); updateAbHud();
   }
   function upgradeAb(t) {
-    if (!abilities[t] || abLv[t] >= abMax(t) || coins < abPrice(t)) return;
-    coins -= abPrice(t); abLv[t]++;
+    if (!abilities[t] || abLv[t] >= abMax(t) || GS.coins < abPrice(t)) return;
+    GS.coins -= abPrice(t); abLv[t]++;
     toast(t, 'Lv ' + (abLv[t] + 1), upText(t)[abLv[t] - 1]); SFX.play('pickup', null, { rate: 1.3 });
     const el = document.getElementById('ab-' + t); if (el) { el.classList.remove('fresh'); void el.offsetWidth; el.classList.add('fresh'); }
     updateAbHud();
   }
   function updateAbHud() {
     if (abDirty) { buildAbBar(); return; }
-    const act = RIDE_ACTIVE[ride], bk = act && abilities[act] ? activeCdK() : 0;
-    const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + coins + '|' + gems + '|' + bk.toFixed(2);
-    if (sig === abSig) return; abSig = sig;
-    if (wUpSeen !== gems) { wUpSeen = gems; updateWeaponHUD(); }      // guns are levelled with crystals
+    const act = RIDE_ACTIVE[GS.ride], bk = act && abilities[act] ? activeCdK() : 0;
+    const sig = kit().map(t => (abilities[t] ? 1 : 0) + '' + abLv[t]).join() + '|' + GS.coins + '|' + GS.gems + '|' + bk.toFixed(2);
+    if (sig === GS.abSig) return; GS.abSig = sig;
+    if (GS.wUpSeen !== GS.gems) { GS.wUpSeen = GS.gems; updateWeaponHUD(); }      // guns are levelled with crystals
     for (const t of kit()) {
       const el = document.getElementById('ab-' + t); if (!el) continue;
       if (abilities[t] && el.classList.contains('locked')) { el.classList.remove('locked'); el.classList.add('fresh'); }
-      const open = abilities[t] && abLv[t] < abMax(t); el.classList.toggle('can', open && coins >= abPrice(t));
-      const ce = el.querySelector('.cost'); ce.textContent = open ? abPrice(t) + '●' : ''; ce.classList.toggle('ok', open && coins >= abPrice(t));
+      const open = abilities[t] && abLv[t] < abMax(t); el.classList.toggle('can', open && GS.coins >= abPrice(t));
+      const ce = el.querySelector('.cost'); ce.textContent = open ? abPrice(t) + '●' : ''; ce.classList.toggle('ok', open && GS.coins >= abPrice(t));
       el.querySelector('.lv').textContent = abLv[t] ? '★'.repeat(abLv[t]) : '';
       if (t === act) el.style.setProperty('--cd', bk.toFixed(2));
     }
     const tag = document.getElementById('wallet');
-    if (tag) tag.innerHTML = '<b class="c">● ' + coins + '</b><b class="g">◆ ' + gems + '</b>';
+    if (tag) tag.innerHTML = '<b class="c">● ' + GS.coins + '</b><b class="g">◆ ' + GS.gems + '</b>';
   }
   const toastEl = document.getElementById('toast'); let toastTimer = 0;
   function toast(type, extra, hint) {
@@ -3048,7 +3049,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   function applyAbilityVisuals() {
     drill.visible = abilities.drill; bullbar.visible = !abilities.drill;
     arm.visible = mast.visible = abilities.grab;
-    abSig = '';
+    GS.abSig = '';
   }
   applyAbilityVisuals();
   /* test-seam: debug registry */
@@ -3131,7 +3132,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         netEv({ t: 'pkx', id: p.id });
         if (!p.type.startsWith('w_') && !p.type.startsWith('x_') && p.type !== 'heal' && p.type !== 'upgrade' && abilities[p.type]) p.type = 'heal';      // already have that one: patch the ride up instead
         if (p.type === 'heal') car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.4);
-        else if (p.type === 'upgrade') { upPts++; upGot++; extra = upGot + '/' + UP_MAX; abSig = ''; }
+        else if (p.type === 'upgrade') { upPts++; upGot++; extra = upGot + '/' + UP_MAX; GS.abSig = ''; }
         else if (p.type.startsWith('x_')) fireToken(p.type);
         else if (p.type.startsWith('w_')) { gainWeapon(p.type); extra = '— level it up with upgrades'; }
         else { abilities[p.type] = true; applyAbilityVisuals(); crewSay('ability'); }
@@ -3153,13 +3154,13 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const wBar = document.getElementById('weapons');
   function updateWeaponHUD(fresh) {                      // fresh: the weapon that just changed pops
     wBar.innerHTML = W_ORDER.filter(k => weapons[k]).map(k =>
-      `<div class="wslot${k === fresh ? ' new' : ''}${weapons[k] < W_MAX && gems >= wPrice(k) ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + wLv(k)}</b>${weapons[k] < W_MAX ? `<i class="cost${gems >= wPrice(k) ? ' ok' : ''}">${wPrice(k)}◆</i>` : ''}</div>`).join('');
+      `<div class="wslot${k === fresh ? ' new' : ''}${weapons[k] < W_MAX && GS.gems >= wPrice(k) ? ' can' : ''}"><b class="up" data-k="${k}">+</b><img src="${ICON_URLS['w_' + k]}" draggable="false"><b>${weapons[k] >= W_MAX ? 'MAX' : 'Lv' + wLv(k)}</b>${weapons[k] < W_MAX ? `<i class="cost${GS.gems >= wPrice(k) ? ' ok' : ''}">${wPrice(k)}◆</i>` : ''}</div>`).join('');
   }
   { const spendW = e => { const u = e.target.closest && e.target.closest('.up'); if (!u) return; e.preventDefault(); e.stopPropagation();
-      const k = u.dataset.k; if (!weapons[k] || weapons[k] >= W_MAX || gems < wPrice(k)) return; gems -= wPrice(k); const lv = gainWeapon('w_' + k, true);
-      toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + wLv(k)); SFX.play('pickup', null, { rate: 1.3 }); abSig = ''; };
+      const k = u.dataset.k; if (!weapons[k] || weapons[k] >= W_MAX || GS.gems < wPrice(k)) return; GS.gems -= wPrice(k); const lv = gainWeapon('w_' + k, true);
+      toast('w_' + k, lv >= W_MAX ? 'MAX' : 'Lv ' + wLv(k)); SFX.play('pickup', null, { rate: 1.3 }); GS.abSig = ''; };
     wBar.addEventListener('mousedown', spendW); wBar.addEventListener('touchstart', spendW, { passive: false }); }
-  let wUpSeen = -1;
+  GS.wUpSeen = -1;
   function dropWeapon(at) {                                 // after the warm-up: now and then a one-shot token (gear itself only drops for you, from your own kills)
     const onGround = pickups.filter(p => p.type.startsWith('x_') && Math.hypot(p.x - at.x, p.z - at.z) < 45).length;
     if (onGround >= 2) return;
@@ -3181,7 +3182,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   // ---- nova: a ring of bullets ----
   const novaMat = glow(new THREE.MeshBasicMaterial({ color: 0x5ff5e6 }), 3.5);
-  let novaT = 0;
+  GS.novaT = 0;
   function fireNova() {
     const L = weapons.nova - 1, n = W_STATS.nova.n[L], o = new THREE.Vector3(car.pos.x, 1.0 + car.y, car.pos.z), ph = Math.random() * 6.283;
     for (let i = 0; i < n; i++) {
@@ -3231,9 +3232,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
         float a = max(inside, halo);
         gl_FragColor = vec4(col * a, 1.0) * alpha;
       }` });
-  const haloHoly = () => ride === 'halo' && beams.some(B => B.kind === 'halo' && !B.fx);
+  const haloHoly = () => GS.ride === 'halo' && beams.some(B => B.kind === 'halo' && !B.fx);
   const carSrc = { get pos() { return car.pos; }, h: () => car.heading, y: () => car.y, alive: () => car.alive && car.depth < 0.3 };
-  function fireBeams(src = carSrc, kind = ride, L = weapons.nova - 1, fx = false) {      // fx: somebody else's beams, shown but harmless
+  function fireBeams(src = carSrc, kind = GS.ride, L = weapons.nova - 1, fx = false) {      // fx: somebody else's beams, shown but harmless
     const dmg = W_STATS.nova.dmg[L];
     if (kind === 'halo') {                               // a ring of angelic swords; while they are out nothing can hurt the halo
       const n = HALO_SWORDS.n[L], len = HALO_SWORDS.len[L], ph = Math.random() * 6.283, dirs = [], mt = swordMat();
@@ -3264,7 +3265,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     for (let i = beams.length - 1; i >= 0; i--) {
       const B = beams[i]; B.t += dt;
       const a = Math.max(0, Math.min(1, B.t / 0.08) * Math.min(1, (B.T - B.t) / 0.25));           // snap on, fade off
-      for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = elapsed; }
+      for (const mt of B.mats) { mt.uniforms.alpha.value = a; mt.uniforms.time.value = GS.elapsed; }
       const S = B.src, fx = Math.sin(S.h()), fz = Math.cos(S.h()), alive = S.alive(), grow = Math.min(1, B.t / 0.1);
       for (const D of B.dirs) {
         let ang, ox = S.pos.x, oz = S.pos.z, oy;
@@ -3345,7 +3346,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
   const dodecaGeo = new THREE.DodecahedronGeometry(0.62, 0);
   const dodecaMats = RAINBOW.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, roughness: 0.3, metalness: 0.2, flatShading: true }));
   function trimSaws() {                                     // a level or the whole saw gun lost: fewer saws
-    const n = weapons.orbit ? W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1) : 0;
+    const n = weapons.orbit ? W_STATS.orbit.n[weapons.orbit - 1] * (GS.ride === 'halo' ? 2 : 1) : 0;
     while (saws.length > n) scene.remove(saws.pop().m);
   }
   function deathToll() {                                    // dying on the field costs a random upgrade level, or a random skill/gun when nothing is levelled
@@ -3355,7 +3356,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     if (lv.length) { const [kind, k] = pick(lv); if (kind === 'ab') abLv[k]--; else { weapons[k] -= 2; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'lost a level'];
     } else { const own = [...kit().filter(t => abilities[t] && t !== 'jump').map(t => ['ab', t]), ...W_ORDER.filter(k => weapons[k]).map(k => ['w', k])]; if (!own.length) return;
       const [kind, k] = pick(own); if (kind === 'ab') { abilities[k] = false; applyAbilityVisuals(); } else { weapons[k] = 0; trimSaws(); updateWeaponHUD(); } lost = [kind === 'ab' ? k : 'w_' + k, 'LOST']; }
-    abDirty = true; abSig = ''; toast(lost[0], lost[1]); lossFxStart(lost[0], lost[1] !== 'LOST');
+    abDirty = true; GS.abSig = ''; toast(lost[0], lost[1]); lossFxStart(lost[0], lost[1] !== 'LOST');
   }
   // what you lost pops out of the wreck, smoulders and breaks apart: whole icon for a skill or gun, a half-size one for a level
   const lossFx = [];
@@ -3396,9 +3397,9 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     }
   }
   function buildSaws() {
-    const n = W_STATS.orbit.n[weapons.orbit - 1] * (ride === 'halo' ? 2 : 1);
+    const n = W_STATS.orbit.n[weapons.orbit - 1] * (GS.ride === 'halo' ? 2 : 1);
     while (saws.length < n) {
-      const uni = ride === 'unicorn', m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[saws.length % dodecaMats.length] : sawMat); m.scale.setScalar(uni ? 1.1 : 1.4); m.castShadow = true; scene.add(m);
+      const uni = GS.ride === 'unicorn', m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[saws.length % dodecaMats.length] : sawMat); m.scale.setScalar(uni ? 1.1 : 1.4); m.castShadow = true; scene.add(m);
       if (uni) { saws.push({ m, pos: new THREE.Vector3() }); continue; }
       const glowRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.8, 16), glow(new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }), 2.5));
       glowRing.rotation.x = -Math.PI / 2; m.add(glowRing);
@@ -3413,12 +3414,12 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
     for (const o of obstacles) if (o.sawCd > 0) o.sawCd -= dt;
     if (boss.sawCd > 0) boss.sawCd -= dt;
     const L = weapons.orbit - 1, S = W_STATS.orbit, on = car.alive && car.depth < 0.3;
-    sawAngle += S.spd[L] * dt * (ride === 'halo' ? 1.86 : 1);
+    sawAngle += S.spd[L] * dt * (GS.ride === 'halo' ? 1.86 : 1);
     saws.forEach((s, i) => {
       const a = sawAngle + i / saws.length * Math.PI * 2;
       s.pos.set(car.pos.x + Math.sin(a) * S.r[L], 1.0 + car.y, car.pos.z + Math.cos(a) * S.r[L]);
       s.m.position.copy(s.pos); s.m.visible = on;
-      if (ride === 'unicorn') {                          // dodecahedra: no cutting, every monster they touch (cubes aside) is stunned for half a second
+      if (GS.ride === 'unicorn') {                          // dodecahedra: no cutting, every monster they touch (cubes aside) is stunned for half a second
         s.m.rotation.x += dt * 3; s.m.rotation.y += dt * 4; if (!on) return;
         for (const m of swarm) {
           if (m.dead || m.sawCd > 0) continue;
@@ -3502,7 +3503,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
       const p = tmp.set(s.to.x, 0.6, s.to.z);
       flash(p, 0xc79bff, s.R * 3.2, 0.4, 4); burst(p, 0x6a5a7a, 10, 2.6, 7, 0.5);
       spawnParticles(p, 0xb48cff, 18, 11); spawnParticles(p, 0x8a8a78, 10, 8);
-      shake = Math.max(shake, s.fx ? 0.2 : 0.5); SFX.play('blast', p);
+      GS.shake = Math.max(GS.shake, s.fx ? 0.2 : 0.5); SFX.play('blast', p);
       if (s.fx) continue;                                // someone else's shell: the bang without the damage
       for (const e of enemies) {
         if (e.dead || e.carried) continue;
@@ -3522,7 +3523,7 @@ import { ARENA, FIRE_RATE, W_STATS, W_ORDER, W_GEAR, SWORD_T, TUNE, UNI, BUG, RI
 
   function updateWeapons(dt) {
     const ready = car.alive && car.depth < 0.3;
-    if (weapons.nova) { novaT -= dt; if (novaT <= 0 && ready) { if (threatNear(20)) { novaT = W_STATS.nova.cd[weapons.nova - 1]; if (ride === 'halo') novaT = Math.max(2, novaT) + SWORD_T[weapons.nova - 1]; if (ride === 'halo' || ride === 'unicorn') fireBeams(); else if (ride === 'spider') fireWebs(); else fireNova(); } else novaT = 0.15; } }
+    if (weapons.nova) { GS.novaT -= dt; if (GS.novaT <= 0 && ready) { if (threatNear(20)) { GS.novaT = W_STATS.nova.cd[weapons.nova - 1]; if (GS.ride === 'halo') GS.novaT = Math.max(2, GS.novaT) + SWORD_T[weapons.nova - 1]; if (GS.ride === 'halo' || GS.ride === 'unicorn') fireBeams(); else if (GS.ride === 'spider') fireWebs(); else fireNova(); } else GS.novaT = 0.15; } }
     updateSaws(dt);
     updateBeams(dt);
     updateWebs(dt);
@@ -3958,14 +3959,14 @@ const MONSTERS = [
 
   const swarm = [], globs = [];
   const SW_CAP = 110;
-  let swId = 0; const swById = new Map(), SW_KEYS = Object.keys(SW_KINDS);
+  GS.swId = 0; const swById = new Map(), SW_KEYS = Object.keys(SW_KINDS);
   function spawnCritter(kind, x, z, variant, id) {
     const v = variant == null ? Math.floor(Math.random() * 3) : variant, K = SW_KINDS[kind], art = SW_ART[kind][v];
     const sprite = new THREE.Sprite(art.walk[0]); sprite.center.set(0.5, 0.03); sprite.scale.set(0.01, 0.01, 1); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(K.r * 2.6, 1, K.r * 2.2); scene.add(shadow);
     const m = { kind, K, art, sprite, shadow, pos: new THREE.Vector3(x, 0, z), vel: new THREE.Vector3(), hp: K.hp * (1 + 0.6 * (NET.on && NET.game ? Math.min(2, NET.remotes.size) : 0)), dead: false, awake: true, carried: false,
                 flash: 0, cd: 0.5, phase: Math.random() * 4, facing: 1, think: Math.random() * 0.3, prey: null, home: null, throwT: 0.4 + Math.random() * 2.2, cartFan: Math.random() < 0.5, spitT: 1 + Math.random() * 2, born: 0, sawCd: 0, r: K.r, swarm: true };
-    m.v = v; m.id = id == null ? ++swId : id; swById.set(m.id, m);
+    m.v = v; m.id = id == null ? ++GS.swId : id; swById.set(m.id, m);
     swarm.push(m);
     burst(tmp.set(x, 0.3, z), 0x8a7a6a, 2, 1.2, 2, 0.3);
     return m;
@@ -3978,17 +3979,17 @@ const MONSTERS = [
     spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7);
     flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false);
     SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
-    if (!NET.applying) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
+    if (!NET.applying) { GS.enemyKills++; ekillsEl.textContent = GS.enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
     waves.lastKill.copy(m.pos);
-    if (m.wb) { wbKilled++; if (m.wbLoot) { bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); } shake = Math.max(shake, 0.6); }
-    else if (m.mini && !NET.client) { if (PH.i > 0) dropWeapon(m.pos); shake = Math.max(shake, 0.4); }
+    if (m.wb) { GS.wbKilled++; if (m.wbLoot) { bossDrop(m.pos.x, m.pos.z); if (!NET.client) netEv({ t: 'bdrop', x: r1(m.pos.x), z: r1(m.pos.z) }); } GS.shake = Math.max(GS.shake, 0.6); }
+    else if (m.mini && !NET.client) { if (PH.i > 0) dropWeapon(m.pos); GS.shake = Math.max(GS.shake, 0.4); }
     if (!NET.client) lootFrom(m.rig ? 'rig' : m.wb ? 'wb' : m.mini ? 'mini' : m.K.heavy ? 'brute' : m.K.ranged || m.K.fly ? 'tough' : 'mob', m.pos.x, m.pos.z);
     if (m.K.split && !m.mini) for (const sd of [-1, 1]) { const c = spawnCritter(m.K.split, m.pos.x + sd * 0.7, m.pos.z + rand(-0.4, 0.4), m.v); c.home = m.home; c.vel.set(sd * 6, 0, rand(-3, 3)); }
   }
   function hitCritter(m, dmg, dir, push = 3) {
     if (m.dead) return;
     if (m.rig && RIG.tame) return;                         // for now the rigs can't be hurt
-    if (m.net) { m.flash = 0.08; m.myHit = elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
+    if (m.net) { m.flash = 0.08; m.myHit = GS.elapsed; netEv({ t: 'hit', i: m.id, d: Math.min(9999, dmg), x: dir ? r2(dir.x) : 0, z: dir ? r2(dir.z) : 0, p: push }, NET.hostPeer); return; }
     if (m.rig && push <= 3 && !(dir && dir.x * Math.sin(m.rig.rh) + dir.z * Math.cos(m.rig.rh) > 0.3)) dmg *= 0.4;      // the booth walls soak bullets and beams; the back window doesn't
     m.hp -= dmg; if (m.flash < -0.12) m.flash = 0.08;      // blinks under constant fire instead of staying lit
     if (dir && !m.rig) m.vel.addScaledVector(dir, push * (m.K.heavy ? 0.3 : 1));
@@ -4026,7 +4027,7 @@ const MONSTERS = [
     x.fillStyle = '#1b1421'; x.beginPath(); x.roundRect(0, 0, 256, 44, 12); x.fill();
     for (let i = 0; i < 3; i++) { x.fillStyle = i < left ? (left === 1 ? '#ff4a2a' : '#ffb03a') : '#4a3f48'; x.beginPath(); x.roundRect(8 + i * 81, 8, 77, 28, 7); x.fill(); }
     return srgbTex(c); });
-  let rigT = 8, rigOwed = 0;
+  GS.rigT = 8; GS.rigOwed = 0;
   function makeRig(m) {
     if (m.rig) return m; makeMini(m); m.hp *= 1.6; m.K = { ...m.K, heavy: true };
     const g = new THREE.Group(), box = (w, h, d, x, y, z, mat) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); b.position.set(x, y, z); b.castShadow = b.receiveShadow = true; g.add(b); return b; };
@@ -4078,9 +4079,9 @@ const MONSTERS = [
   function rigDirector(dt) {
     if (NET.client || startEl.isConnected || PH.brk > 0) return;
     const want = RIG.n[PHASES[PH.i].key] || 0, have = swarm.filter(m => m.rig && !m.dead).length;
-    if (PH.i === 0 && wbSpawned) { if (rigOwed > 0 && (rigT -= dt) <= 0) { rigT = 0.5; if (spawnRig()) rigOwed--; } return; }      // boss hunt: the rigs standing are targets, no more come (but there are at least two)
-    if (have >= want) { rigT = Math.max(rigT, 6); return; }
-    if ((rigT -= dt) <= 0) rigT = spawnRig() ? (have < want / 2 ? 9 : 16) : 1;
+    if (PH.i === 0 && GS.wbSpawned) { if (GS.rigOwed > 0 && (GS.rigT -= dt) <= 0) { GS.rigT = 0.5; if (spawnRig()) GS.rigOwed--; } return; }      // boss hunt: the rigs standing are targets, no more come (but there are at least two)
+    if (have >= want) { GS.rigT = Math.max(GS.rigT, 6); return; }
+    if ((GS.rigT -= dt) <= 0) GS.rigT = spawnRig() ? (have < want / 2 ? 9 : 16) : 1;
   }
   const angTo = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
   function rigAI(m, dt, T) {                                // host: crawl about its own patch, away from other rigs; stay on the plain
@@ -4098,7 +4099,7 @@ const MONSTERS = [
     if (Math.hypot(m.pos.x - ox, m.pos.z - oz) < sp * dt * 0.3) R.rh += 1.2 * dt;       // stuck on a rock: swing round
     m.pos.x = THREE.MathUtils.clamp(m.pos.x, -ARENA + 4, ARENA - 4); m.pos.z = THREE.MathUtils.clamp(m.pos.z, -ARENA + 4, ARENA - 4);
     const f = rigLog(m);                                      // the log mows monsters down too
-    for (const o of swarm) { if (o === m || o.dead || o.rig || o.wb || o.K.fly || (o.rigCd || 0) > elapsed) continue; if (rigDist(f, o.pos) < RIG.logR + o.r) { o.rigCd = elapsed + 0.8; hitCritter(o, o.mini ? 2 : 6, rigFling(f, o.pos).clone(), 16); o.stun = Math.max(o.stun || 0, 0.4); } }
+    for (const o of swarm) { if (o === m || o.dead || o.rig || o.wb || o.K.fly || (o.rigCd || 0) > GS.elapsed) continue; if (rigDist(f, o.pos) < RIG.logR + o.r) { o.rigCd = GS.elapsed + 0.8; hitCritter(o, o.mini ? 2 : 6, rigFling(f, o.pos).clone(), 16); o.stun = Math.max(o.stun || 0, 0.4); } }
   }
   function rigLog(m) { const a = m.rig.a; return { cx: m.pos.x, cz: m.pos.z, rx: Math.cos(a), rz: -Math.sin(a) }; }       // the log as a segment through the mast
   function rigDist(f, p) { const dx = p.x - f.cx, dz = p.z - f.cz, t = THREE.MathUtils.clamp(dx * f.rx + dz * f.rz, -RIG.half, RIG.half); return Math.abs(t) < RIG.mastR ? 99 : Math.hypot(dx - f.rx * t, dz - f.rz * t); }
@@ -4111,11 +4112,11 @@ const MONSTERS = [
     const R = m.rig;
     if (m.net && Math.hypot(m.vel.x, m.vel.z) > 0.5) R.rh += angTo(R.rh, Math.atan2(m.vel.x, m.vel.z)) * Math.min(1, 3 * dt);
     if (R.fall > 0) { R.fall -= dt; const y = Math.max(0, R.fall) * 26; R.g.position.set(m.pos.x, y, m.pos.z);
-      if (R.fall <= 0) { shake = Math.max(shake, Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40 ? 0.9 : 0.2); burst(tmp.set(m.pos.x, 0.5, m.pos.z), 0x8a7a64, 26, 4.5, 9, 0.6); SFX.play('tent_slam', m.pos);
+      if (R.fall <= 0) { GS.shake = Math.max(GS.shake, Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40 ? 0.9 : 0.2); burst(tmp.set(m.pos.x, 0.5, m.pos.z), 0x8a7a64, 26, 4.5, 9, 0.6); SFX.play('tent_slam', m.pos);
         if (car.alive && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < RIG.half + 1) rigToss(m, rigLog(m)); }
       return; }
-    R.a = (elapsed * RIG.spin + m.id * 1.7) % 6.283;        // spins on its own; each player is judged against what they see
-    const t = elapsed + m.id;                                                    // cartoon excavator: everything rattles, the cab bounces, the elite yanks levers
+    R.a = (GS.elapsed * RIG.spin + m.id * 1.7) % 6.283;        // spins on its own; each player is judged against what they see
+    const t = GS.elapsed + m.id;                                                    // cartoon excavator: everything rattles, the cab bounces, the elite yanks levers
     R.bob = Math.abs(Math.sin(t * 10)) * 0.14 + Math.abs(Math.sin(t * 23)) * 0.05;
     R.g.position.set(m.pos.x + Math.sin(t * 31) * 0.05, Math.abs(Math.sin(t * 13)) * 0.07, m.pos.z + Math.cos(t * 27) * 0.05);
     R.g.rotation.z = Math.sin(t * 8.3) * 0.025; R.g.rotation.x = Math.sin(t * 6.7) * 0.02;
@@ -4129,7 +4130,7 @@ const MONSTERS = [
     if (R.hp.scale.x > 7) R.hp.scale.set(Math.max(7, R.hp.scale.x - dt * 6), Math.max(1.2, R.hp.scale.y - dt * 1.05), 1);
     if (R.hits >= 1 && Math.random() < dt * 9) puff(tmp.set(m.pos.x + rand(-1.5, 1.5), RIG.top + 1.5, m.pos.z + rand(-1.5, 1.5)), 0x221e1c, 1.8, 1.1, rand(-0.5, 0.5), 3, rand(-0.5, 0.5));
     if (R.hits >= 2) { if (Math.random() < dt * 14) spawnParticles(tmp.set(m.pos.x + rand(-1.6, 1.6), RIG.top + 0.6, m.pos.z + rand(-1.6, 1.6)), Math.random() < 0.5 ? 0xff7a2a : 0xffc040, 2, 4); R.booth.rotation.z += 0.12; }
-    if ((R.hitCd -= dt) > 0 || elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
+    if ((R.hitCd -= dt) > 0 || GS.elapsed < (car.rigCd || 0) || !car.alive || car.burrow !== 'up' || car.y > 2.6) return;
     const f = rigLog(m);
     if (rigDist(f, car.pos) < RIG.logR + car.radius) { rigToss(m, f); return; }
     const bx = car.pos.x - m.pos.x, bz = car.pos.z - m.pos.z, bd = Math.hypot(bx, bz) || 1e-3;      // the base is solid
@@ -4139,22 +4140,22 @@ const MONSTERS = [
   function rigToss(m, f) {                                  // whack! up and away along the sweep
     const d = rigFling(f, car.pos);
     car.vel.x = d.x * 5; car.vel.z = d.z * 5; car.speed = 0;      // a short hop: the log passes under you while you're up
-    car.vy = 10; car.airborne = true; m.rig.hitCd = 1.0; car.rigCd = elapsed + 1.8;      // no chain of tosses from two logs
-    if (myTow) bombOff(bombs.find(B => B.id === myTow));      // the jolt throws the bomb off the cart
+    car.vy = 10; car.airborne = true; m.rig.hitCd = 1.0; car.rigCd = GS.elapsed + 1.8;      // no chain of tosses from two logs
+    if (GS.myTow) bombOff(bombs.find(B => B.id === GS.myTow));      // the jolt throws the bomb off the cart
     hurtCar(car.maxHp * 0.08, d.clone());
-    shake = Math.max(shake, 0.6); SFX.play('clang', car.pos, { rate: 0.8 }); spawnParticles(tmp.copy(car.pos).setY(1), 0xd8cfc0, 10, 8);
+    GS.shake = Math.max(GS.shake, 0.6); SFX.play('clang', car.pos, { rate: 0.8 }); spawnParticles(tmp.copy(car.pos).setY(1), 0xd8cfc0, 10, 8);
   }
   function rigBreak(m, quiet) {                             // the elite is dead: the rig falls apart
     const R = m.rig; if (!R || R.gone) return; R.gone = true; scene.remove(R.g); if (R.zone) scene.remove(R.zone); if (quiet) return;
     const p = tmp.set(m.pos.x, 1.2, m.pos.z);
     spawnParticles(p, 0x6b4a2a, 26, 13); spawnParticles(p, 0x8c8478, 14, 10); burst(p, 0x5a4a3a, 18, 4, 9, 0.6); flash(p, 0xffb060, 7, 0.3, 3, false);
     const f = rigLog(m); for (const sd of [-1, 1]) spawnParticles(tmp.set(f.cx + f.rx * sd * RIG.half * 0.6, 1.5, f.cz + f.rz * sd * RIG.half * 0.6), 0x6b4a2a, 14, 11);
-    if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 50) shake = Math.max(shake, 0.6);
+    if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 50) GS.shake = Math.max(GS.shake, 0.6);
     SFX.play('crate_break', m.pos, { rate: 0.6 }); SFX.play('clang', m.pos, { rate: 0.5 });
   }
   // ---- BOMBS: the only thing that breaks a rig. Drive into one and it pops onto your cart (half speed, full while a friend drives right next to you);
   //      bring it next to a rig and keep it there 5 s; it jumps onto the elite and goes off ----
-  const bombs = []; let bombId = 0, bombNetT = 0, myTow = 0, towCd = 0, bombSpawnT = 4;
+  const bombs = []; GS.bombSpawnT = 4; GS.towCd = 0; GS.bombNetT = 0; GS.bombId = 0; GS.myTow = 0;
   const bombGeo = new THREE.SphereGeometry(1.1, 16, 12), bombMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.35, metalness: 0.3 });
   const sparkMat = glow(new THREE.SpriteMaterial({ color: 0xffc040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 3);
   const bombNeckGeo = new THREE.CylinderGeometry(0.32, 0.36, 0.45, 10), bombFuseGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.7, 5), bombFuseMat = new THREE.MeshStandardMaterial({ color: 0xc8a878 });
@@ -4246,8 +4247,8 @@ const MONSTERS = [
     const go = e => { e.preventDefault(); e.stopPropagation(); useUlt(k); }; b.addEventListener('mousedown', go); b.addEventListener('touchstart', go, { passive: false }); }
   { const go = e => { e.preventDefault(); e.stopPropagation(); convertCoins(); }; convEl.addEventListener('mousedown', go); convEl.addEventListener('touchstart', go, { passive: false }); }
   for (const ev of ['pointerdown', 'click']) shopEl.addEventListener(ev, e => e.stopPropagation());
-  function convertCoins() { if (coins < SHOP.conv[0]) { SFX.play('hit_stone', null, { vol: 0.35, rate: 0.6 }); return; } coins -= SHOP.conv[0]; gems += SHOP.conv[1]; abSig = ''; SFX.play('pickup', null, { rate: 1.9, vol: 0.6 }); }
-  function buyUlt(k) { if (gems < SHOP.ult[k]) { SFX.play('hit_stone', null, { vol: 0.35, rate: 0.6 }); return false; } gems -= SHOP.ult[k]; ult[k]++; abSig = ''; SFX.play('pickup', null, { rate: 0.8 }); flashAlert(ULT_NAME[k] + ' READY'); return true; }
+  function convertCoins() { if (GS.coins < SHOP.conv[0]) { SFX.play('hit_stone', null, { vol: 0.35, rate: 0.6 }); return; } GS.coins -= SHOP.conv[0]; GS.gems += SHOP.conv[1]; GS.abSig = ''; SFX.play('pickup', null, { rate: 1.9, vol: 0.6 }); }
+  function buyUlt(k) { if (GS.gems < SHOP.ult[k]) { SFX.play('hit_stone', null, { vol: 0.35, rate: 0.6 }); return false; } GS.gems -= SHOP.ult[k]; ult[k]++; GS.abSig = ''; SFX.play('pickup', null, { rate: 0.8 }); flashAlert(ULT_NAME[k] + ' READY'); return true; }
   function useUlt(k) {                                     // a charge in hand fires; with none, the same press buys one
     if (startEl.isConnected || !car.alive) return;
     if (ult[k] <= 0) { buyUlt(k); return; }
@@ -4256,11 +4257,11 @@ const MONSTERS = [
   }
   function updateShop() {
     const show = !startEl.isConnected; if (shopEl.style.display !== (show ? 'flex' : 'none')) shopEl.style.display = show ? 'flex' : 'none'; if (!show) return;
-    const sig = coins + '|' + gems + '|' + ult.sword + '|' + ult.hands; if (sig === shopSig) return; shopSig = sig;
-    for (const b of shopEl.querySelectorAll('.ult')) { const k = b.dataset.u, n = ult[k], can = gems >= SHOP.ult[k];
+    const sig = GS.coins + '|' + GS.gems + '|' + ult.sword + '|' + ult.hands; if (sig === shopSig) return; shopSig = sig;
+    for (const b of shopEl.querySelectorAll('.ult')) { const k = b.dataset.u, n = ult[k], can = GS.gems >= SHOP.ult[k];
       b.classList.toggle('has', n > 0); b.classList.toggle('buy', !n && can); b.querySelector('.n').textContent = n > 0 ? '×' + n : '';
       b.querySelector('.act').innerHTML = n > 0 ? 'USE' : (can ? 'BUY ' : '') + '<span class="g">◆' + SHOP.ult[k] + '</span>'; }
-    convEl.classList.toggle('can', coins >= SHOP.conv[0]); convEl.innerHTML = '<span class="c">●' + SHOP.conv[0] + '</span> ➜ <span class="g">◆' + SHOP.conv[1] + '</span>';
+    convEl.classList.toggle('can', GS.coins >= SHOP.conv[0]); convEl.innerHTML = '<span class="c">●' + SHOP.conv[0] + '</span> ➜ <span class="g">◆' + SHOP.conv[1] + '</span>';
   }
   // -- ten hands --
   function ultKillAt(x, z, R) {                            // host: nothing inside the ring survives, log machines included
@@ -4283,14 +4284,14 @@ const MONSTERS = [
       if (it.st === 0) { it.st = 1; it.hand = makeHand2D(0.62); scene.add(it.hand); }
       if (it.st === 1) { const k = Math.min(1, t / U.fly), dist = 46 * Math.pow(1 - k, 2.2); handPose(it.hand, 0, 1 - k, 0, 'slap'); it.hand.position.set(it.x, 1.4, it.z).addScaledVector(handAxis, dist);      // the slap comes down
         if (k >= 1) { it.st = 2; tmp.set(it.x, 0.3, it.z); burst(tmp, 0x8a7a64, 10, 2.4, 6, 0.5); waveFx(it.x, it.z, 3.4, 0xfff4c8, 0.25); SFX.play('land', tmp, { vol: 0.55, rate: 1.1 + Math.random() * 0.4 });
-          if (Math.hypot(it.x - car.pos.x, it.z - car.pos.z) < 40) shake = Math.max(shake, 0.35);
+          if (Math.hypot(it.x - car.pos.x, it.z - car.pos.z) < 40) GS.shake = Math.max(GS.shake, 0.35);
           if (F.own) { if (NET.client) netEv({ t: 'blast', x: r1(it.x), z: r1(it.z), r: 3.6, d: 2, p: 10, s: 1 }, NET.hostPeer); else blastAt(it.x, it.z, 3.6, 2, 10, true); }
           const g = bombModel(); g.position.set(it.x, 0, it.z); scene.add(g); it.bomb = g; it.spark = g.spark; } }
       else if (it.st === 2) { const k = (t - U.fly - U.lift) / 0.32; if (k > 0) { handPose(it.hand, 1, k, 0, 'open'); it.hand.position.set(it.x, 1.4, it.z).addScaledVector(handAxis, 46 * k * k); }      // and whisks away, the bomb stays
         if (k >= 1) { scene.remove(it.hand); it.hand.material.dispose(); it.hand = null; it.st = 3; } }
       if (it.bomb) { const pulse = 1 + Math.max(0, F.t - F.boomT + U.fuse) / U.fuse * 0.25 * Math.abs(Math.sin(F.t * 26)); it.bomb.scale.setScalar(pulse); it.spark.scale.setScalar(0.7 + Math.random() * 0.8); } }
     if (!F.done && F.t >= F.boomT) { F.done = true; if (F.own) ultBoom(F);
-      SFX.play('boss_roar', tmp.set(F.x, 2, F.z), { rate: 1.3, vol: 0.6 }); if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) shake = Math.max(shake, 1.6);
+      SFX.play('boss_roar', tmp.set(F.x, 2, F.z), { rate: 1.3, vol: 0.6 }); if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) GS.shake = Math.max(GS.shake, 1.6);
       waveFx(F.x, F.z, U.R, 0xffa040, 0.45); waveFx(F.x, F.z, U.R * 0.6, 0xfff4c8, 0.3); }
     if (F.done) { let left = 0; for (let i = 0; i < F.items.length; i++) { const it = F.items[i]; if (!it.bomb) continue;      // the bombs go off one after another, fast
         if (F.t >= F.boomT + i * 0.045) { const p = tmp.set(it.x, 1.6, it.z); flash(p, 0xffa040, 16, 0.5, 8, false); spawnParticles(p, 0xff7a2a, 26, 16); spawnParticles(p, 0x2a2420, 14, 10); SFX.play('explode', p, { rate: 0.8 + Math.random() * 0.4, vol: 0.7 });
@@ -4327,7 +4328,7 @@ const MONSTERS = [
     const U = ULT.sword; F.t += dt; const g = F.g; let y = 0, lean = 0;
     if (F.t < U.fall) { const k = F.t / U.fall; y = 70 * (1 - k * k); lean = 0.18; }
     else { if (F.st === 0) { F.st = 1; tmp.set(F.x, 0.5, F.z); flash(tmp, 0xbfe9ff, 22, 0.5, 6); waveFx(F.x, F.z, U.R0, 0xffe27a, 0.4); waveFx(F.x, F.z, U.R0 * 0.55, 0xffffff, 0.25); burst(tmp, 0xc9a070, 30, 5, 12, 0.7);
-        SFX.play('boss_roar', tmp, { rate: 1.7, vol: 0.55 }); SFX.play('land', tmp, { vol: 0.9, rate: 0.6 }); if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) shake = Math.max(shake, 1.5); if (F.own) swordHits(F, U.R0, true); }
+        SFX.play('boss_roar', tmp, { rate: 1.7, vol: 0.55 }); SFX.play('land', tmp, { vol: 0.9, rate: 0.6 }); if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 80) GS.shake = Math.max(GS.shake, 1.5); if (F.own) swordHits(F, U.R0, true); }
       const t = F.t - U.fall - U.hold; y = -1.6; lean = -0.12;
       if (t > 0 && F.run < U.run) { const step = Math.min(U.run - F.run, U.speed * dt); F.run += step; F.x += F.dx * step; F.z += F.dz * step; lean = -0.42 + Math.sin(F.t * 40) * 0.03; y = -1.9 + Math.sin(F.t * 31) * 0.12;      // ploughing on
         if (Math.abs(F.x) > ARENA - 3 || Math.abs(F.z) > ARENA - 3) F.run = U.run;
@@ -4337,7 +4338,7 @@ const MONSTERS = [
             m.scale.set(w, 1, 2.1); m.rotation.y = Math.atan2(F.dx, F.dz); m.position.set(fx, yy, fz); scene.add(m); furrows.push({ m, t: 0, life, o: m.material.opacity }); }
           for (const sd of [-1, 1]) { tmp.set(fx + F.dz * sd * 1.6, 0.5, fz - F.dx * sd * 1.6); burst(tmp, 0xb8895e, 4, 2.2, 7, 0.55); }
           if (Math.random() < 0.5) SFX.play('land', tmp, { vol: 0.25, rate: 1.6 + Math.random() * 0.5 }); }
-        if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 50) shake = Math.max(shake, 0.3); }
+        if (Math.hypot(F.x - car.pos.x, F.z - car.pos.z) < 50) GS.shake = Math.max(GS.shake, 0.3); }
       if (F.run >= U.run) { F.out = (F.out || 0) + dt; const k = F.out / U.out; y = -1.9 + 60 * k * k; g.scale.setScalar(Math.max(0.01, 1 - k * 0.6)); if (k >= 1) { scene.remove(g); return true; } } }
     g.position.set(F.x, y, F.z); g.rotation.set(F.dz * lean, 0, -F.dx * lean);      // leaning into its path
     return false;
@@ -4348,7 +4349,7 @@ const MONSTERS = [
     for (let i = furrows.length - 1; i >= 0; i--) { const f = furrows[i]; f.t += dt; f.m.material.opacity = f.o * Math.max(0, 1 - f.t / f.life); if (f.t >= f.life) { scene.remove(f.m); f.m.material.dispose(); furrows.splice(i, 1); } }
     updateShop();
   }
-  function dropBomb(B) { if (B.gone) return; B.gone = true; scene.remove(B.g); if (B.drop) scene.remove(B.drop.hand); bombs.splice(bombs.indexOf(B), 1); if (myTow === B.id) myTow = 0; }
+  function dropBomb(B) { if (B.gone) return; B.gone = true; scene.remove(B.g); if (B.drop) scene.remove(B.drop.hand); bombs.splice(bombs.indexOf(B), 1); if (GS.myTow === B.id) GS.myTow = 0; }
   function bombSpot(m) {                                   // a bomb lies 30-40 m from the rig it is meant for
     for (let i = 0; i < 30; i++) { const a = Math.random() * 6.283, d = 30 + Math.random() * 10, x = m.pos.x + Math.cos(a) * d, z = m.pos.z + Math.sin(a) * d;
       if (Math.abs(x) > ARENA - 6 || Math.abs(z) > ARENA - 6 || inRoom(x, z) || obstacles.some(o => active(o) && Math.hypot(o.mesh.position.x - x, o.mesh.position.z - z) < 5)) continue;
@@ -4358,34 +4359,34 @@ const MONSTERS = [
   function bombRefill(by, m) {                              // host: a hit! the glove brings the next bomb right to the thrower, just outside the log's reach
     const bx = by ? by[0] : m.pos.x + 20, bz = by ? by[1] : m.pos.z; let dx = bx - m.pos.x, dz = bz - m.pos.z; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
     const r = Math.max(d + 9, RIG.half + 3.5), x = THREE.MathUtils.clamp(m.pos.x + dx * r, -ARENA + 6, ARENA - 6), z = THREE.MathUtils.clamp(m.pos.z + dz * r, -ARENA + 6, ARENA - 6);
-    addBomb(++bombId, Math.round(x), Math.round(z), true); bombSpawnT = 8;
+    addBomb(++GS.bombId, Math.round(x), Math.round(z), true); GS.bombSpawnT = 8;
   }
   function carrierOf(B) {                                   // whose cart this bomb rides on: where that cart is
-    if (myTow === B.id && car.alive) return cart.pos;
+    if (GS.myTow === B.id && car.alive) return cart.pos;
     for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) return R.cpos;
     return null;
   }
   function bombOff(B) {                                     // knocked off my cart: it rolls off where the cart is
-    myTow = 0; towCd = 2; if (!B) return; B.x = B.tx = cart.pos.x; B.z = B.tz = cart.pos.z;
+    GS.myTow = 0; GS.towCd = 2; if (!B) return; B.x = B.tx = cart.pos.x; B.z = B.tz = cart.pos.z;
     for (let i = 0; i < 4; i++) puff(tmp.set(cart.pos.x + rand(-1, 1), 1, cart.pos.z + rand(-1, 1)), 0xe8e0d0, 1.4, 0.6, rand(-2, 2), 2, rand(-2, 2));
   }
   function bombBoom(B, m) {                                // everybody: the bomb hops onto the elite and blows the rig apart
-    if (myTow === B.id) myTow = 0;
+    if (GS.myTow === B.id) GS.myTow = 0;
     const sx = B.x, sz = B.z, tx = m ? m.pos.x : B.x, tz = m ? m.pos.z : B.z; B.g.visible = true; B.num.visible = false; B.g.scale.setScalar(1);
     B.leap = { t: 0, sx, sz, tx, tz };
   }
   function updateBombs(dt) {
     if (startEl.isConnected) return;
-    if ((towCd -= dt) < 0) towCd = 0;
+    if ((GS.towCd -= dt) < 0) GS.towCd = 0;
     const rigs = swarm.filter(m => m.rig && !m.dead && !m.rig.gone);
     if (!NET.client) {                                     // host: a bomb for every rig; drag physics; the hold count; the bang
-      if (rigs.length > bombs.length && (bombSpawnT -= dt) <= 0) { bombSpawnT = 3;
-        const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++bombId, sp[0], sp[1], true); }
+      if (rigs.length > bombs.length && (GS.bombSpawnT -= dt) <= 0) { GS.bombSpawnT = 3;
+        const m = rigs[Math.floor(Math.random() * rigs.length)], sp = bombSpot(m); if (sp) addBomb(++GS.bombId, sp[0], sp[1], true); }
       for (const B of bombs.slice()) { if (B.leap || B.fly) continue;
         const C = carrierOf(B); B.n = C ? 1 : 0; if (C) { B.x = C.x; B.z = C.z; }
         if (!rigs.length && !C) dropBomb(B);
       }
-      if ((bombNetT -= dt) <= 0 && NET.on && NET.game) { bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), B.fly ? 1 : B.drop && B.drop.t < HAND.arrive ? 2 : 0, B.n]) }); }
+      if ((GS.bombNetT -= dt) <= 0 && NET.on && NET.game) { GS.bombNetT = 0.1; netEv({ t: 'bm', b: bombs.filter(B => !B.leap).map(B => [B.id, r1(B.x), r1(B.z), B.fly ? 1 : B.drop && B.drop.t < HAND.arrive ? 2 : 0, B.n]) }); }
     } else for (const B of bombs) if (!B.leap && !B.n && !B.fly) { const k = 1 - Math.exp(-10 * dt); B.x += (B.tx - B.x) * k; B.z += (B.tz - B.z) * k; }
     // everybody: grab, draw, ropes
     for (const B of bombs.slice()) {
@@ -4393,7 +4394,7 @@ const MONSTERS = [
         B.g.position.set(L.sx + (L.tx - L.sx) * k, Math.sin(k * Math.PI) * 9 + k * RIG.top, L.sz + (L.tz - L.sz) * k); B.g.rotation.z += dt * 9;
         if (k >= 1) { const p = tmp.set(L.tx, RIG.top, L.tz);
           flash(p, 0xffa040, 22, 0.6, 9, false); spawnParticles(p, 0xff7a2a, 40, 18); spawnParticles(p, 0x2a2420, 24, 12); burst(tmp.set(L.tx, 0.6, L.tz), 0x4a3a2a, 30, 6, 12, 0.7);
-          SFX.play('boss_roar', p, { rate: 1.6, vol: 0.5 }); SFX.play('crate_break', p, { rate: 0.4 }); if (Math.hypot(L.tx - car.pos.x, L.tz - car.pos.z) < 70) shake = Math.max(shake, 1.2);
+          SFX.play('boss_roar', p, { rate: 1.6, vol: 0.5 }); SFX.play('crate_break', p, { rate: 0.4 }); if (Math.hypot(L.tx - car.pos.x, L.tz - car.pos.z) < 70) GS.shake = Math.max(GS.shake, 1.2);
           if (!NET.client) { const m = B.rigM; if (m && !m.dead) { m.rig.hits = (m.rig.hits || 0) + 1; netEv({ t: 'righit', m: m.id, n: m.rig.hits }); flashAlert(m.rig.hits >= 3 ? 'LOG MACHINE DOWN!' : 'HIT ' + m.rig.hits + '/3'); if (m.rig.hits >= 3) killCritter(m); else bombRefill(B.by, m); }
             blastAt(L.tx, L.tz, 10, 6, 24, true); }
           dropBomb(B); }
@@ -4409,22 +4410,22 @@ const MONSTERS = [
           burst(tmp.set(F.x, 0.4, F.z), 0x8a7a64, 10, 2.5, 6, 0.5); SFX.play('land', tmp, { vol: 0.6 }); if (F.own && NET.client) netEv({ t: 'bml', i: B.id, x: r1(F.x), z: r1(F.z) }, NET.hostPeer); }
         continue; }
       if (B.drop && handTick(B, dt)) { B.spark.scale.setScalar(0.5 + Math.random() * 0.5); continue; }      // still in the glove: nobody can take it yet
-      let ride_ = null; if (myTow === B.id) ride_ = [cart.pos, (ride === 'spider' ? 0 : car.y * 0.8)]; else for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) ride_ = [R.cpos, R.pos.y || 0];
-      if (ride_) { B.x = ride_[0].x; B.z = ride_[0].z; B.g.position.set(B.x, 1.0 + ride_[1] + Math.abs(Math.sin(elapsed * 11 + B.id)) * 0.12, B.z); B.g.scale.setScalar(0.8); B.g.rotation.set(Math.sin(elapsed * 9) * 0.15, 0, Math.sin(elapsed * 7) * 0.15); }
+      let ride_ = null; if (GS.myTow === B.id) ride_ = [cart.pos, (GS.ride === 'spider' ? 0 : car.y * 0.8)]; else for (const R of NET.remotes.values()) if (R.up && R.tw === B.id) ride_ = [R.cpos, R.pos.y || 0];
+      if (ride_) { B.x = ride_[0].x; B.z = ride_[0].z; B.g.position.set(B.x, 1.0 + ride_[1] + Math.abs(Math.sin(GS.elapsed * 11 + B.id)) * 0.12, B.z); B.g.scale.setScalar(0.8); B.g.rotation.set(Math.sin(GS.elapsed * 9) * 0.15, 0, Math.sin(GS.elapsed * 7) * 0.15); }
       else { B.g.position.set(B.x, 0, B.z); B.g.scale.setScalar(1); B.g.rotation.set(0, 0, 0); }
       B.spark.scale.setScalar(0.5 + Math.random() * 0.5);
-      if (!myTow && !towCd && !B.n && !(B.drop && B.drop.t < HAND.arrive + HAND.hold) && car.alive && car.burrow === 'up' && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || (cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab))) {
-        myTow = B.id; B.n = 1; if (!cart.shown) { cart.shown = true; cartReset(); }
+      if (!GS.myTow && !GS.towCd && !B.n && !(B.drop && B.drop.t < HAND.arrive + HAND.hold) && car.alive && car.burrow === 'up' && car.y < 1.5 && (Math.hypot(car.pos.x - B.x, car.pos.z - B.z) < TNT.grab || (cart.shown && Math.hypot(cart.pos.x - B.x, cart.pos.z - B.z) < TNT.grab))) {
+        GS.myTow = B.id; B.n = 1; if (!cart.shown) { cart.shown = true; cartReset(); }
         for (let i = 0; i < 7; i++) puff(tmp.set(B.x + rand(-1.2, 1.2), 0.8 + Math.random(), B.z + rand(-1.2, 1.2)), 0xf0ead8, 1.6, 0.7, rand(-2.5, 2.5), 2.5, rand(-2.5, 2.5));
         SFX.play('clang', car.pos, { rate: 1.4 }); SFX.play('pickup', car.pos, { vol: 0.6 }); flashAlert('BOMB! JUMP TO THROW'); }
     }
-    if (myTow && (!car.alive || car.burrow !== 'up')) bombOff(bombs.find(B => B.id === myTow));      // wrecked or gone underground: the bomb rolls off
-    if (myTow && !bombs.some(B => B.id === myTow && !B.leap)) myTow = 0;
+    if (GS.myTow && (!car.alive || car.burrow !== 'up')) bombOff(bombs.find(B => B.id === GS.myTow));      // wrecked or gone underground: the bomb rolls off
+    if (GS.myTow && !bombs.some(B => B.id === GS.myTow && !B.leap)) GS.myTow = 0;
     for (const m of rigs) { const R = m.rig; if (!R.zone) { R.zone = new THREE.Mesh(new THREE.RingGeometry(TNT.near + 1, TNT.far - 1, 72), new THREE.MeshBasicMaterial({ color: 0xff5a3a, transparent: true, opacity: 0, depthWrite: false })); R.zone.geometry.rotateX(-Math.PI / 2); scene.add(R.zone); }
-      R.zone.visible = !!myTow; if (myTow) { R.zone.position.set(m.pos.x, 0.06, m.pos.z); R.zone.material.opacity = 0.16 + Math.sin(elapsed * 6) * 0.08; } }      // throw from inside this band
+      R.zone.visible = !!GS.myTow; if (GS.myTow) { R.zone.position.set(m.pos.x, 0.06, m.pos.z); R.zone.material.opacity = 0.16 + Math.sin(GS.elapsed * 6) * 0.08; } }      // throw from inside this band
   }
   function throwBomb() {                                    // jump with the bomb aboard: the cart flings it forward in a high lob; drop it into a booth and it goes off
-    const B = bombs.find(B => B.id === myTow); if (!B) { myTow = 0; return; }
+    const B = bombs.find(B => B.id === GS.myTow); if (!B) { GS.myTow = 0; return; }
     const h = car.heading, fx = Math.sin(h), fz = Math.cos(h), x = cart.pos.x, z = cart.pos.z, y = 1.4 + car.y * 0.8;
     const tUp = TNT.vy / TNT.g, tHit = tUp + Math.sqrt(Math.max(0, 2 * (y + TNT.vy * TNT.vy / (2 * TNT.g) - RIG.top - 0.8) / TNT.g));      // when the lob comes down through booth height
     let vh = 13, dx = fx, dz = fz;
@@ -4432,13 +4433,13 @@ const MONSTERS = [
       const ex = m.pos.x - x, ez = m.pos.z - z, d = Math.hypot(ex, ez); if (d < TNT.near || d > TNT.far) continue;
       if ((ex * fx + ez * fz) / d < Math.cos(TNT.aim)) continue; dx = ex / d; dz = ez / d; vh = d / tHit; break; }
     const vx = dx * vh + car.vel.x * 0.3, vz = dz * vh + car.vel.z * 0.3;
-    myTow = 0; towCd = 1; B.n = 0; B.fly = { x, y, z, vx, vy: TNT.vy, vz, own: true };
+    GS.myTow = 0; GS.towCd = 1; B.n = 0; B.fly = { x, y, z, vx, vy: TNT.vy, vz, own: true };
     netEv({ t: 'bmt', i: B.id, x: r1(x), y: r1(y), z: r1(z), vx: r2(vx), vy: TNT.vy, vz: r2(vz) });
     if (!car.airborne) { car.vy = JUMP_V * 0.75; car.airborne = true; }
     for (let i = 0; i < 5; i++) puff(tmp.set(x + rand(-1, 1), 1, z + rand(-1, 1)), 0xf0ead8, 1.4, 0.6, rand(-2, 2), 3, rand(-2, 2));
     SFX.play('jump', car.pos, { rate: 0.8 }); SFX.play('clang', cart.pos, { rate: 1.2 });
   }
-  const towK = () => { if (!myTow) return 1; for (const R of NET.remotes.values()) if (R.up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < TNT.help) return 1; return 0.5; };      // a friend right alongside helps push
+  const towK = () => { if (!GS.myTow) return 1; for (const R of NET.remotes.values()) if (R.up && Math.hypot(R.pos.x - car.pos.x, R.pos.z - car.pos.z) < TNT.help) return 1; return 0.5; };      // a friend right alongside helps push
   function spawnMinis(n, x, z, gate) {
     for (let i = 0; i < n; i++) { const a = i / n * 6.283 + Math.random(), d = 3 + Math.random() * 3 + (n > 3 ? 4 : 0);
       makeMini(spawnCritter(MINI_KINDS[Math.floor(Math.random() * MINI_KINDS.length)], THREE.MathUtils.clamp(x + Math.cos(a) * d, -ARENA + 3, ARENA - 3), THREE.MathUtils.clamp(z + Math.sin(a) * d, -ARENA + 3, ARENA - 3)), gate); }
@@ -4548,7 +4549,7 @@ const MONSTERS = [
   const swA = new THREE.Vector3();
   function updateSwarm(dt) {
     // director: no waves during the boss fight, inside the boss room, or while dead
-    const calm = !waveTargets().length || (!gateOpen && (boss.state === 'fight' || boss.state === 'emerging')) || angel.on;      // nobody out in the open: no waves
+    const calm = !waveTargets().length || (!GS.gateOpen && (boss.state === 'fight' || boss.state === 'emerging')) || angel.on;      // nobody out in the open: no waves
     let alive = 0, mob = 0;
     for (const m of swarm) if (!m.dead) { if (!m.home && !m.rig) alive++; if (!m.K.ranged && Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 15) mob++; }
     waves.alive = alive;
@@ -4600,7 +4601,7 @@ const MONSTERS = [
         }
         else if (!seen) { tx = -nx * K.speed * 0.8; tz = -nz * K.speed * 0.8; }            // car went underground: scatter
         else if (inRoom(T.pos.x, T.pos.z) !== inRoom(m.pos.x, m.pos.z)) {
-          if (!gateOpen) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is sealed: loiter
+          if (!GS.gateOpen) { tx = Math.sin(m.phase * 0.3) * 2; tz = Math.cos(m.phase * 0.3) * 2; }   // boss arena is sealed: loiter
           else { const inside = inRoom(m.pos.x, m.pos.z), gz = THREE.MathUtils.clamp(m.pos.z, -GATE_HZ + 2.5, GATE_HZ - 2.5), lined = Math.abs(m.pos.z) < GATE_HZ - 1.5 && Math.abs(m.pos.x - ARENA) < 6;
             const gx = lined ? (inside ? ARENA - 6 : ARENA + 6) : (inside ? ARENA + 4 : ARENA - 4), ex = gx - m.pos.x, ez = gz - m.pos.z, ed = Math.hypot(ex, ez) || 1;   // through the gate, not into the wall
             tx = ex / ed * K.speed; tz = ez / ed * K.speed; } }
@@ -4647,7 +4648,7 @@ const MONSTERS = [
         }
         if (!dazed && !m.rig && seen && dist < 45 && (m.throwT -= dt) <= 0 && dist < 26) {      // the timer runs on the way in, so a pack arrives already shooting      // every kind has a shot of its own: straight, fan or ring
           const pat = MOB_PAT[m.kind] || 0;
-          if (mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
+          if (GS.mobShots > 44 || (pat === 2 && dist > 13)) m.throwT = 0.5 + Math.random() * 0.8;      // too much in the air already, or a ring would not reach
           else { m.throwT = (pat === 2 ? 4.5 : pat === 1 ? 3.6 : 2.8) + Math.random() * 2.5;
           mobThrow(m, nx, nz, dist, pat); netEv({ t: 'fx', k: 'th', i: m.id, x: r2(nx), z: r2(nz), d: r1(dist), p: pat }); }
 
@@ -4663,10 +4664,10 @@ const MONSTERS = [
       }
       if (m.rig) rigTick(m, dt);
       if (m.seq && !(m.stun > 0)) miniSeq(m, dt);
-      if (m.fire) { const fl = 1 + 0.18 * Math.sin(elapsed * 17 + m.id); m.fire.scale.set(0.5 * (2 - fl), 0.36 * fl, 1); }
+      if (m.fire) { const fl = 1 + 0.18 * Math.sin(GS.elapsed * 17 + m.id); m.fire.scale.set(0.5 * (2 - fl), 0.36 * fl, 1); }
       { const st = m.net ? (m.stunVis = Math.max(0, (m.stunVis || 0) - dt)) > 0 : m.stun > 0;      // stars circle a stunned head
         if (st && !m.stars) { m.stars = new THREE.Sprite(starsMat()); m.stars.renderOrder = 6; scene.add(m.stars); }
-        if (m.stars) { m.stars.visible = st; if (st) { const s = K.size * 0.75; m.stars.position.set(m.pos.x, (K.fly || 0) + K.size * 1.02, m.pos.z); m.stars.scale.set(s, s * 0.5, 1); m.stars.material.rotation = Math.sin(elapsed * 7) * 0.35; } } }
+        if (m.stars) { m.stars.visible = st; if (st) { const s = K.size * 0.75; m.stars.position.set(m.pos.x, (K.fly || 0) + K.size * 1.02, m.pos.z); m.stars.scale.set(s, s * 0.5, 1); m.stars.material.rotation = Math.sin(GS.elapsed * 7) * 0.35; } } }
       // draw: walk cycle, face the way it moves, hop a little, pop in when spawned
       m.phase += dt * (2.5 + Math.hypot(m.vel.x, m.vel.z) * 0.45);
       const f = Math.floor(m.phase) % SW_FRAMES;
@@ -4758,12 +4759,12 @@ const MONSTERS = [
     const m = new THREE.SpriteMaterial({ map: srgbTex(cv), transparent: true, alphaTest: 0.35 }); m.color.setScalar(0.5); return m;
   }));
   const chubs = [];
-  let chubEaten = 0, chubSpawnT = 4, chubTick = 0;
+  GS.chubTick = 0; GS.chubSpawnT = 4; GS.chubEaten = 0;
   const cartNEl = document.getElementById('cartN'), eatNEl = document.getElementById('eatN');
   const chubVulnerable = c => !c.dead && !angel.on && (c.state === 'roam' || c.state === 'flee' || c.state === 'tocar' || c.state === 'dazed');
   const carOK = () => car.alive && car.depth < 0.3 && car.y < 1;
   function perchSlot(rock) { const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * rock.top * 0.62; return new THREE.Vector3(rock.mesh.position.x + Math.cos(a) * d, rock.h, rock.mesh.position.z + Math.sin(a) * d); }
-  let chubId = 0;
+  GS.chubId = 0;
   function spawnChub(rock, perched) {
     const sprite = new THREE.Sprite(chubMats[0][0]); sprite.center.set(0.5, 0.04); scene.add(sprite);
     const shadow = new THREE.Mesh(swShadowGeo, swShadowMat); shadow.scale.set(1, 1, 0.8); scene.add(shadow);
@@ -4771,7 +4772,7 @@ const MONSTERS = [
                 goal: new THREE.Vector3(), from: new THREE.Vector3(), to: new THREE.Vector3(), T: 1, arcH: 1, next: 'roam', face: 1, calm: 0, dead: false, threat: 99 };
     if (perched) { c.pos.copy(perchSlot(rock)); c.state = 'perch'; }
     else { const a = Math.random() * 6.283, d = rock.r + 2 + Math.random() * 5; c.pos.set(rock.mesh.position.x + Math.cos(a) * d, 0, rock.mesh.position.z + Math.sin(a) * d); c.goal.copy(c.pos); }
-    c.id = ++chubId; chubs.push(c); return c;
+    c.id = ++GS.chubId; chubs.push(c); return c;
   }
   function monsterDist(x, z) {                         // distance to the nearest thing with teeth
     let best = 99;
@@ -4800,7 +4801,7 @@ const MONSTERS = [
     tmp.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
     spawnParticles(tmp, 0x4f9dff, 10, 7); spawnParticles(tmp, 0xffffff, 4, 5);
     SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 });
-    chubEaten++; eatNEl.textContent = chubEaten; if (!NET.client) netEv({ t: 'eat', x: r1(c.pos.x), z: r1(c.pos.z) });
+    GS.chubEaten++; eatNEl.textContent = GS.chubEaten; if (!NET.client) netEv({ t: 'eat', x: r1(c.pos.x), z: r1(c.pos.z) });
     if (Math.hypot(c.pos.x - car.pos.x, c.pos.z - car.pos.z) < 30) crewSay('eaten', 0.5);
   }
 
@@ -4829,11 +4830,11 @@ const MONSTERS = [
     crewSay('chub', 0.6);
   }
   function cartReset() { const h = car.heading; cart.pos.set(car.pos.x - Math.sin(h) * (2.45 + CART_L), 0, car.pos.z - Math.cos(h) * (2.45 + CART_L)); cart.heading = cart.prevH = h; cart.phi = cart.phiV = 0; }
-  const safeKeeps = () => ride === 'buggy' && Math.random() < 0.5;      // the steel churn: only half of knocks and bites get a chubzik
+  const safeKeeps = () => GS.ride === 'buggy' && Math.random() < 0.5;      // the steel churn: only half of knocks and bites get a chubzik
   function safeClang() { SFX.play('clang', cart.pos, { vol: 0.45, rate: 1.4 }); spawnParticles(tmp.set(cart.pos.x, 1.6, cart.pos.z), 0xffd27a, 5, 5); }
   const safeCount = n => { let k = 0; for (let i = 0; i < n; i++) if (!safeKeeps()) k++; if (k < n) safeClang(); return k; };
   let spillT = 0;
-  function cartSpill(n) { if (elapsed < spillT || !cart.riders.length) return; spillT = elapsed + 0.6; cartFling(safeCount(n), 0); }   // a hard knock shakes a few out
+  function cartSpill(n) { if (GS.elapsed < spillT || !cart.riders.length) return; spillT = GS.elapsed + 0.6; cartFling(safeCount(n), 0); }   // a hard knock shakes a few out
   function cartFling(n, side) {
     for (let i = 0; i < n && cart.riders.length; i++) {
       const c = cart.riders.pop(), h = cart.heading, s = side || (Math.random() < 0.5 ? -1 : 1), lat = rand(4, 8) * s, back = rand(0, 4);
@@ -4857,26 +4858,26 @@ const MONSTERS = [
     const speed = Math.hypot(car.vel.x, car.vel.z);
     const lat = THREE.MathUtils.clamp(dh / Math.max(dt, 1e-3) * Math.max(speed, 6), -110, 110);
     // sway: a spring that gets less damped and harder driven as the cart fills up; at speed a full cart fishtails on its own
-    const drive = lat * 0.085 * (1 + n * 0.12) + (speed > 12 ? Math.sin(elapsed * 7.3) * n * 0.7 * Math.min(1, (speed - 12) / 12) : 0);
+    const drive = lat * 0.085 * (1 + n * 0.12) + (speed > 12 ? Math.sin(GS.elapsed * 7.3) * n * 0.7 * Math.min(1, (speed - 12) / 12) : 0);
     cart.phiV += (-42 * cart.phi - 5.5 / (1 + n * 0.22) * cart.phiV + drive) * dt;
     cart.phi = THREE.MathUtils.clamp(cart.phi + cart.phiV * dt, -0.75, 0.75);
     const over = Math.abs(cart.phi) - 0.33;
     if (!car.alive && n) cartFling(n, 0);
     const up = car.alive && car.depth < 0.5;
     cartG.visible = up;
-    cartG.position.set(cart.pos.x, (ride === 'spider' ? 0 : car.y * 0.8) - car.depth * 3, cart.pos.z);   // the cart cannot climb
+    cartG.position.set(cart.pos.x, (GS.ride === 'spider' ? 0 : car.y * 0.8) - car.depth * 3, cart.pos.z);   // the cart cannot climb
     { // the spider's bug faces the way it is actually running, a wheeled cart points at its hitch
       const vx = (cart.pos.x - cart.prevX) / Math.max(dt, 1e-3), vz = (cart.pos.z - cart.prevZ) / Math.max(dt, 1e-3); cart.prevX = cart.pos.x; cart.prevZ = cart.pos.z;
       if (Math.hypot(vx, vz) > 2) { const d = Math.atan2(vx, vz) - cart.vis; cart.vis += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-9 * dt)); }
-      cartG.rotation.y = (ride === 'spider' ? cart.vis : cart.heading) + cart.phi * 0.35; }
+      cartG.rotation.y = (GS.ride === 'spider' ? cart.vis : cart.heading) + cart.phi * 0.35; }
     cartBody.rotation.z = cart.phi; cartBody.position.y = Math.abs(cart.phi) * 0.25;
-    if (safe) { safe.body.rotation.z = cart.phi; safe.body.position.y = Math.abs(cart.phi) * 0.25; }
+    if (GS.safe) { GS.safe.body.rotation.z = cart.phi; GS.safe.body.position.y = Math.abs(cart.phi) * 0.25; }
     // passengers ride in rows of three, stacked when it gets crowded
     const ch = cartG.rotation.y, rx = Math.cos(ch), rz = -Math.sin(ch), fx = Math.sin(ch), fz = Math.cos(ch), cp = Math.cos(cart.phi), sp = Math.sin(cart.phi);
     cart.riders.forEach((c, i) => {
       const lx = (i % 3 - 1) * 0.56, lz = (Math.floor(i / 3) % 3 - 1) * 0.66, ly = 0.2 + Math.floor(i / 9) * 0.5;
       const x2 = lx * cp - ly * sp, y2 = ly * cp + lx * sp;
-      c.pos.set(cart.pos.x + rx * x2 + fx * lz, cartG.position.y + 0.68 + y2 + Math.abs(Math.sin(elapsed * 9 + i)) * 0.08 * Math.min(1, speed / 8 + Math.abs(cart.phi) * 3), cart.pos.z + rz * x2 + fz * lz);
+      c.pos.set(cart.pos.x + rx * x2 + fx * lz, cartG.position.y + 0.68 + y2 + Math.abs(Math.sin(GS.elapsed * 9 + i)) * 0.08 * Math.min(1, speed / 8 + Math.abs(cart.phi) * 3), cart.pos.z + rz * x2 + fz * lz);
       c.sprite.visible = up;
     });
     // anything that catches the cart helps itself
@@ -4910,8 +4911,8 @@ const MONSTERS = [
   const ALTAR_ZONE = 11;
   const zoneGeo = (() => { const g = new THREE.RingGeometry(ALTAR_ZONE - 0.35, ALTAR_ZONE, 72, 1); g.rotateX(-Math.PI / 2); const p = g.attributes.position, keep = [];      // dashed ring
     const idx = g.index.array; for (let i = 0; i < idx.length; i += 6) if (Math.floor(i / 6) % 3 !== 2) keep.push(...idx.slice(i, i + 6)); g.setIndex(keep); return g; })();
-  let altarsDone = 0, gateOpen = false, gateSpawned = false;
-  function openGate() { if (gateOpen) return; gateOpen = true; flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
+  GS.gateSpawned = false; GS.altarsDone = 0; GS.gateOpen = false;
+  function openGate() { if (GS.gateOpen) return; GS.gateOpen = true; flashAlert('THE GATE OPENS'); setDoor(false); crewSay('gate', 1, true); }
   function gateTick() {                                 // host: all three altars fed -> nine mini-bosses at the gate; it opens when they are dead
     return;                                            // the phases open the gate now (after the loot run)
   }
@@ -4946,16 +4947,16 @@ const MONSTERS = [
     }
   }
   // ---- the first phase is an empty warm-up arena: nests and altars rise out of the ground when scouting starts ----
-  const sleepRocks = rocks.slice(); let worldUp = false; const rising = [];
+  const sleepRocks = rocks.slice(); GS.worldUp = false; const rising = [];
   for (const o of sleepRocks) { o.dormant = true; o.mesh.visible = false; } rocks.length = 0;
   for (const A of altars) { A.g.visible = A.bar.visible = A.zone.visible = false; A.mesh.visible = false; }
   function worldWake() {                               // everybody, as soon as the phase index says scouting has begun (late joiners too)
-    worldUp = true;
+    GS.worldUp = true;
     for (const o of sleepRocks) { if (!o.dormant) continue; o.dormant = false; o.mesh.visible = true; if (!rocks.includes(o)) rocks.push(o);
       const d = Math.hypot(o.mesh.position.x - car.pos.x, o.mesh.position.z - car.pos.z); o.mesh.scale.y = 0.01; rising.push({ g: o.mesh, y: o.h / 2, t: -Math.min(1.2, d / 120), dust: true }); }
     for (const A of altars) { A.g.visible = true; A.mesh.visible = true; A.g.scale.y = 0.01;
       rising.push({ g: A.g, y: 0, t: -Math.min(1.2, Math.hypot(A.x - car.pos.x, A.z - car.pos.z) / 120), dust: true, base: true }); }
-    SFX.play('door', null, { vol: 0.7, rate: 0.7 }); shake = Math.max(shake, 0.2);
+    SFX.play('door', null, { vol: 0.7, rate: 0.7 }); GS.shake = Math.max(GS.shake, 0.2);
   }
   function updateRising(dt) {
     for (let i = rising.length - 1; i >= 0; i--) {
@@ -5022,8 +5023,8 @@ const MONSTERS = [
 
   const altHud = () => { altNEl.textContent = altars.map(A => A.done ? '✔' : A.n + '/' + ALTAR_NEED).join(' · '); };
   const aliveNEl = document.getElementById('aliveN'), unloadBtn = document.getElementById('unload');
-  let unloadAltar = null, aliveT = 0;
-  function doUnload() { if (unloadAltar && carBub.t < 0) { carBub.t = 0; carBub.altar = unloadAltar; unloadBtn.style.display = 'none'; } unloadBtn.blur(); }
+  let aliveT = 0; GS.unloadAltar = null;
+  function doUnload() { if (GS.unloadAltar && carBub.t < 0) { carBub.t = 0; carBub.altar = GS.unloadAltar; unloadBtn.style.display = 'none'; } unloadBtn.blur(); }
   for (const ev of ['mousedown', 'touchstart', 'pointerdown']) unloadBtn.addEventListener(ev, e => { e.stopPropagation(); if (ev === 'touchstart') { e.preventDefault(); doUnload(); } }, { passive: false });
   unloadBtn.addEventListener('click', e => { e.stopPropagation(); doUnload(); });
   addEventListener('keydown', e => { if (e.code === 'KeyG' && !e.repeat) doUnload(); });
@@ -5040,11 +5041,11 @@ const MONSTERS = [
     for (let i = 0; i < Math.min(A.n, ALTAR_NEED); i++) A.runes[i].material.color.setHex(0x5fd0ff).multiplyScalar(3);
     A.fill.scale.x = Math.max(0.001, A.n / ALTAR_NEED); altHud();
     if (A.n >= ALTAR_NEED && !A.done) {
-      A.done = true; altarsDone++; altHud();
+      A.done = true; GS.altarsDone++; altHud();
       A.beam.material.color.setHex(0xffc24a); A.beam.material.opacity = 0.45; A.fill.material.color.setHex(0xffc24a);
-      tmp.set(A.x, 2, A.z); flash(tmp, 0xffd27a, 30, 0.6, 5); burst(tmp, 0xffd27a, 16, 3, 9, 0.5); shake = Math.max(shake, 0.7);
+      tmp.set(A.x, 2, A.z); flash(tmp, 0xffd27a, 30, 0.6, 5); burst(tmp, 0xffd27a, 16, 3, 9, 0.5); GS.shake = Math.max(GS.shake, 0.7);
       SFX.play('boss_roar', tmp, { rate: 1.6, vol: 0.6 }); SFX.play('loot', tmp);
-      flashAlert(altarsDone >= 3 ? 'ALL ALTARS FED' : 'ALTAR AWAKENED ' + altarsDone + '/3'); crewSay('altar', 1, true);
+      flashAlert(GS.altarsDone >= 3 ? 'ALL ALTARS FED' : 'ALTAR AWAKENED ' + GS.altarsDone + '/3'); crewSay('altar', 1, true);
     }
   }
   function altarNear(A) {                                // distance from the altar to the nearest player who is up
@@ -5053,11 +5054,11 @@ const MONSTERS = [
     return d;
   }
   function altarWave(A, kind) {                          // kind 1: it just woke up; 2: the timer ran out. The host also spawns the guard
-    A.waveAt = elapsed; A.pulse = 1;
+    A.waveAt = GS.elapsed; A.pulse = 1;
     if (!NET.client) altarGuards(A, Math.round(10 * waveMul()));
     const near = Math.hypot(car.pos.x - A.x, car.pos.z - A.z) < 70;      // only the players around it hear it laugh
     tmp.set(A.x, 3, A.z);
-    if (kind === 1) { if (near) { SFX.play('laugh', null); flashAlert('THE ALTAR HUNGERS'); shake = Math.max(shake, 0.5); } flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5); }
+    if (kind === 1) { if (near) { SFX.play('laugh', null); flashAlert('THE ALTAR HUNGERS'); GS.shake = Math.max(GS.shake, 0.5); } flash(tmp, 0xff3a5a, 18, 0.5, 4); burst(tmp, 0x5a2a4a, 14, 3, 8, 0.5); }
     else { if (near) SFX.play('laugh', null, { rate: 1.05 }); flash(tmp, 0xff3a5a, 14, 0.4, 3); }
   }
   function updateAltars(dt) {
@@ -5065,10 +5066,10 @@ const MONSTERS = [
     for (const A of altars) {
       A.pulse = Math.max(0, A.pulse - dt * 2); A.cd -= dt;
       A.crystal.rotation.y += dt * (A.done ? 3 : 0.8 + A.n * 0.4);
-      A.crystal.position.y = 3.3 + Math.sin(elapsed * 2 + A.x) * 0.25;
+      A.crystal.position.y = 3.3 + Math.sin(GS.elapsed * 2 + A.x) * 0.25;
       const lv = A.done ? 3.2 : 0.35 + A.n / ALTAR_NEED * 1.6 + A.pulse * 2;
       A.crystal.material.color.setRGB(A.done ? lv : lv * 0.25, A.done ? lv * 0.72 : lv * 0.7, A.done ? lv * 0.25 : lv);
-      if (!worldUp) { A.bar.visible = A.zone.visible = false; continue; }
+      if (!GS.worldUp) { A.bar.visible = A.zone.visible = false; continue; }
       A.bar.quaternion.copy(camera.quaternion); A.bar.visible = !A.done || A.pulse > 0;
       if (A.done || PH.i < 2) { A.zone.visible = false; continue; }      // altars sleep until the chubziks hatch
       const dA = Math.hypot(car.pos.x - A.x, car.pos.z - A.z), up = car.alive && car.depth < 0.3;
@@ -5080,7 +5081,7 @@ const MONSTERS = [
         const dP = altarNear(A), k = altars.indexOf(A);
         if (!A.awake && dP < 30) {
           A.awake = true; A.pulse = 1;
-          const since = elapsed - (A.waveAt == null ? -999 : A.waveAt);
+          const since = GS.elapsed - (A.waveAt == null ? -999 : A.waveAt);
           if (since < ALTAR_WAVE) { A.spawnT = ALTAR_WAVE - since; netEv({ t: 'aw', k, s: 1, n: r1(A.spawnT), w: 0 }); }   // came back before its timer ran out: no fresh wave, no laugh
           else { A.spawnT = ALTAR_WAVE; altarWave(A, 1); netEv({ t: 'aw', k, s: 1, n: ALTAR_WAVE, w: 1 }); }
         } else if (A.awake && dP > 52) { A.awake = false; netEv({ t: 'aw', k, s: 0 }); }
@@ -5108,7 +5109,7 @@ const MONSTERS = [
       const sec = Math.ceil(timerA.spawnT); if (altTEl.textContent !== 'next wave ' + sec) altTEl.textContent = 'next wave ' + sec;
       altTEl.classList.toggle('soon', sec <= 5);
     } else altTEl.style.display = 'none';
-    unloadAltar = offer;
+    GS.unloadAltar = offer;
     if (offer) {
       unloadV.set(offer.x, 7.6, offer.z).project(camera);
       unloadBtn.style.display = 'block'; unloadBtn.style.left = (unloadV.x * 0.5 + 0.5) * innerWidth + 'px'; unloadBtn.style.top = Math.max(70, (-unloadV.y * 0.5 + 0.5) * innerHeight) + 'px';
@@ -5127,7 +5128,7 @@ const MONSTERS = [
       if (t > 3.6 || !car.alive) { carBub.t = -1; carBub.said = 0; carBub.vee.visible = carBub.roxy.visible = false; if (carBub.altar) carBub.altar = null; }
     }
     gateTick();
-    if (!gateOpen && boss.state === 'idle' && door.targetY < 0) { door.targetY = 2.3; }       // sealed until the altars are fed
+    if (!GS.gateOpen && boss.state === 'idle' && door.targetY < 0) { door.targetY = 2.3; }       // sealed until the altars are fed
   }
 
   // ---------- finale: once Pyramidon is down, a huge blue cube-angel descends and every surviving chubzik flies up into it ----------
@@ -5172,16 +5173,16 @@ const MONSTERS = [
     const ray = new THREE.Mesh(new THREE.CylinderGeometry(6, 9, 90, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })); ray.position.y = 30; g.add(ray);
     // the world goes quiet
     for (const m of swarm) { m.dead = true; scene.remove(m.sprite, m.shadow); if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 40) spawnParticles(tmp.set(m.pos.x, 1, m.pos.z), m.art.color, 6, 6); }
-    waves.t = 1e9; chubSpawnT = 1e9;
+    waves.t = 1e9; GS.chubSpawnT = 1e9;
     SFX.play('choir', null);
   }
   function updateAngel(dt) {
     if (!angel.on) return;
     const t = (angel.t += dt), g = angel.g, Y = 15;
     const k = THREE.MathUtils.clamp((t - 1.5) / 4, 0, 1), e = 1 - Math.pow(1 - k, 3);
-    g.position.y = 80 + (Y - 80) * e + Math.sin(elapsed * 1.3) * 0.5;
+    g.position.y = 80 + (Y - 80) * e + Math.sin(GS.elapsed * 1.3) * 0.5;
     angel.halo.rotation.z += dt * 0.8;
-    for (const w of angel.wings) { const f = Math.sin(elapsed * 2.4); w.s.material.rotation = w.sd * (0.15 + f * 0.28); w.s.scale.set(9, 11 * (1 + f * 0.08), 1); }
+    for (const w of angel.wings) { const f = Math.sin(GS.elapsed * 2.4); w.s.material.rotation = w.sd * (0.15 + f * 0.28); w.s.scale.set(9, 11 * (1 + f * 0.08), 1); }
     for (const E of angel.eyes) { E.t -= dt; E.s.material = angel.eyeMats[E.t < 0.14 ? 1 : 0]; if (E.t < 0) E.t = rand(1.5, 5); }
     if (angel.phase === 'wait' && t > 5.2) {             // call them all home, cart included, wherever they are
       angel.phase = 'gather';
@@ -5202,7 +5203,7 @@ const MONSTERS = [
         const c = angel.list[i]; c.t += dt; if (c.t < 0) continue;
         const u = Math.min(1, c.t / c.T), s = u * u * (3 - 2 * u);
         c.pos.set(c.from.x + (angel.pos.x - c.from.x) * s, c.from.y + (g.position.y - c.from.y) * s + Math.sin(Math.PI * u) * 6, c.from.z + (angel.pos.z - c.from.z) * s);
-        c.sprite.position.copy(c.pos); c.sprite.material = chubMats[0][Math.floor(elapsed * 8 + i) % CHUB_FR];
+        c.sprite.position.copy(c.pos); c.sprite.material = chubMats[0][Math.floor(GS.elapsed * 8 + i) % CHUB_FR];
         const sc = CHUB_SIZE * (1 + 0.6 * Math.sin(Math.PI * u)) * (u > 0.85 ? (1 - u) / 0.15 : 1); c.sprite.scale.set(sc, sc, 1);
         if (u >= 1) {
           c.dead = true; scene.remove(c.sprite); if (c.shadow) scene.remove(c.shadow); angel.list.splice(i, 1);
@@ -5214,11 +5215,11 @@ const MONSTERS = [
     }
     if (angel.phase === 'done' && !angel.shown && t > angel.doneT + 1.4) {
       angel.shown = true; ascEl.style.display = 'none';
-      const fed = altars.reduce((a, A) => a + A.n, 0), mm = Math.floor(elapsed / 60), ss = String(Math.floor(elapsed % 60)).padStart(2, '0');
-      const verdict = angel.saved === 0 ? 'The angel came for nothing.' : angel.saved >= chubEaten + fed ? 'More saved than lost. The angel beams.' : angel.saved >= fed ? 'A fair trade, by wasteland standards.' : 'The altars ate better than the angel.';
+      const fed = altars.reduce((a, A) => a + A.n, 0), mm = Math.floor(GS.elapsed / 60), ss = String(Math.floor(GS.elapsed % 60)).padStart(2, '0');
+      const verdict = angel.saved === 0 ? 'The angel came for nothing.' : angel.saved >= GS.chubEaten + fed ? 'More saved than lost. The angel beams.' : angel.saved >= fed ? 'A fair trade, by wasteland standards.' : 'The altars ate better than the angel.';
       resEl.innerHTML = `<h2>THE CHUBZIKS ASCEND</h2><div class="big">${angel.saved}</div><div class="sub">saved</div>
-        <table><tr><td>Fed to the altars</td><td>${fed}</td></tr><tr><td>Eaten by monsters</td><td>${chubEaten}</td></tr>
-        <tr><td>Monsters destroyed</td><td>${enemyKills}</td></tr><tr><td>Crates smashed</td><td>${kills}</td></tr><tr><td>Pillars and rocks flattened</td><td>${pillarsSmashed}</td></tr>
+        <table><tr><td>Fed to the altars</td><td>${fed}</td></tr><tr><td>Eaten by monsters</td><td>${GS.chubEaten}</td></tr>
+        <tr><td>Monsters destroyed</td><td>${GS.enemyKills}</td></tr><tr><td>Crates smashed</td><td>${GS.kills}</td></tr><tr><td>Pillars and rocks flattened</td><td>${GS.pillarsSmashed}</td></tr>
         <tr><td>Time</td><td>${mm}:${ss}</td></tr></table><p>${verdict}</p><button id="again">PLAY AGAIN</button>`;
       resEl.style.display = 'block';
       document.getElementById('again').addEventListener('click', hardReload);
@@ -5234,12 +5235,12 @@ const MONSTERS = [
     }
   }
   function updateChubs(dt) {
-    if (!resInit && !NET.client && worldUp) { resInit = true; seedResidents(); }      // the nests' guards move in when the nests rise
-    if (!chubInit && !NET.client && PH.i >= 2) { chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); }      // the chubziks hatch with SAVE & SACRIFICE
-    chubSpawnT -= dt;
-    if (chubSpawnT <= 0 && !NET.client) {                             // the colony slowly refills, a resident pack too
-      chubSpawnT = 3; chubTick++;
-      if (worldUp && rocks.length < 8 && chubTick % 4 === 0) {      // too few rocks left for the colony: one of the flattened ones rises again, away from everybody
+    if (!resInit && !NET.client && GS.worldUp) { resInit = true; seedResidents(); }      // the nests' guards move in when the nests rise
+    if (!GS.chubInit && !NET.client && PH.i >= 2) { GS.chubInit = true; for (const R of rocks) for (let i = 0; i < 6; i++) spawnChub(R, i < 4); }      // the chubziks hatch with SAVE & SACRIFICE
+    GS.chubSpawnT -= dt;
+    if (GS.chubSpawnT <= 0 && !NET.client) {                             // the colony slowly refills, a resident pack too
+      GS.chubSpawnT = 3; GS.chubTick++;
+      if (GS.worldUp && rocks.length < 8 && GS.chubTick % 4 === 0) {      // too few rocks left for the colony: one of the flattened ones rises again, away from everybody
         const far = o => { if (Math.hypot(o.mesh.position.x - car.pos.x, o.mesh.position.z - car.pos.z) < 35) return false; for (const R of NET.remotes.values()) if (Math.hypot(o.mesh.position.x - R.pos.x, o.mesh.position.z - R.pos.z) < 35) return false; return true; };
         const gone = obstacles.filter(o => o.rock && !o.dormant && !o.mesh.visible && far(o));
         if (gone.length) { const o = gone[Math.floor(Math.random() * gone.length)]; rockGrow(o); netEv({ t: 'rock', i: obstacles.indexOf(o) }); for (let i = 0; i < 4; i++) spawnChub(o, true); }
@@ -5247,7 +5248,7 @@ const MONSTERS = [
       let loose = 0; for (const c of chubs) if (c.state !== 'cart') loose++;
       if (PH.i >= 2 && rocks.length && loose < rocks.length * 8) spawnChub(rocks[Math.floor(Math.random() * rocks.length)], true);   // only surviving rocks breed
       let res = 0; for (const m of swarm) if (!m.dead && m.home) res++;
-      if (chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) { const R = rocks[Math.floor(Math.random() * rocks.length)]; if (Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z) > 45) { const a = Math.random() * 6.283; spawnCritter(Math.random() < 0.3 ? 'spitter' : 'gremlin', R.mesh.position.x + Math.cos(a) * (R.r + 7), R.mesh.position.z + Math.sin(a) * (R.r + 7)).home = R; } }
+      if (GS.chubTick % 2 === 0 && !angel.on && res < 40 && rocks.length) { const R = rocks[Math.floor(Math.random() * rocks.length)]; if (Math.hypot(R.mesh.position.x - car.pos.x, R.mesh.position.z - car.pos.z) > 45) { const a = Math.random() * 6.283; spawnCritter(Math.random() < 0.3 ? 'spitter' : 'gremlin', R.mesh.position.x + Math.cos(a) * (R.r + 7), R.mesh.position.z + Math.sin(a) * (R.r + 7)).home = R; } }
     }
     const okMe = carOK();
     for (let i = chubs.length - 1; i >= 0; i--) {
@@ -5293,7 +5294,7 @@ const MONSTERS = [
           if (c.state === 'perch' && !c.rock.mesh.visible) { c.pos.y = 0; c.state = 'dazed'; c.dazeT = 0.8; }
         }
       } else if (c.state === 'perch') {
-        if (ride === 'spider' && !other && car.alive && dCar < car.radius + 0.7 && Math.abs(car.y - c.pos.y) < 1.3) { c.pos.y = 0; cartAdd(c); continue; }
+        if (GS.ride === 'spider' && !other && car.alive && dCar < car.radius + 0.7 && Math.abs(car.y - c.pos.y) < 1.3) { c.pos.y = 0; cartAdd(c); continue; }
         { let got = null; for (const R of NET.remotes.values()) if (R.up && R.ride === 'spider' && Math.hypot(R.pos.x - c.pos.x, R.pos.z - c.pos.z) < car.radius + 0.7 && Math.abs(R.pos.y - c.pos.y) < 1.3) got = R;
           if (got) { netEv({ t: 'chub' }, got.peer); c.dead = true; scene.remove(c.sprite, c.shadow); continue; } }
         c.calm = c.threat > 12 ? c.calm + dt : 0; scared = c.threat < 9;
@@ -5347,15 +5348,15 @@ const MONSTERS = [
   function resetChubs() {                              // respawn: passengers scatter, the colony stays
     cartFling(cart.riders.length, 0); cartReset(); seedResidents();
   }
-  let chubInit = false;
+  GS.chubInit = false;
 
   // ---- mobile auto-fire: lock the turret on the nearest awake biter (or the boss) like a shmup ----
-  let autoTarget = null;
+  GS.autoTarget = null;
   const autoV = new THREE.Vector3();
   function onScreen(x, z) { autoV.set(x, 1, z).project(camera); return Math.abs(autoV.x) < 1.05 && Math.abs(autoV.y) < 1.05; }
   function pickAutoTarget() {
     const ok = e => e && !e.dead && !e.carried && e.awake && Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z) < 30 && onScreen(e.pos.x, e.pos.z);
-    if (autoTarget && autoTarget !== boss && ok(autoTarget)) return autoTarget;   // sticky, no jitter between two biters
+    if (GS.autoTarget && GS.autoTarget !== boss && ok(GS.autoTarget)) return GS.autoTarget;   // sticky, no jitter between two biters
     let best = null, bd = 26;
     for (const e of enemies) if (ok(e)) { const d = Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z); if (d < bd) { bd = d; best = e; } }
     for (const e of swarm) if (ok(e)) { const d = Math.hypot(e.pos.x - car.pos.x, e.pos.z - car.pos.z) - (e.K.ranged ? 4 : 0); if (d < bd) { bd = d; best = e; } }
@@ -5380,14 +5381,14 @@ const MONSTERS = [
     const hidden = car.alive && (car.burrow === 'under' || car.burrow === 'down');
     if (!hidden) { car.dig = 0; digBar.visible = false; return; }
     car.dig = car.dig || 0;
-    if (diggers > 0) {
+    if (GS.diggers > 0) {
       crewSay('dig');
-      car.dig += dt * diggers;
+      car.dig += dt * GS.diggers;
       digDirtT -= dt;
       if (digDirtT <= 0) { digDirtT = 0.06; spawnParticles(tmp.copy(car.pos).setY(0.5), Math.random() < 0.7 ? 0x6b5a3e : 0xd040a0, 2, 7); }
       mound.position.x += rand(-0.08, 0.08); mound.position.z += rand(-0.08, 0.08);   // нора трясётся
       SFX.play('scratch', car.pos);
-      shake = Math.max(shake, 0.12);
+      GS.shake = Math.max(GS.shake, 0.12);
     } else car.dig = Math.max(0, car.dig - dt * 0.5);  // бросили копать — нора потихоньку «заживает»
     digBar.visible = car.dig > 0;
     if (digBar.visible) {
@@ -5400,7 +5401,7 @@ const MONSTERS = [
       car.burrow = 'up'; car.depth = 0; car.burrowCd = 2;
       car.vy = 9; car.airborne = true; car.usedDouble = true; car.popped = true;
       spawnParticles(tmp.copy(car.pos).setY(0.5), 0x6b5a3e, 26, 12);
-      shake = Math.max(shake, 0.7);
+      GS.shake = Math.max(GS.shake, 0.7);
       flashAlert('DUG OUT!'); SFX.play('dig_up', car.pos); SFX.play('growl_elite', car.pos, { delay: 0.1 });
     }
   }
@@ -5422,7 +5423,7 @@ const MONSTERS = [
     const h = grab.held;
     SFX.play('chomp', e.pos); SFX.play(h.kind === 'crate' ? 'hit_wood' : 'hit_flesh', holdPos);
     h.shieldHp -= e.bite;
-    shake = Math.max(shake, 0.2);
+    GS.shake = Math.max(GS.shake, 0.2);
     spawnParticles(tmp.set((e.pos.x + holdPos.x) / 2, holdPos.y, (e.pos.z + holdPos.z) / 2),
                    h.kind === 'crate' ? 0xd2873c : 0xc8323c, 5, 6);
     if (h.kind === 'crate') h.ref.flash = 0.08;
@@ -5431,7 +5432,7 @@ const MONSTERS = [
       if (h.kind === 'crate') damageCrate(h.ref, 99);
       else hitEnemy(h.ref, tmp.set(0, 0, 0), 999, 0);
       spawnParticles(tmp.copy(holdPos), h.kind === 'crate' ? 0xd2873c : 0xc8323c, 14, 9);
-      shake = Math.max(shake, 0.45);
+      GS.shake = Math.max(GS.shake, 0.45);
     }
   }
   function updateShieldBar() {
@@ -5453,7 +5454,7 @@ const MONSTERS = [
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
   const bossGroup = new THREE.Group();
   bossGroup.position.set(BOSS_POS.x, -BOSS_SINK, BOSS_POS.z); bossGroup.visible = false; scene.add(bossGroup);
-  const bossMat = new THREE.MeshStandardMaterial({ color: 0x3c2656, emissive: 0x1a0830, flatShading: true, metalness: 0.55, roughness: 0.45, envMap: ENV, envMapIntensity: 1.0 });
+  const bossMat = new THREE.MeshStandardMaterial({ color: 0x3c2656, emissive: 0x1a0830, flatShading: true, metalness: 0.55, roughness: 0.45, envMap: GS.ENV, envMapIntensity: 1.0 });
   const bossDark = new THREE.MeshStandardMaterial({ color: 0x241634, flatShading: true, metalness: 0.6, roughness: 0.45 });
   const seamMat = glow(new THREE.MeshBasicMaterial({ color: 0xff3d9a }), 2.4);
   const bput = (geo, mat, x, y, z, parent = bossGroup) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = mat !== seamMat; parent.add(m); return m; };
@@ -5497,7 +5498,7 @@ const MONSTERS = [
     const geo = i % 3 === 0 ? new THREE.OctahedronGeometry(0.34, 0) : i % 3 === 1 ? new THREE.TetrahedronGeometry(0.4, 0) : new THREE.BoxGeometry(0.42, 0.42, 0.42);
     const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8a3ab0, emissive: 0xa020e0, roughness: 0.4, metalness: 0.4, flatShading: true }));
     bossGroup.add(m);
-    orbit.push({ m, a: rand(0, Math.PI * 2), r: rand(5.8, 7.4), y: rand(1, 8), sp: rand(0.5, 1.3) * (worldRnd() < 0.5 ? -1 : 1) });
+    orbit.push({ m, a: rand(0, Math.PI * 2), r: rand(5.8, 7.4), y: rand(1, 8), sp: rand(0.5, 1.3) * (GS.worldRnd() < 0.5 ? -1 : 1) });
   }
   const bossCol = { mesh: new THREE.Object3D(), hx: 3.7, hz: 3.7, h: 5, solid: true, crate: false, boss: true, disabled: true };
   bossCol.mesh.position.copy(BOSS_POS); obstacles.push(bossCol);
@@ -5529,14 +5530,14 @@ const MONSTERS = [
   function updateTentacle(tn, dt) {
     tn.t += dt;
     const r = tentRoot(tn);
-    let tTheta = tn.a0 + 0.3 * Math.sin(elapsed * 0.7 + tn.k * 1.7), tReach = 1, tLift = 0.45, tWave = 0.45, tGlow = 0, rate = 2.5;
+    let tTheta = tn.a0 + 0.3 * Math.sin(GS.elapsed * 0.7 + tn.k * 1.7), tReach = 1, tLift = 0.45, tWave = 0.45, tGlow = 0, rate = 2.5;
     if (tn.state === 'wind') {
       const tp = tn.tp || car.pos; tn.aim = Math.atan2(tp.z - r.z, tp.x - r.x);   // tracks whoever it is swinging at
       tTheta = tn.aim; tReach = 0.5; tLift = 3.4; tWave = 0.12; tGlow = 1; rate = 7;
       if (tn.t > 0.65) { tn.state = 'strike'; tn.t = 0; tn.hitDone = false; SFX.play('whoosh', tn.pts[tn.n >> 1], { rate: 0.8 }); }
     } else if (tn.state === 'strike') {
       tTheta = tn.aim; tReach = 1.15; tLift = 0; tWave = 0; tGlow = 1; rate = 28;
-      if (tn.t > 0.16) { tn.state = 'slam'; tn.t = 0; shake = Math.max(shake, 0.35); SFX.play('tent_slam', tn.pts[tn.n - 1]);
+      if (tn.t > 0.16) { tn.state = 'slam'; tn.t = 0; GS.shake = Math.max(GS.shake, 0.35); SFX.play('tent_slam', tn.pts[tn.n - 1]);
         for (let i = 0; i < tn.n; i += 3) { spawnParticles(tn.pts[i], 0x6a5a7a, 2, 5); burst(tn.pts[i], 0x8a7a9a, 1, 1.8, 3, 0.3); } }
     } else if (tn.state === 'slam') {
       tTheta = tn.aim; tReach = 1.15; tLift = 0; tWave = 0; tGlow = 0.6; rate = 28;
@@ -5558,9 +5559,9 @@ const MONSTERS = [
       const m = tn.segs[i], p = tn.pts[i];
       if (i >= tn.n) { m.visible = false; continue; }
       const f = (i + 1) / tn.n;
-      const ang = tn.theta + tn.wave * Math.sin(elapsed * 2.6 + i * 0.55 + tn.k) * f;
+      const ang = tn.theta + tn.wave * Math.sin(GS.elapsed * 2.6 + i * 0.55 + tn.k) * f;
       const d = (i + 1) * TENT_SP * tn.reach;
-      p.set(r.x + Math.cos(ang) * d, 0.5 + tn.lift * Math.sin(Math.PI * Math.min(1, f * 1.1)) + 0.12 * Math.sin(elapsed * 4 + i), r.z + Math.sin(ang) * d);
+      p.set(r.x + Math.cos(ang) * d, 0.5 + tn.lift * Math.sin(Math.PI * Math.min(1, f * 1.1)) + 0.12 * Math.sin(GS.elapsed * 4 + i), r.z + Math.sin(ang) * d);
       m.position.copy(p);
       m.scale.setScalar(1.1 - 0.55 * f);
       if (i === tn.n - 1) { tn.tip.position.copy(p); tn.tip.rotation.y += dt * 4; tn.tip.rotation.x += dt * 2.5; tn.tip.visible = true; }
@@ -5722,7 +5723,7 @@ const MONSTERS = [
     spawnParticles(tmp.set(BOSS_POS.x, 3, BOSS_POS.z), 0xd040a0, 40, 14);
     flash(tmp, 0xff50c0, 46, 0.7, 6); burst(tmp, 0x5a3070, 22, 4, 9, 0.55);
     spawnParticles(tmp.set(BOSS_POS.x, 5, BOSS_POS.z), 0xff2255, 20, 12);
-    shake = 1.2;
+    GS.shake = 1.2;
     flashAlert('PYRAMIDON DEFEATED'); SFX.play('boss_die', BOSS_POS);
     if (!NET.client) { dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z - 3)); dropLoot(new THREE.Vector3(BOSS_POS.x - 7, 0, BOSS_POS.z + 3)); lootFrom('boss', BOSS_POS.x - 10, BOSS_POS.z); }
     angelStart();
@@ -5754,7 +5755,7 @@ const MONSTERS = [
       tn.n = TENT_MIN; tn.reach = 0; tn.state = 'idle'; tn.t = 0; hideTent(tn);
     }
     bossBarEl.style.display = 'none';
-    setDoor(!gateOpen);
+    setDoor(!GS.gateOpen);
   }
 
   const quakes = [], QUAKE_T = 2.4;
@@ -5772,10 +5773,10 @@ const MONSTERS = [
     for (let i = quakes.length - 1; i >= 0; i--) {
       const q = quakes[i]; q.t += dt; const k = Math.min(1, q.t / QUAKE_T);
       q.disc.scale.setScalar(Math.max(0.01, q.r * k)); q.ring.material.opacity = 0.55 + 0.4 * Math.sin(q.t * (6 + 14 * k));      // the fill creeps out to the ring: that is the countdown
-      shake = Math.max(shake, 0.08 + 0.12 * k);
+      GS.shake = Math.max(GS.shake, 0.08 + 0.12 * k);
       if (k < 1) continue;
       scene.remove(q.ring, q.disc); q.ring.material.dispose(); q.disc.material.dispose(); quakes.splice(i, 1);
-      shake = Math.max(shake, 1); SFX.play('blast', tmp.set(q.x, 0, q.z)); SFX.play('tent_slam', tmp);
+      GS.shake = Math.max(GS.shake, 1); SFX.play('blast', tmp.set(q.x, 0, q.z)); SFX.play('tent_slam', tmp);
       flash(tmp.set(q.x, 1, q.z), 0xff7a2a, q.r * 2.2, 0.45, 3);
       for (let j = 0; j < 22; j++) { const a = j / 22 * 6.283, d = q.r * (0.3 + 0.7 * Math.random()); tmp.set(q.x + Math.cos(a) * d, 0.4, q.z + Math.sin(a) * d); spawnParticles(tmp, 0x6a5a4a, 3, 9); if (j % 3 === 0) burst(tmp, 0x8a7a6a, 2, 2.4, 5, 0.4); }
       if (car.alive && car.depth < 0.3 && car.y < 1.5 && Math.hypot(car.pos.x - q.x, car.pos.z - q.z) < q.r)
@@ -5800,7 +5801,7 @@ const MONSTERS = [
     const vx = (BOSS_POS.x - px) / Math.max(dt, 1e-3), vz = (BOSS_POS.z - pz) / Math.max(dt, 1e-3), sp = Math.hypot(vx, vz), lean = Math.min(0.17, sp * 0.006);
     bossGroup.rotation.set(sp > 0.1 ? vz / sp * lean : 0, 0, sp > 0.1 ? -vx / sp * lean : 0);      // leaning into the run
     if ((M.dustT -= dt) <= 0) { M.dustT = 0.04; burst(tmp.set(px + rand(-4, 4), 0.4, pz + rand(-4, 4)), 0x8a7a64, 5, 3, 8, 0.6); }
-    const dc = Math.hypot(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z) || 1e-3; if (dc < 60) shake = Math.max(shake, 0.25);
+    const dc = Math.hypot(car.pos.x - BOSS_POS.x, car.pos.z - BOSS_POS.z) || 1e-3; if (dc < 60) GS.shake = Math.max(GS.shake, 0.25);
     if (!M.hit && sp > 6 && car.alive && car.y < 1.5 && dc < 7.2) { M.hit = true; hurtCar(BOSS2.ram, tmp.set((car.pos.x - BOSS_POS.x) / dc, 0, (car.pos.z - BOSS_POS.z) / dc).clone()); }      // run over: once a dash
     for (const o of obstacles) { if (o === bossCol || !(o.crate || o.pillar) || !active(o)) continue;                                                         // crates and pillars in its way are gone
       if (Math.abs(o.mesh.position.x - BOSS_POS.x) > o.hx + 4.2 || Math.abs(o.mesh.position.z - BOSS_POS.z) > o.hz + 4.2) continue;
@@ -5808,7 +5809,7 @@ const MONSTERS = [
     if (boss.state === 'flee') bossBar();
     if (k < 1) return;
     boss.mv = null; bossGroup.rotation.set(0, 0, 0);
-    waveFx(BOSS_POS.x, BOSS_POS.z, 10, 0xff7ad8, 0.4); burst(tmp.set(BOSS_POS.x, 0.5, BOSS_POS.z), 0x8a7a64, 26, 5, 12, 0.6); SFX.play('land', tmp, { vol: 0.9, rate: 0.55 }); if (dc < 70) shake = Math.max(shake, 0.9);
+    waveFx(BOSS_POS.x, BOSS_POS.z, 10, 0xff7ad8, 0.4); burst(tmp.set(BOSS_POS.x, 0.5, BOSS_POS.z), 0x8a7a64, 26, 5, 12, 0.6); SFX.play('land', tmp, { vol: 0.9, rate: 0.55 }); if (dc < 70) GS.shake = Math.max(GS.shake, 0.9);
     if (boss.state === 'flee') { boss.state = 'fight'; boss.t = 0; boss.quakeCd = 2.5; boss.throwCd = 2; boss.lashCd = 1; bossBar(); flashAlert('PYRAMIDON IS LOOSE'); }
   }
   function bossDash() {                                  // host: to a new spot beside somebody, so the next ring of lava closes around them
@@ -5886,14 +5887,14 @@ const MONSTERS = [
       L.wall.scale.y = Math.max(0.01, h); L.wall.material.uniforms.uT.value = L.gl.material.uniforms.uT.value = L.t; L.wall.material.uniforms.uA.value = L.gl.material.uniforms.uA.value = up; L.line.material.opacity = (0.75 + 0.25 * Math.sin(L.t * 14)) * up;
       const dx = car.pos.x - L.x, dz = car.pos.z - L.z, d = Math.hypot(dx, dz) || 1e-3, a0 = Math.atan2(dz, dx);
       for (let j = 0; j < 3; j++) if (Math.random() < dt * 30) { const a = a0 + rand(-0.8, 0.8); spawnParticles(tmp.set(L.x + Math.cos(a) * L.r, 0.5 + Math.random() * h, L.z + Math.sin(a) * L.r), Math.random() < 0.5 ? 0xff6ae0 : 0xb04aff, 2, 5); }      // embers on the stretch you can see
-      if (up > 0.6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + 0.5 && (car.lavaT || 0) < elapsed) { car.lavaT = elapsed + 0.5; const sd = d < L.r ? -1 : 1;
+      if (up > 0.6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + 0.5 && (car.lavaT || 0) < GS.elapsed) { car.lavaT = GS.elapsed + 0.5; const sd = d < L.r ? -1 : 1;
         hurtCar(BOSS2.lavaDmg, tmp.set(dx / d * sd, 0, dz / d * sd).clone()); }      // burnt, and thrown back to the side you came from
     }
   }
   function updateBoss(dt) {
     updateQuakes(dt); updateLava(dt);
-    const runeTarget = boss.state === 'fight' ? 1.5 + 0.6 * Math.sin(elapsed * 3) : boss.state === 'emerging' ? 3.2 : boss.state === 'dead' ? 0.25 : 0.8;
-    runeLevel += (runeTarget - runeLevel) * Math.min(1, 3 * dt); runeMat.color.setScalar(runeLevel);
+    const runeTarget = boss.state === 'fight' ? 1.5 + 0.6 * Math.sin(GS.elapsed * 3) : boss.state === 'emerging' ? 3.2 : boss.state === 'dead' ? 0.25 : 0.8;
+    GS.runeLevel += (runeTarget - GS.runeLevel) * Math.min(1, 3 * dt); runeMat.color.setScalar(GS.runeLevel);
     // дверь
     const dy = door.targetY - doorMesh.position.y;
     doorMesh.position.y += Math.sign(dy) * Math.min(Math.abs(dy), 9 * dt);
@@ -5911,7 +5912,7 @@ const MONSTERS = [
     if (boss.state === 'emerging') {
       const k = Math.min(1, boss.t / 2.6), e = 1 - Math.pow(1 - k, 3);
       bossGroup.position.y = -BOSS_SINK + BOSS_SINK * e;
-      shake = Math.max(shake, 0.3 * (1 - k) + 0.1);
+      GS.shake = Math.max(GS.shake, 0.3 * (1 - k) + 0.1);
       boss.dirtT -= dt;
       if (boss.dirtT <= 0) {
         boss.dirtT = 0.05;
@@ -5929,16 +5930,16 @@ const MONSTERS = [
 
     // глаз и орбита
     eye.lookAt(car.pos.x, 1, car.pos.z);
-    eye.position.y = 6.0 + 0.12 * Math.sin(elapsed * 2.3);
-    capstone.position.y = 7.15 + 0.22 * Math.sin(elapsed * 1.4); capstone.rotation.y += dt * 0.5;
+    eye.position.y = 6.0 + 0.12 * Math.sin(GS.elapsed * 2.3);
+    capstone.position.y = 7.15 + 0.22 * Math.sin(GS.elapsed * 1.4); capstone.rotation.y += dt * 0.5;
     for (const o of orbit) {
       o.a += o.sp * dt;
-      o.m.position.set(Math.cos(o.a) * o.r, o.y + Math.sin(elapsed * 2 + o.a) * 0.4, Math.sin(o.a) * o.r);
+      o.m.position.set(Math.cos(o.a) * o.r, o.y + Math.sin(GS.elapsed * 2 + o.a) * 0.4, Math.sin(o.a) * o.r);
       o.m.rotation.x += dt * 2; o.m.rotation.y += dt * 3;
     }
     boss.flash -= dt;
     if (boss.flash > 0) bossMat.emissive.setRGB(0.55, 0.3, 0.55);
-    else { const g = 0.02 + 0.012 * Math.sin(elapsed * 3); bossMat.emissive.setRGB(g * 0.7, g * 0.15, g * 1.6); }
+    else { const g = 0.02 + 0.012 * Math.sin(GS.elapsed * 3); bossMat.emissive.setRGB(g * 0.7, g * 0.15, g * 1.6); }
 
     if (boss.state !== 'fight') return;
     for (const tn of tentacles) updateTentacle(tn, dt);
@@ -5967,7 +5968,7 @@ const MONSTERS = [
   const clock = new THREE.Timer();      // Clock is deprecated since r183
   const tmp = new THREE.Vector3();
   let roll = 0, pitch = 0, wheelSpin = 0, prevSpeed = 0;
-  let elapsed = 0, hurtFlash = 0, shake = 0;
+  GS.hurtFlash = 0; GS.elapsed = 0; GS.shake = 0;
   const lastValid = new THREE.Vector3();
   const hpFill = document.getElementById('hpfill');
 
@@ -6097,7 +6098,7 @@ const MONSTERS = [
     SPD.quat.slerp(spQt, 1 - Math.exp(-(car.airborne ? 5 : 12) * dt));
   }
   function update(dt) {
-    elapsed += dt;
+    GS.elapsed += dt;
     const ctl = car.alive && car.burrow === 'up';
     updateJump(dt);
     updateBurrow(dt);
@@ -6111,10 +6112,10 @@ const MONSTERS = [
     const up = ctl && (keys.KeyW || keys.ArrowUp || (stick && Math.abs(stickTurn) < 1.3)), down = ctl && (keys.KeyS || keys.ArrowDown);
     const left = ctl && (keys.KeyA || keys.ArrowLeft), right = ctl && (keys.KeyD || keys.ArrowRight);
     if (!car.alive) { car.deadTimer -= dt; if (car.deadTimer <= 0) respawn(); }
-    else if (elapsed - car.lastHurt > 3 && car.hp < car.maxHp) car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.06 * dt);
+    else if (GS.elapsed - car.lastHurt > 3 && car.hp < car.maxHp) car.hp = Math.min(car.maxHp, car.hp + car.maxHp * 0.06 * dt);
 
-    if (ride === 'spider') spiderDrive(dt, ctl, stick); else if (ride === 'halo') haloDrive(dt, ctl, stick); else {
-    const RT = ride === 'unicorn' ? UNI : BUG;
+    if (GS.ride === 'spider') spiderDrive(dt, ctl, stick); else if (GS.ride === 'halo') haloDrive(dt, ctl, stick); else {
+    const RT = GS.ride === 'unicorn' ? UNI : BUG;
     // throttle / brake
     if (up) car.speed += (car.speed < 0 ? RT.brake : RT.accel) * dt;
     else if (down) car.speed -= (car.speed > 0 ? RT.brake : RT.reverseAccel) * dt;
@@ -6149,14 +6150,14 @@ const MONSTERS = [
     }
     // velocity chases the heading → light drift
     const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    const k = car.airborne || ride === 'spider' || ride === 'halo' ? 0 : Math.min(1, (ride === 'unicorn' ? UNI.grip : BUG.grip) * dt);   // в воздухе летим по инерции
+    const k = car.airborne || GS.ride === 'spider' || GS.ride === 'halo' ? 0 : Math.min(1, (GS.ride === 'unicorn' ? UNI.grip : BUG.grip) * dt);   // в воздухе летим по инерции
     car.vel.x += (fx * car.speed - car.vel.x) * k;
     car.vel.z += (fz * car.speed - car.vel.z) * k;
     car.vel.y = 0; car.pos.y = 0;                         // height lives in car.y; the position vector stays on the ground plane
-    if (!(ride === 'spider' && !car.airborne)) car.pos.addScaledVector(car.vel, ride === 'unicorn' && !car.airborne ? dt * (1 + 0.16 * Math.sin(ridePhase * 4.8)) : dt);   // a gallop surges with every stride
+    if (!(GS.ride === 'spider' && !car.airborne)) car.pos.addScaledVector(car.vel, GS.ride === 'unicorn' && !car.airborne ? dt * (1 + 0.16 * Math.sin(GS.ridePhase * 4.8)) : dt);   // a gallop surges with every stride
 
     // collisions
-    const crawler = ride === 'spider';
+    const crawler = GS.ride === 'spider';
     for (const o of obstacles) if (active(o) && (o.wall || car.y < o.h - 0.2) && !(crawler && (o.pillar || o.rock))) resolveCarVsBox(o);
     if (crawler) {                                       // the spider walks over pillars and rocks instead of ramming them
       let gh = 0;
@@ -6172,7 +6173,7 @@ const MONSTERS = [
     if (crawler) carGroup.quaternion.copy(SPD.quat);
     const accelNow = (car.speed - prevSpeed) / Math.max(dt, 1e-4); prevSpeed = car.speed;
     const lateral = car.vel.x * fz - car.vel.z * fx; // sideways slip
-    updateSkid(dt, ride === 'buggy' ? lateral : 0);
+    updateSkid(dt, GS.ride === 'buggy' ? lateral : 0);
     roll += (THREE.MathUtils.clamp(-car.steer * Math.abs(car.speed) * 0.006 + lateral * 0.02, -0.12, 0.12) - roll) * Math.min(1, 8 * dt);
     pitch += (THREE.MathUtils.clamp(-accelNow * 0.002, -0.06, 0.06) - pitch) * Math.min(1, 6 * dt);
     body.rotation.z = roll; body.rotation.x = pitch + Math.sin(car.depth * Math.PI) * 0.45 - THREE.MathUtils.clamp(car.vy * 0.025, -0.3, 0.3); // ныряет носом; в прыжке задирает/клюёт
@@ -6183,17 +6184,17 @@ const MONSTERS = [
     }
 
     // shooting
-    fireCooldown -= dt;
+    GS.fireCooldown -= dt;
     let autoFire = false;
-    if (autoTarget) {                                   // shoot once the turret is roughly on target
-      const tp = autoTargetPos(autoTarget), want = Math.atan2(tp.x - car.pos.x, tp.z - car.pos.z) - car.heading - turret.rotation.y;
+    if (GS.autoTarget) {                                   // shoot once the turret is roughly on target
+      const tp = autoTargetPos(GS.autoTarget), want = Math.atan2(tp.x - car.pos.x, tp.z - car.pos.z) - car.heading - turret.rotation.y;
       autoFire = Math.abs(Math.atan2(Math.sin(want), Math.cos(want))) < 0.22;
     }
-    if (ctl && (mouseFire || touch.aim.mag > 0.3 || autoFire) && fireCooldown <= 0) {
-      fire(); fireCooldown = 1 / (FIRE_RATE * (weapons.spread ? W_STATS.spread.rate[weapons.spread - 1] : 1));
+    if (ctl && (GS.mouseFire || touch.aim.mag > 0.3 || autoFire) && GS.fireCooldown <= 0) {
+      fire(); GS.fireCooldown = 1 / (FIRE_RATE * (weapons.spread ? W_STATS.spread.rate[weapons.spread - 1] : 1));
     }
-    muzzleTimer -= dt;
-    muzzle.visible = muzzleTimer > 0;
+    GS.muzzleTimer -= dt;
+    muzzle.visible = GS.muzzleTimer > 0;
     if (muzzle.visible) muzzle.scale.setScalar(rand(0.7, 1.3));
 
     for (let i = bullets.length - 1; i >= 0; i--) {
@@ -6276,13 +6277,13 @@ const MONSTERS = [
     updateAltars(dt);
     updateAngel(dt);
     updateRide(dt);
-    if (ride === 'unicorn') updateHorn();
+    if (GS.ride === 'unicorn') updateHorn();
     updateNet(dt);
     updatePhases(dt); updateHints(dt); updateMinimap(dt);
     updateDiag();
 
-    hurtFlash -= dt;
-    paint.emissive.setHex(hurtFlash > 0 ? 0xaa1111 : 0x000000);
+    GS.hurtFlash -= dt;
+    paint.emissive.setHex(GS.hurtFlash > 0 ? 0xaa1111 : 0x000000);
     const hpK = car.hp / car.maxHp * 100;
     hpFill.style.width = hpK + '%';
     hpFill.style.background = hpK > 55 ? '#5fd36a' : hpK > 25 ? '#f0b43c' : '#e5484d';
@@ -6292,8 +6293,8 @@ const MONSTERS = [
     camFocus.lerp(tmp, 1 - Math.exp(-5 * dt));
     camera.position.copy(camFocus).add(ISO_OFFSET);
     camera.lookAt(camFocus);
-    shake = Math.max(0, shake - dt * 2.5);
-    if (shake > 0) camera.position.add(tmp.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.6));
+    GS.shake = Math.max(0, GS.shake - dt * 2.5);
+    if (GS.shake > 0) camera.position.add(tmp.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(GS.shake * 0.6));
 
     sun.position.copy(camFocus).add(SUN_OFFSET);
     sun.target.position.copy(camFocus);
@@ -6303,11 +6304,11 @@ const MONSTERS = [
     {
       const thr = up || down ? 1 : 0, spdK = Math.min(1, Math.abs(car.speed) / TUNE.maxSpeed);
       const live = car.alive && car.depth < 0.6, vK = Math.min(1, Math.hypot(car.vel.x, car.vel.z) / TUNE.maxSpeed);
-      SFX.loop('hum', ride === 'halo' && live ? 0.05 + 0.04 * vK : 0, 1);
-      SFX.loop('servo', ride === 'spider' && live ? 0.11 * vK : 0, 0.8 + 0.5 * vK);
-      SFX.loop('engine', ride === 'buggy' && live ? 0.16 + 0.2 * thr + 0.12 * spdK : 0, 0.72 + 1.3 * spdK + 0.12 * thr, 450 + 2300 * Math.min(1, 0.35 * thr + spdK));
+      SFX.loop('hum', GS.ride === 'halo' && live ? 0.05 + 0.04 * vK : 0, 1);
+      SFX.loop('servo', GS.ride === 'spider' && live ? 0.11 * vK : 0, 0.8 + 0.5 * vK);
+      SFX.loop('engine', GS.ride === 'buggy' && live ? 0.16 + 0.2 * thr + 0.12 * spdK : 0, 0.72 + 1.3 * spdK + 0.12 * thr, 450 + 2300 * Math.min(1, 0.35 * thr + spdK));
       const inBoss = inRoom(car.pos.x, car.pos.z);
-      SFX.loop('wind', (inBoss ? 0.05 : 0.13) + (ride === 'halo' ? 0.05 * vK : 0), 1);
+      SFX.loop('wind', (inBoss ? 0.05 : 0.13) + (GS.ride === 'halo' ? 0.05 * vK : 0), 1);
       SFX.loop('drone', inBoss && (boss.state === 'fight' || boss.state === 'emerging') ? 0.32 : 0, 1);
       SFX.setRoom(inBoss ? 0.12 : 0);
     }
@@ -6322,15 +6323,15 @@ const MONSTERS = [
     if (perfT < 1 || perfN < 3) return;
     const avg = perfT / perfN; perfT = 0; perfN = 0;
     const floor = COARSE ? 0.5 : 0.6;
-    if (avg > 1 / 45 && PR > floor) {
-      PR = Math.max(floor, PR * 0.8);
-      renderer.setPixelRatio(PR);
-      if (composer) composer.setPixelRatio(PR);
-      if (fxaaPass) fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * PR), 1 / (innerHeight * PR));
-    } else if (avg > 1 / 38 && PR <= floor) {             // resolution is at the floor and it still drags: shed effects
-      if (shadowEvery < 3) shadowEvery = 3;
-      else if (fxaaPass && fxaaPass.enabled) fxaaPass.enabled = false;
-      else if (bloomPass && bloomPass.enabled) bloomPass.enabled = false;
+    if (avg > 1 / 45 && GS.PR > floor) {
+      GS.PR = Math.max(floor, GS.PR * 0.8);
+      renderer.setPixelRatio(GS.PR);
+      if (GS.composer) GS.composer.setPixelRatio(GS.PR);
+      if (GS.fxaaPass) GS.fxaaPass.uniforms.resolution.value.set(1 / (innerWidth * GS.PR), 1 / (innerHeight * GS.PR));
+    } else if (avg > 1 / 38 && GS.PR <= floor) {             // resolution is at the floor and it still drags: shed effects
+      if (GS.shadowEvery < 3) GS.shadowEvery = 3;
+      else if (GS.fxaaPass && GS.fxaaPass.enabled) GS.fxaaPass.enabled = false;
+      else if (GS.bloomPass && GS.bloomPass.enabled) GS.bloomPass.enabled = false;
     }
   }
 
@@ -6398,7 +6399,7 @@ const MONSTERS = [
   function netWorld() {                                  // everything a newcomer needs to match this world
     const sm = [], cr = [];
     obstacles.forEach((o, i) => { if ((o.pillar || o.rock) && !o.mesh.visible && !o.dormant) sm.push(i); if (o.crate && !o.room) cr.push([i, r1(o.mesh.position.x), r1(o.mesh.position.z), o.mesh.visible ? 1 : 0, o.rc || 0]); });
-    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' || boss.state === 'flee' ? 1 : 0, bp: [boss.ph, r1(boss.mv ? boss.mv.tx : BOSS_POS.x), r1(boss.mv ? boss.mv.tz : BOSS_POS.z)], pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), lt: loot.slice(0, 120).map(L => [L.id, L.gem ? 1 : 0, r1(L.x), r1(L.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
+    return { t: 'sync', sm, cr, al: altars.map(A => A.n), bd: Math.round(boss.dealt), bk: boss.state === 'dead' ? 1 : 0, go: GS.gateOpen ? 1 : 0, bst: boss.state === 'fight' || boss.state === 'emerging' || boss.state === 'flee' ? 1 : 0, bp: [boss.ph, r1(boss.mv ? boss.mv.tx : BOSS_POS.x), r1(boss.mv ? boss.mv.tz : BOSS_POS.z)], pk: pickups.filter(p => !p.own).slice(0, 30).map(p => [p.id, p.type, r1(p.x), r1(p.z)]), lt: loot.slice(0, 120).map(L => [L.id, L.gem ? 1 : 0, r1(L.x), r1(L.z)]), aw: altars.map(A => A.awake ? r1(A.spawnT) : -1), bn: tentacles.map(t => t.n), ph: [PH.i, r1(PH.brk), PH.clr, PH.wv, PH.hellN, r1(PH.t), PH.gate ? 1 : 0], fa: altars.map(A => A.found ? 1 : 0), fr: rocks.filter(R => R.found).map(R => obstacles.indexOf(R)) };
   }
   const netGamePeers = () => NET.room.peers().filter(p => (p.presence || {}).game === NET.game && (p.presence || {}).v === VER);
   function netHostPeer() { return netGamePeers().filter(p => (p.presence || {}).hp === 1).map(p => String(p.peer)).sort()[0] || null; }
@@ -6417,15 +6418,15 @@ const MONSTERS = [
     for (const m of swarm) { m.dead = true; scene.remove(m.sprite, m.shadow); if (m.rig) rigBreak(m, true); } swarm.length = 0; swById.clear();
     for (const g of globs) scene.remove(g.g, g.ring); globs.length = 0;
     for (let i = chubs.length - 1; i >= 0; i--) { const c = chubs[i]; if (c.state !== 'cart') { c.dead = true; scene.remove(c.sprite, c.shadow); chubs.splice(i, 1); } }
-    chubInit = true; waves.pending = false; NET.chMir = new Map();
+    GS.chubInit = true; waves.pending = false; NET.chMir = new Map();
   }
   function netAdopt() {                                  // the host left and I am next in line: the mirrors become mine to simulate
     netLog('host is gone: I took over the monsters (' + swarm.length + ') and chubziks');
-    for (const m of swarm) { swId = Math.max(swId, m.id); if (m.net) { m.net = false; m.think = Math.random() * 0.3; m.cd = 0.5; } }
-    for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
+    for (const m of swarm) { GS.swId = Math.max(GS.swId, m.id); if (m.net) { m.net = false; m.think = Math.random() * 0.3; m.cd = 0.5; } }
+    for (const c of chubs) { if (!c.net) continue; c.net = false; c.id = ++GS.chubId; c.rock = c.home = rockStub(c.pos.x, c.pos.z);
       if (c.fl & 2 && c.rock.mesh.visible && Math.hypot(c.rock.mesh.position.x - c.pos.x, c.rock.mesh.position.z - c.pos.z) < c.rock.r + 1) c.state = 'perch'; else { c.pos.y = 0; c.state = 'roam'; c.goal.copy(c.pos); c.t = 0; } }
     NET.client = false; NET.isHost = true; NET.hostPeer = null; NET.chMir = new Map(); waves.t = Math.max(waves.t, 10);
-    wbSpawned = swarm.some(m => m.wb && !m.dead);      // the bosses were the old host's: carry on topping them up
+    GS.wbSpawned = swarm.some(m => m.wb && !m.dead);      // the bosses were the old host's: carry on topping them up
   }
   function netPick(m) {                                  // host: each monster goes for the nearest player
     if (NET.client || !NET.remotes.size) return null;
@@ -6434,8 +6435,8 @@ const MONSTERS = [
     return best;
   }
   function waveTargets() {                              // players a wave could be sent at: up and outside the boss room
-    const a = []; if (carSeen() && (gateOpen || !inRoom(car.pos.x, car.pos.z))) a.push(car.pos);
-    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) if (R.up && (gateOpen || !inRoom(R.pos.x, R.pos.z))) a.push(R.pos);
+    const a = []; if (carSeen() && (GS.gateOpen || !inRoom(car.pos.x, car.pos.z))) a.push(car.pos);
+    if (NET.on && NET.game && !NET.client) for (const R of NET.remotes.values()) if (R.up && (GS.gateOpen || !inRoom(R.pos.x, R.pos.z))) a.push(R.pos);
     return a;
   }
   function netAnyPlayer() { const a = waveTargets(); return a.length ? a[Math.floor(Math.random() * a.length)] : car.pos; }
@@ -6460,16 +6461,16 @@ const MONSTERS = [
         if (!Array.isArray(e) || !Number.isInteger(e[0])) continue;
         const kind = SW_KEYS[Math.floor(num(e[1], 0, 99) / 3)] || 'gremlin', x = num(e[2], -ARENA - 50, ARENA + 50), z = num(e[3], -ARENA - 50, ARENA + 50);
         let m = swById.get(e[0]);
-        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) { makeWanderer(m); if (e[4] & 256) m.wbLoot = true; } if (e[4] & 64) makeRig(m); if (e[4] & 128) m.guard = true; if (e[4] & 4) gateSpawned = true; }
-        m.tx = x; m.tz = z; m.q = q; m.seenT = elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
+        if (!m || m.dead) { if (swarm.length > SW_CAP + 60) continue; m = spawnCritter(kind, x, z, Math.floor(num(e[1], 0, 99)) % 3, e[0]); m.net = true; if (e[4] & 16) digOut(m); if (e[4] & 2) makeMini(m, e[4] & 4); if (e[4] & 32) { makeWanderer(m); if (e[4] & 256) m.wbLoot = true; } if (e[4] & 64) makeRig(m); if (e[4] & 128) m.guard = true; if (e[4] & 4) GS.gateSpawned = true; }
+        m.tx = x; m.tz = z; m.q = q; m.seenT = GS.elapsed; if ((e[4] & 1) && m.flash <= 0) m.flash = 0.1; if (e[4] & 8) m.stunVis = Math.max(m.stunVis || 0, 0.3);
       }
-      for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
+      for (const m of swarm) if (m.net && !m.dead && (last ? m.q !== q : GS.elapsed - m.seenT > 3)) {             // not in the host's list any more: it died
         m.dead = true; scene.remove(m.sprite, m.shadow);
         if (Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z) < 60) {
           const p = tmp.set(m.pos.x, (m.K.fly || 0) + m.K.size * 0.4, m.pos.z);
           spawnParticles(p, m.art.color, m.K.heavy ? 18 : 9, m.K.heavy ? 10 : 7); flash(p, m.art.color, m.K.heavy ? 6 : 3, 0.18, 1.6, false); SFX.play('pop', p, { rate: m.K.heavy ? 0.7 : 0.9 + Math.random() * 0.3 });
         }
-        if (elapsed - (m.myHit || -9) < 1.2) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
+        if (GS.elapsed - (m.myHit || -9) < 1.2) { GS.enemyKills++; ekillsEl.textContent = GS.enemyKills; crewKill(false); myKill(m.pos.x, m.pos.z, 1); }
       }
     } else if (!angel.on) {
       const M = NET.chMir || (NET.chMir = new Map());
@@ -6528,7 +6529,7 @@ const MONSTERS = [
       else if (d.t === 'en') { const quiet = !NET.enSeen; NET.enSeen = true; if (NET.client && Array.isArray(d.a)) for (const r of d.a.slice(0, 64)) {
         const e = Array.isArray(r) && enemies[r[0]]; if (!e || e.carried) continue;
         const fl = num(r[4], 0, 31), x = num(r[1], -ARENA, ARENA), z = num(r[2], -ARENA, ARENA);
-        if (fl & 2) { if (!e.dead) { e.dead = true; e.root.visible = false; if (!quiet) enemyDieFx(e); if (elapsed - (e.myHit || -9) < 1.5) { enemyKills++; ekillsEl.textContent = enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); } } continue; }
+        if (fl & 2) { if (!e.dead) { e.dead = true; e.root.visible = false; if (!quiet) enemyDieFx(e); if (GS.elapsed - (e.myHit || -9) < 1.5) { GS.enemyKills++; ekillsEl.textContent = GS.enemyKills; crewKill(e.elite); myKill(e.pos.x, e.pos.z, 3); } } continue; }
         if (e.dead || (e.awake && !(fl & 1))) {          // came back from the respawn queue: a sleeping crate again
           e.dead = false; e.root.visible = true; e.awake = false; e.awakeParts.forEach(q => q.visible = false); setEnemyLook(e, e.matDormant);
           e.pivot.rotation.x = 0; e.hop.position.y = 0; e.hop.scale.set(1, 1, 1); e.open = 0; e.pos.set(x, 0, z); e.yaw = num(r[3], -99, 99);
@@ -6553,15 +6554,15 @@ const MONSTERS = [
       else if (d.t === 'drop') { if (!NET.client && chubs.length < 500) { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), c = spawnChub(rockStub(x, z), false);
         c.pos.set(num(d.fx, -ARENA, ARENA), 0.8, num(d.fz, -ARENA, ARENA)); chubArc(c, tmp.set(x, 0, z), 0.7, 'dazed', 3); c.dazeT = 0.7; } }
       else if (d.t === 'aw') { const A = altars[d.k]; if (NET.client && A && !A.done) { A.awake = d.s === 1; if (d.n != null) A.spawnT = num(d.n, 0, 99); if (d.w === 1 || d.w === 2) altarWave(A, d.w); } }
-      else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < elapsed) { A.netG = elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
+      else if (d.t === 'guards') { const A = altars[d.k]; if (!NET.client && A && (A.netG || 0) < GS.elapsed) { A.netG = GS.elapsed + 5; NET.applying = false; altarGuards(A, Math.round(num(d.n, 1, 8))); } }
       else if (d.t === 'eat') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA); if (NET.client && Math.hypot(x - car.pos.x, z - car.pos.z) < 50) { tmp.set(x, 0.6, z); spawnParticles(tmp, 0x4f9dff, 10, 7); SFX.play('chomp', tmp, { rate: 1.4, vol: 0.7 }); SFX.play('chub', tmp, { rate: 0.6 }); } }
       else if (d.t === 'ambush') { if (!NET.client) { NET.applying = false; ambush(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA), d.b === 1); } }
       else if (d.t === 'bm') { if (NET.client && Array.isArray(d.b)) { const seen = new Set();
           for (const q of d.b) { if (!Array.isArray(q) || !Number.isInteger(q[0])) continue; seen.add(q[0]); let B = bombs.find(B => B.id === q[0]);
-            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA), q[3] === 2); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); bombId = Math.max(bombId, q[0]); }
+            if (!B) B = addBomb(q[0], num(q[1], -ARENA, ARENA), num(q[2], -ARENA, ARENA), q[3] === 2); if (B.leap || B.fly) continue; B.tx = num(q[1], -ARENA, ARENA); B.tz = num(q[2], -ARENA, ARENA); B.n = num(q[4], 0, 8); GS.bombId = Math.max(GS.bombId, q[0]); }
           for (const B of bombs.slice()) if (!B.leap && !seen.has(B.id)) dropBomb(B); } }
       else if (d.t === 'bmx') { if (NET.client) { const B = bombs.find(B => B.id === d.i), m = swById.get(d.m); if (B && !B.leap) { if (B.fly && m) { B.leap = { t: 0.62, sx: B.fly.x, sz: B.fly.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; } else bombBoom(B, m); } } }
-      else if (d.t === 'loot') { if (NET.client && Array.isArray(d.a)) for (const q of d.a.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), num(q[4], -12, 12), num(q[5], 0, 14), num(q[6], -12, 12)); lootId = Math.max(lootId, q[0]); } }
+      else if (d.t === 'loot') { if (NET.client && Array.isArray(d.a)) for (const q of d.a.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), num(q[4], -12, 12), num(q[5], 0, 14), num(q[6], -12, 12)); GS.lootId = Math.max(GS.lootId, q[0]); } }
       else if (d.t === 'lootget') { if (!NET.client) { const i = loot.findIndex(L => L.id === d.i); if (i >= 0) { const L = loot[i]; scene.remove(L.m); loot.splice(i, 1); netEv({ t: 'lootx', i: L.id }); netEv({ t: 'lootok', gm: L.gem ? 1 : 0 }, from); } } }
       else if (d.t === 'lootok') { if (NET.client) lootGain(d.gm === 1); }
       else if (d.t === 'lootx') { const i = loot.findIndex(L => L.id === d.i); if (i >= 0) { scene.remove(loot[i].m); loot.splice(i, 1); } }
@@ -6572,7 +6573,7 @@ const MONSTERS = [
           if (B && m && m.rig && !m.dead && Math.hypot(m.pos.x - (B.fly ? B.fly.x : B.x), m.pos.z - (B.fly ? B.fly.z : B.z)) < 25) { B.rigM = m; B.leap = { t: 0.62, sx: B.fly ? B.fly.x : B.x, sz: B.fly ? B.fly.z : B.z, tx: m.pos.x, tz: m.pos.z }; B.fly = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) B.by = [q.pos.x, q.pos.z]; netEv({ t: 'bmx', i: B.id, m: m.id }); } } }
       else if (d.t === 'bml') { if (!NET.client) { const B = bombs.find(B => B.id === d.i); if (B && !B.leap) { B.fly = null; B.x = num(d.x, -ARENA, ARENA); B.z = num(d.z, -ARENA, ARENA); } } }
       else if (d.t === 'armed') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R && (W_GEAR.includes(d.k) || d.k === 'jump')) armedFx(R, d.k); }
-      else if (d.t === 'bdrop') { if (NET.client) { wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
+      else if (d.t === 'bdrop') { if (NET.client) { GS.wbKilled++; bossDrop(num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); } }
       else if (d.t === 'decoy') { addDecoy(num(d.a, -ARENA, ARENA), num(d.b, -ARENA, ARENA), num(d.x, -ARENA, ARENA), num(d.z, -ARENA, ARENA)); }
       else if (d.t === 'cubes') { let R = null; for (const q of NET.remotes.values()) if (String(q.peer) === String(from)) R = q; if (R) spawnCubes(Math.round(num(d.n, 1, 5)), R, Math.round(num(d.l, 0, 2))); }
       else if (d.t === 'dome') { const x = num(d.x, -ARENA, ARENA), z = num(d.z, -ARENA, ARENA), r = num(d.r, 3, 14), T = num(d.T, 0.5, 6); addDome(x, z, r, T); if (!NET.client) { NET.applying = false; blastAt(x, z, r, 1, 26, true); } }
@@ -6589,7 +6590,7 @@ const MONSTERS = [
         else if (d.k === 'sp') spit(m, null, null, new THREE.Vector3(num(d.x, -ARENA, ARENA), num(d.y, 0, 20), num(d.z, -ARENA, ARENA))); } }
       else if (d.t === 'sync?') { if (netAmHost()) netEv(netWorld(), from); }
       else if (d.t === 'sync') {
-        if (Array.isArray(d.lt)) for (const q of d.lt.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), 0, 0, 0); lootId = Math.max(lootId, q[0]); }
+        if (Array.isArray(d.lt)) for (const q of d.lt.slice(0, 120)) if (Array.isArray(q) && Number.isInteger(q[0]) && !loot.some(L => L.id === q[0])) { addLoot(q[0], q[1] === 1 ? 1 : 0, num(q[2], -ARENA - 80, ARENA + 80), num(q[3], -ARENA, ARENA), 0, 0, 0); GS.lootId = Math.max(GS.lootId, q[0]); }
         for (const i of Array.isArray(d.sm) ? d.sm.slice(0, 400) : []) { const o = obAt(i); if (o && (o.pillar || o.rock) && o.mesh.visible) { o.mesh.visible = false; if (o.rock) rockSmashed(o); } }
         for (const c of Array.isArray(d.cr) ? d.cr.slice(0, 400) : []) { const o = obAt(c && c[0]); if (!o || !o.crate || o.room) continue;
           o.mesh.position.set(num(c[1], -ARENA, ARENA), o.h / 2, num(c[2], -ARENA, ARENA)); o.rc = num(c[4], 0, 1e6);
@@ -6624,7 +6625,7 @@ const MONSTERS = [
     for (const x of chubs) if (!x.dead && x.state !== 'cart') c++;
     for (const o of obstacles) if ((o.pillar || o.rock) && !o.mesh.visible) sm++;
     return { b: BUILD, r: !NET.game ? 'solo' : NET.client ? 'guest' : 'HOST', n: NET.nick, f: Math.round(DG.fps), m, ms, c, k: cart.riders.length, al: altars.map(A => A.n).join('/'), sm, hp: Math.round(car.hp),
-      x: Math.round(car.pos.x), z: Math.round(car.pos.z), ride, pl: NET.remotes.size + 1, age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0, rx: DG.rxRate, gh: DG.ghost, vis: document.hidden ? 0 : 1, md: car.mode, inp: COARSE ? 'touch' : 'keys', slip: DG.slip | 0 };
+      x: Math.round(car.pos.x), z: Math.round(car.pos.z), ride: GS.ride, pl: NET.remotes.size + 1, age: NET.client ? Math.round(performance.now() - DG.lastSw) : 0, rx: DG.rxRate, gh: DG.ghost, vis: document.hidden ? 0 : 1, md: car.mode, inp: COARSE ? 'touch' : 'keys', slip: DG.slip | 0 };
   }
   function diagRender() {
     DG.dirty = false; if (!DG.open) return;
@@ -6674,23 +6675,23 @@ const MONSTERS = [
       const nx = d > 0.05 ? dx / d : side, nz = d > 0.05 ? dz / d : 0, push = (minD - d) * 0.6;
       car.pos.x += nx * push; car.pos.z += nz * push;
       const vn = car.vel.x * nx + car.vel.z * nz;
-      if (vn < 0) { car.vel.x -= nx * vn * 1.3; car.vel.z -= nz * vn * 1.3; car.speed *= 0.8; if (ride === 'spider') { SPD.vel.x -= nx * vn * 1.3; SPD.vel.z -= nz * vn * 1.3; }
-        if (-vn > 8 && (NET.bumpT || 0) < elapsed) { NET.bumpT = elapsed + 0.4; cartSpill(1); shake = Math.max(shake, 0.3); SFX.play('clang', car.pos, { vol: 0.5 }); spawnParticles(tmp.set(car.pos.x - nx * car.radius, 1, car.pos.z - nz * car.radius), 0xffd27a, 6, 6); } }
+      if (vn < 0) { car.vel.x -= nx * vn * 1.3; car.vel.z -= nz * vn * 1.3; car.speed *= 0.8; if (GS.ride === 'spider') { SPD.vel.x -= nx * vn * 1.3; SPD.vel.z -= nz * vn * 1.3; }
+        if (-vn > 8 && (NET.bumpT || 0) < GS.elapsed) { NET.bumpT = GS.elapsed + 0.4; cartSpill(1); GS.shake = Math.max(GS.shake, 0.3); SFX.play('clang', car.pos, { vol: 0.5 }); spawnParticles(tmp.set(car.pos.x - nx * car.radius, 1, car.pos.z - nz * car.radius), 0xffd27a, 6, 6); } }
     }
   }
   const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
   function netPose() {                                  // how the ride is posed right now: cart sway, how deep it is dug in, gallop phase, the spider's tilt and feet
-    const o = { cp: r2(cart.phi), dp: r2(car.depth), ph: r2(ridePhase % 1000) };
-    if (ride === 'spider' && rideG.spider && rideG.spider.feet) {
+    const o = { cp: r2(cart.phi), dp: r2(car.depth), ph: r2(GS.ridePhase % 1000) };
+    if (GS.ride === 'spider' && rideG.spider && rideG.spider.feet) {
       const q = carGroup.quaternion; o.q = [r2(q.x), r2(q.y), r2(q.z), r2(q.w)];
       o.ft = []; for (const L of rideG.spider.feet) o.ft.push(r1(L.foot.x), r1(L.foot.y), r1(L.foot.z));
     }
     return o;
   }
   function netSend() {
-    NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
-      cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
-      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, tw: myTow, pp: pedestals.filter(P => P.state !== 'gone').map(P => [P.x, P.z]), ak: gearDone() ? 1 : 0, ks: kit().every(t => abilities[t]) ? 1 : 0, gd: W_GEAR.every(k => weapons[k]) && abilities.jump ? 1 : 0, tl: ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
+    NET.room.presence({ game: NET.game, hostNick: NET.hostNick, nick: NET.nick, ride: GS.ride, x: r1(car.pos.x), z: r1(car.pos.z), y: r1(car.y), h: r2(car.heading), t: r2(car.heading + turret.rotation.y),
+      cx: r1(cart.pos.x), cz: r1(cart.pos.z), ch: r2(GS.ride === 'spider' ? cart.vis : cart.heading), cn: cart.riders.length, cs: cart.shown ? 1 : 0,
+      a: car.alive && car.depth < 0.5 ? 1 : 0, f: NET.fireSeq, hp: NET.isHost ? 1 : 0, v: VER, wo: weapons.orbit, tw: GS.myTow, pp: pedestals.filter(P => P.state !== 'gone').map(P => [P.x, P.z]), ak: gearDone() ? 1 : 0, ks: kit().every(t => abilities[t]) ? 1 : 0, gd: W_GEAR.every(k => weapons[k]) && abilities.jump ? 1 : 0, tl: GS.ride === 'unicorn' && abilities.trail ? abLv.trail + 1 : 0, vw: r1(camera.right / camera.zoom), vh: r1(camera.top / camera.zoom), ...netPose() }).catch(() => {});
   }
   // simple stand-in models for the other players
   function buildProxy(k) {
@@ -6802,11 +6803,11 @@ const MONSTERS = [
         while (rs.length < show) { const sp = new THREE.Sprite(chubMats[0][0]); sp.center.set(0.5, 0.04); sp.scale.set(CHUB_SIZE * 0.85, CHUB_SIZE * 0.85, 1); scene.add(sp); rs.push(sp); }
         rs.forEach((sp, i) => { sp.visible = i < show; if (i >= show) return;
           const lx = (i % 3 - 1) * 0.56, lz = (Math.floor(i / 3) % 3 - 1) * 0.66, ly = 0.2 + Math.floor(i / 9) * 0.5;
-          sp.material = chubMats[0][Math.floor(elapsed * 3 + i) % CHUB_FR];
-          sp.position.set(R.cpos.x + rx * lx + fx * lz, 0.68 + ly + Math.abs(Math.sin(elapsed * 9 + i)) * 0.06, R.cpos.z + rz * lx + fz * lz); }); }
+          sp.material = chubMats[0][Math.floor(GS.elapsed * 3 + i) % CHUB_FR];
+          sp.position.set(R.cpos.x + rx * lx + fx * lz, 0.68 + ly + Math.abs(Math.sin(GS.elapsed * 9 + i)) * 0.06, R.cpos.z + rz * lx + fz * lz); }); }
       { const L = Math.round(num(pr.wo, 0, 5)) - 1, want = up && L >= 0 ? W_STATS.orbit.n[L] * (R.ride === 'halo' ? 2 : 1) : 0, sw = R.saws || (R.saws = []), uni = R.ride === 'unicorn';      // their saws / dodecahedra
         while (sw.length < want) { const m = new THREE.Mesh(uni ? dodecaGeo : sawGeo, uni ? dodecaMats[sw.length % dodecaMats.length] : sawMat); m.scale.setScalar(uni ? 1.1 : 1.4); scene.add(m); sw.push(m); }
-        sw.forEach((m, i) => { m.visible = i < want; if (i >= want) return; const a = elapsed * W_STATS.orbit.spd[L] * (R.ride === 'halo' ? 1.86 : 1) + i / want * 6.283, rr = W_STATS.orbit.r[L];
+        sw.forEach((m, i) => { m.visible = i < want; if (i >= want) return; const a = GS.elapsed * W_STATS.orbit.spd[L] * (R.ride === 'halo' ? 1.86 : 1) + i / want * 6.283, rr = W_STATS.orbit.r[L];
           m.position.set(R.pos.x + Math.sin(a) * rr, 1 + R.pos.y, R.pos.z + Math.cos(a) * rr); if (uni) { m.rotation.x += dt * 3; m.rotation.y += dt * 4; } else m.rotation.y += dt * 22; }); }
       const cn = Math.round(num(pr.cn, 0, 999)); if (pr !== R.lastPr) { R.lastPr = pr; R.cn = cn; } netLabel(R, (cleanNick(pr.nick) || 'Driver') + (cn ? ' · ' + cn : ''));
       if (pr.f !== R.lastF) {                            // they fired: a tracer for show, no damage
@@ -6836,16 +6837,16 @@ const MONSTERS = [
   const PH = { i: 0, brk: PHASES[0].brk, wv: 0, clr: 0, t: 0, hellN: 0, gate: false, cardT: 0, shown: -1, lootT: 0, findT: 0 };
   function waveMul() {                                 // how thick a wave is: phase, fed altars, and +35% per friend in the lobby
     let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++;
-    return PHASES[PH.i].mul * (PHASES[PH.i].key === 'save' ? 1 + 0.3 * altarsDone : 1) * (1 + 0.35 * Math.min(3, o));
+    return PHASES[PH.i].mul * (PHASES[PH.i].key === 'save' ? 1 + 0.3 * GS.altarsDone : 1) * (1 + 0.35 * Math.min(3, o));
   }
   const hellTotal = () => { let o = 0; if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) o++; return 12 + 4 * Math.min(3, o); };      // 12 for one, +4 per friend
   const hellAlive = () => { let n = 0; for (const m of swarm) if (!m.dead && m.hell) n++; return n; };
   const foundN = () => ({ a: altars.filter(A => A.found).length, r: rocks.filter(R => R.found).length });
   function phDone() {
     const k = PHASES[PH.i].key, f = foundN();
-    if (k === 'roll') return gearDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every(R => R.ak)) && wbSpawned && rigOwed === 0 && !swarm.some(m => m.rig && !m.dead);
+    if (k === 'roll') return gearDone() && (!(NET.on && NET.game) || [...NET.remotes.values()].every(R => R.ak)) && GS.wbSpawned && GS.rigOwed === 0 && !swarm.some(m => m.rig && !m.dead);
     if (k === 'scout') return f.a >= altars.length && f.r >= Math.min(NEST_GOAL, rocks.length) && PH.gate;
-    if (k === 'save') return altarsDone >= 3;
+    if (k === 'save') return GS.altarsDone >= 3;
     if (k === 'hell') return PH.hellN >= hellTotal() && hellAlive() === 0;
     return false;
   }
@@ -6873,7 +6874,7 @@ const MONSTERS = [
   function phScan() {                                  // anyone driving close enough discovers things (each machine checks, the host's word is final)
     const ps = []; if (car.alive) ps.push(car.pos); if (NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up) ps.push(R.pos);
     const near = (x, z, r) => ps.some(p => Math.hypot(p.x - x, p.z - z) < r);
-    if (worldUp) altars.forEach((A, i) => { if (!A.found && near(A.x, A.z, FIND_R)) phFind('a', i); });
+    if (GS.worldUp) altars.forEach((A, i) => { if (!A.found && near(A.x, A.z, FIND_R)) phFind('a', i); });
     for (const R of rocks) if (!R.found && R.mesh.visible && near(R.mesh.position.x, R.mesh.position.z, FIND_R - 8)) phFind('r', obstacles.indexOf(R));
     if (!PH.gate && near(ROOM_X1, 0, 50)) phFind('g', 0);
   }
@@ -6887,7 +6888,7 @@ const MONSTERS = [
   }
   function updatePhases(dt) {
     if (startEl.isConnected) return;
-    if (!worldUp && PH.i >= 1) worldWake();
+    if (!GS.worldUp && PH.i >= 1) worldWake();
     if (rising.length) updateRising(dt);
     if ((PH.findT -= dt) <= 0) { PH.findT = 0.4; if (!NET.client) phScan(); }
     if (PH.brk > 0) PH.brk = Math.max(0, PH.brk - dt); else PH.t += dt;
@@ -6917,7 +6918,7 @@ const MONSTERS = [
       if (crewArmed()) { const KB = K.filter(t => t !== 'jump'), hb = KB.filter(t => abilities[t]).length; t += tk('Hunt the wandering bosses', hb >= KB.length, hb + '/' + KB.length + ' skills'); const lr = swarm.filter(m => m.rig && !m.dead).length; t += tk('Bomb the log machines (3 bombs each)', lr === 0, lr ? lr + ' left' : ''); }
       if (NET.on && NET.game) { const rs = [...NET.remotes.values()], n = rs.filter(R => R.ak).length + (gearDone() ? 1 : 0); t += tk('Whole crew geared up', n >= rs.length + 1, n + '/' + (rs.length + 1)); } }
     else if (P.key === 'scout') t = tk('Find the altars', f.a >= altars.length, f.a + '/' + altars.length) + tk('Find chubzik nests', f.r >= nests, Math.min(f.r, nests) + '/' + nests) + tk('Find the boss gate', PH.gate);
-    else if (P.key === 'save') t = tk('Fill the altars', altarsDone >= 3, altarsDone + '/3');
+    else if (P.key === 'save') t = tk('Fill the altars', GS.altarsDone >= 3, GS.altarsDone + '/3');
     else if (P.key === 'hell') { const tot = hellTotal(), dead = Math.max(0, PH.hellN - hellAlive()); t = tk('Kill the mini-bosses', PH.hellN >= tot && dead >= tot, dead + '/' + tot); }
     else t = tk('Kill the Pyramidon', boss.state === 'dead');
     return `<div class="ph">${PH.brk > 0 ? 'NEXT: ' : ''}${P.name}</div><div class="sub${PH.brk > 0 ? '' : ' desc'}">${PH.brk > 0 ? 'break · ' + Math.ceil(PH.brk) + 's' : P.desc}</div>` + t;
@@ -6944,7 +6945,7 @@ const MONSTERS = [
     poly([[ROOM_X1, -ROOM_HZ], [ROOM_X2, -ROOM_HZ], [ROOM_X2, ROOM_HZ], [ROOM_X1, ROOM_HZ]], 'rgba(60,20,30,.6)', 'rgba(255,120,120,.35)', 1.2);
     const dot = (wx, wz, r, col, ring) => { const [px, py] = f(wx, wz); x.beginPath(); x.arc(px, py, r * dpr, 0, 6.283); if (ring) { x.strokeStyle = col; x.lineWidth = 2 * dpr; x.stroke(); } else { x.fillStyle = col; x.fill(); } return [px, py]; };
     const label = (px, py, t, col, size) => { x.font = `800 ${size * dpr}px system-ui,sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 3 * dpr; x.strokeStyle = 'rgba(0,0,0,.85)'; x.strokeText(t, px, py); x.fillStyle = col; x.fillText(t, px, py); };
-    if (PH.gate) { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : gateOpen ? '☠' : '🔒', gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
+    if (PH.gate) { const [gx, gy] = f(ARENA, 0); label(gx, gy, boss.state === 'dead' ? '✔' : GS.gateOpen ? '☠' : '🔒', GS.gateOpen ? '#ffd27a' : '#c8c0b8', 11); }    // the boss gate
     if (boss.ph === 2 && boss.state !== 'dead' && boss.state !== 'idle') { const [bx, by] = dot(BOSS_POS.x, BOSS_POS.z, 6, '#ff7a1a'); label(bx, by, '☠', '#1a1014', 10); }      // the Pyramidon out in the field
     for (const R of rocks) { if (!R.mesh.visible || !R.found) continue; const n = PH.i >= 2 ? nestCount(R) : 0, [px, py] = dot(R.mesh.position.x, R.mesh.position.z, 3.2, '#9a7a62'); if (n) label(px, py - 8 * dpr, String(n), '#7fc0ff', 10); }   // chubzik nests and how many wait there
     for (const A of altars) { if (!A.found) continue; const [px, py] = dot(A.x, A.z, 5, A.done ? '#9cf59a' : '#ff7ad8', true);
@@ -6973,14 +6974,14 @@ const MONSTERS = [
         rk.sort((a, b) => a.d - b.d); hintList.push(...rk.slice(0, 2));
         for (const P of pedestals) if (P.state !== 'gone') hintList.push({ x: P.x, z: P.z, d: Math.hypot(P.x - car.pos.x, P.z - car.pos.z), range: 999, col: '#ffd23a', text: '⚙', cap: P.state === 'sealed' || P.state === 'rising' ? 'guards: ' + (P.guards || 0) : AB_INFO[pedIcon(P.k)].title });
         for (const m of swarm) if (m.wbLoot && !m.dead) hintList.push({ x: m.pos.x, z: m.pos.z, d: Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: wbGift() ? AB_INFO[wbGift()].title + ' boss' : 'skill boss', live: m, grp: 'wb' });      // only the bosses that carry a skill get a pointer; the rest of the crowd is on the minimap
-        if (!myTow) { let nb = null, nd = 1e9; for (const B of bombs) if (!B.leap) { const d = Math.hypot(B.x - car.pos.x, B.z - car.pos.z); if (d < nd) { nd = d; nb = B; } }
+        if (!GS.myTow) { let nb = null, nd = 1e9; for (const B of bombs) if (!B.leap) { const d = Math.hypot(B.x - car.pos.x, B.z - car.pos.z); if (d < nd) { nd = d; nb = B; } }
           if (nb && nd < 140) hintList.push({ x: nb.x, z: nb.z, d: nd, range: 999, col: '#ff6a3a', text: '●', cap: nb.drop && nb.drop.t < HAND.arrive ? 'bomb incoming' : 'bomb' }); }
         else { let nr = null, nd = 1e9; for (const m of swarm) if (m.rig && !m.dead) { const d = Math.hypot(m.pos.x - car.pos.x, m.pos.z - car.pos.z); if (d < nd) { nd = d; nr = m; } }
           if (nr) hintList.push({ x: nr.pos.x, z: nr.pos.z, d: nd, range: 999, col: '#ff6a3a', text: '✱', cap: 'log machine ' + (nr.rig.hits || 0) + '/3' }); }
         for (const p of pickups) if (p.own) hintList.push({ x: p.x, z: p.z, d: Math.hypot(p.x - car.pos.x, p.z - car.pos.z), range: 999, col: '#ffd23a', text: '★', cap: AB_INFO[p.type].title });      // your gear drop: always pointed at
-        if (worldUp) altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
+        if (GS.worldUp) altars.forEach(A => { const d = Math.hypot(A.x - car.pos.x, A.z - car.pos.z); if (!A.done && d < 60) hintList.push({ x: A.x, z: A.z, d, range: 60, col: '#ff7ad8', text: PH.i < 2 ? '?' : A.n + '/' + ALTAR_NEED, cap: PH.i < 2 ? 'altar' : 'sacrifice!' }); });
         if (boss.ph === 2 && boss.state !== 'dead' && boss.state !== 'idle') hintList.push({ x: BOSS_POS.x, z: BOSS_POS.z, d: Math.hypot(BOSS_POS.x - car.pos.x, BOSS_POS.z - car.pos.z), range: 999, col: '#ff7a1a', text: 'BOSS', cap: 'kill boss' });
-        else { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: gateOpen ? '#ffd27a' : '#9a8f86', text: gateOpen ? 'BOSS' : '🔒', cap: gateOpen ? 'kill boss' : 'boss gate' }); }
+        else { const d = Math.hypot(ROOM_X1 - car.pos.x, car.pos.z), far = GS.gateOpen ? 150 : 70; if (d < far && boss.state !== 'dead') hintList.push({ x: ROOM_X1, z: 0, d, range: far, col: GS.gateOpen ? '#ffd27a' : '#9a8f86', text: GS.gateOpen ? 'BOSS' : '🔒', cap: GS.gateOpen ? 'kill boss' : 'boss gate' }); }
       }
     }
     if (hintT === 0.3 && !startEl.isConnected && NET.on && NET.game) for (const R of NET.remotes.values()) if (R.up)
@@ -7037,12 +7038,12 @@ const MONSTERS = [
     const sprites = (x, list) => { x.fillStyle = '#3b2f33'; x.fillRect(0, 0, 160, 160); for (const [img, dx, dy, sz] of list) x.drawImage(img, dx, dy, sz, sz); };
     const shot = (x, tx, ty, tz, half) => {              // a real render of that spot through the game's own post-processing
       try {
-        if (!composer || HX) throw 0;      // tests skip the how-to pictures: five full renders, 18 s of a headless start
-        const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = composer.passes[0], keep = rp.camera;
+        if (!GS.composer || HX) throw 0;      // tests skip the how-to pictures: five full renders, 18 s of a headless start
+        const cv = renderer.domElement, asp = cv.width / cv.height, cam = camera.clone(), rp = GS.composer.passes[0], keep = rp.camera;
         tmp.set(tx, ty, tz); cam.position.copy(tmp).add(ISO_OFFSET); cam.lookAt(tmp);
         cam.left = -half * asp; cam.right = half * asp; cam.top = half; cam.bottom = -half; cam.zoom = 1; cam.updateProjectionMatrix();
         sun.position.copy(tmp).add(SUN_OFFSET); sun.target.position.copy(tmp); sun.target.updateMatrixWorld(); renderer.shadowMap.needsUpdate = true;
-        rp.camera = cam; composer.render(); rp.camera = keep;
+        rp.camera = cam; GS.composer.render(); rp.camera = keep;
         const sq = Math.min(cv.width, cv.height); x.drawImage(cv, (cv.width - sq) / 2, (cv.height - sq) / 2, sq, sq, 0, 0, 160, 160);
       } catch (e) { x.fillStyle = '#3b2f33'; x.fillRect(0, 0, 160, 160); }
     };
@@ -7064,7 +7065,7 @@ const MONSTERS = [
     unicorn: { name: 'UNICORN', emo: '🦄', tag: 'gallops · 100 HP', how: 'Gores whatever it gallops into. Its saws stun instead of cutting.',
                rows: [['bomb', 'Dome Bomb', 'RMB', 'blasts the biters away, nobody gets into the dome'], ['trail', 'Rainbow Trail', 'passive', 'biters that step on it lose you'], ['jump', 'Starburst', 'Space', 'levelled up: a ring of stars on landing']] } };
   (function rideCards() {
-    const keep = ride, rp = composer && !window.__noRender ? composer.passes[0] : null, el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
+    const keep = GS.ride, rp = GS.composer && !window.__noRender ? GS.composer.passes[0] : null, el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
     for (const b of document.querySelectorAll('#rides button')) { const k = b.dataset.ride, C = RIDE_CARD[k]; if (!C) continue;
       let pic = null;
       if (rp) try {                                        // the ride itself, through the game's camera and post-processing
@@ -7073,7 +7074,7 @@ const MONSTERS = [
         tmp.copy(carGroup.position).setY(1.5); cam.position.copy(tmp).add(ISO_OFFSET); cam.lookAt(tmp);
         cam.left = -half * asp; cam.right = half * asp; cam.top = half; cam.bottom = -half; cam.zoom = 1; cam.updateProjectionMatrix();
         sun.position.copy(tmp).add(SUN_OFFSET); sun.target.position.copy(tmp); sun.target.updateMatrixWorld(); renderer.shadowMap.needsUpdate = true;
-        rp.camera = cam; composer.render(); rp.camera = keepCam;
+        rp.camera = cam; GS.composer.render(); rp.camera = keepCam;
         pic = mkCanvas(320, 200); pic.className = 'rc-pic'; const sh = cv.height, sw = Math.min(cv.width, sh * 1.6); pic.getContext('2d').drawImage(cv, (cv.width - sw) / 2, 0, sw, sh, 0, 0, 320, 200);
       } catch (e) { pic = null; }
       b.textContent = ''; b.appendChild(pic || el('div', 'rc-pic', C.emo));
@@ -7082,7 +7083,7 @@ const MONSTERS = [
         h.appendChild(el('kbd', 'rc-key', key)); d.append(h, el('span', '', text)); row.append(img, d); b.appendChild(row); } }
     if (rp) setRide(keep);
   })();
-  worldRnd = trueRandom;                                // world is built: back to real randomness for the simulation
+  GS.worldRnd = trueRandom;                                // world is built: back to real randomness for the simulation
   if (HX && HX.reseed) HX.reseed();                     // tests: the game's own randomness starts from the test's seed here, however many numbers Three.js took while loading
   for (const e of earlyErrors.splice(0)) try { netLog('error: ' + e); } catch (x) {}      // the log exists now
   { const a = Math.random() * 6.283; car.pos.set(Math.cos(a) * ARENA * 0.4, 0, Math.sin(a) * ARENA * 0.4); car.heading = Math.atan2(-car.pos.x, -car.pos.z); }      // start out on the plain, facing the centre pedestal
@@ -7097,12 +7098,12 @@ const MONSTERS = [
     clock.update(); const raw = clock.getDelta(), dt = HX ? HX.dt(raw) : Math.min(raw, 1 / 30);
     adaptQuality(raw);
     for (let k = 0, n = HX ? HX.sub : 1; k < n; k++) update(dt);      // tests in turbo run several game steps a frame
-    if (++shadowTick >= shadowEvery) { shadowTick = 0; renderer.shadowMap.needsUpdate = true; }
-    if (HX && HX.skipRender()) { /* tests: nothing to draw */ } else if (composer) {
-      gradePass.uniforms.time.value = elapsed;
-      gradePass.uniforms.hurt.value = Math.max(0, hurtFlash) / 0.18;
-      gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * 0.35)) : 0;
-      composer.render();
+    if (++GS.shadowTick >= GS.shadowEvery) { GS.shadowTick = 0; renderer.shadowMap.needsUpdate = true; }
+    if (HX && HX.skipRender()) { /* tests: nothing to draw */ } else if (GS.composer) {
+      GS.gradePass.uniforms.time.value = GS.elapsed;
+      GS.gradePass.uniforms.hurt.value = Math.max(0, GS.hurtFlash) / 0.18;
+      GS.gradePass.uniforms.lowHp.value = car.alive ? Math.max(0, 1 - car.hp / (car.maxHp * 0.35)) : 0;
+      GS.composer.render();
     } else renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
