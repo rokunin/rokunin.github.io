@@ -34,7 +34,7 @@ with Game() as g:
     ev(b, WATCH); a.wait_for_timeout(400); ev(a, QUIET + " d.boss.quakeCd = 0;")
     wait(b, "d.lavas.length === 1", 6)
     wait(a, "d.lavas.length === 0 && d.quakes.length === 0 && !d.boss.vol", 15)
-    t.eq('the client saw one ring of lava of 32 m and six quake rings of 26 m', ev(b, "return [window.__w.lava, window.__w.lr, window.__w.n, [...new Set(window.__w.r)]]"), [1, 32, 6, [26]])
+    t.eq('the client saw one wall of fire of 40 m and six quake rings of 26 m', ev(b, "return [window.__w.lava, window.__w.lr, window.__w.n, [...new Set(window.__w.r)]]"), [1, 40, 6, [26]])
     wait(a, "d.boss.mv", 4, every=0.05); wait(a, "!d.boss.mv", 15); b.wait_for_timeout(600)
     t.eq('after the dash both have it at the same place', ev(b, POS), ev(a, POS))
     t.ok('and that place is new', ev(a, "return Math.hypot(d.BOSS_POS.x - d.BOSS2.out[0], d.BOSS_POS.z - d.BOSS2.out[1]) > 5"))

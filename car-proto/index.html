@@ -2994,7 +2994,7 @@ laugh(r) {                                       // a big man's belly laugh: bre
     crew.on = true; setTimeout(() => crewSay('start', 1, true), 700);
   });
   addEventListener('pointerdown', () => SFX.init(), { capture: true });       // iOS / autoplay: audio starts on the first gesture
-  const BUILD = 133, buildEl = document.getElementById('build');
+  const BUILD = 134, buildEl = document.getElementById('build');
   function hardReload() {                                // refetch the page past the browser cache, then reload (what Ctrl+Shift+R does)
     const go = () => { try { location.reload(); } catch (e) {} };
     try { fetch(location.href, { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch (e) { go(); }
@@ -7285,7 +7285,7 @@ const MONSTERS = [
   // it moves in dashes between volleys, and every volley of quake rings comes with a ring of lava around it that has to be jumped, from either side.
   const BOSS2 = { out: [ARENA - 78, 0], fleeV: 26, dashV: 30, near: [14, 22], sight: 75, ram: 18,
                   lairQ: { n: 3, r: 13, dmg: 26, gap: [12.5, 17.5], rage: [8.75, 12.5] }, fieldQ: { n: 6, r: 26, dmg: 12, gap: [6.25, 8.75], rage: [4.4, 6.25] },      // gap: seconds between volleys (build 133: a fifth rarer)
-                  step: 0.5, lavaR: 32, lavaW: 1.7, lavaH: 2.8, lavaDmg: 20 };
+                  step: 0.5, lavaR: 40, lavaW: 1.7, lavaH: 4.2, lavaDmg: 20 };      // lavaR: the fire wall's radius (build 134: 32 x 1.25)
   const BOSS_SINK = 10.5;                              // how deep it hides before the fight
   const bossGroup = new THREE.Group();
   bossGroup.position.set(BOSS_POS.x, -BOSS_SINK, BOSS_POS.z); bossGroup.visible = false; scene.add(bossGroup);
@@ -7677,25 +7677,51 @@ const MONSTERS = [
     boss.vol = null; const G = bossRage() ? Q.rage : Q.gap; boss.quakeCd = rand(G[0], G[1]);
     if (field) bossDash();
   }
-  const lavas = [], lavaWallGeo = new THREE.CylinderGeometry(1, 1, 1, 120, 1, true); lavaWallGeo.translate(0, 0.5, 0);
-  function bossLava(x, z, r, T) {                        // a ring of lava: it rises, stands T seconds, sinks; on the ground you do not cross it unhurt, in the air you do
-    const mk = (col, op, g) => glow(new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false }), g), w = BOSS2.lavaW, G = new THREE.Group();
-    const crust = new THREE.Mesh(new THREE.RingGeometry(r - w - 0.7, r + w + 0.7, 120), new THREE.MeshBasicMaterial({ color: 0x1c0a08, transparent: true, opacity: 0.8, depthWrite: false }));      // a scorched edge: this is lava, not one more quake ring
-    const band = new THREE.Mesh(new THREE.RingGeometry(r - w, r + w, 120), mk(0xc81e06, 0.95, 1.15)), core = new THREE.Mesh(new THREE.RingGeometry(r - w * 0.42, r + w * 0.42, 120), mk(0xff7a14, 0.95, 1.5));
-    crust.rotation.x = band.rotation.x = core.rotation.x = -Math.PI / 2; crust.position.y = 0.09; band.position.y = 0.1; core.position.y = 0.12;
-    const wIn = new THREE.Mesh(lavaWallGeo, mk(0xff6a12, 0.55, 1.3)), wOut = new THREE.Mesh(lavaWallGeo, mk(0xd82408, 0.45, 1.1)); wIn.scale.set(r - w * 0.5, 0.01, r - w * 0.5); wOut.scale.set(r + w * 0.5, 0.01, r + w * 0.5);
-    G.add(crust, band, core, wIn, wOut); G.position.set(x, 0, z); scene.add(G); lavas.push({ x, z, r, t: 0, T, G, crust, band, core, wIn, wOut });
-    SFX.play('boss_roar', tmp.set(x, 0, z), { rate: 0.45, vol: 0.8 }); if (Math.hypot(car.pos.x - x, car.pos.z - z) < r + 25) flashAlert('LAVA RING: JUMP IT');
+  // The fire wall (build 134, concept B1 with the ground glow of A1): a low ribbon of magenta fire in the Pyramidon's colours, torn at the top by
+  // rising noise like a dissolve shader, a hot line where it meets the ground and a wide pink glow on the ground on both sides.
+  const lavas = [], lavaWallGeo = new THREE.CylinderGeometry(1, 1, 1, 180, 1, true); lavaWallGeo.translate(0, 0.5, 0);
+  const SHV = 'varying vec2 vUv; varying vec3 vP; void main(){ vUv = uv; vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+  const fireWallMat = rep => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uT: { value: 0 }, uA: { value: 0 }, uRep: { value: rep } }, vertexShader: SHV,
+    fragmentShader: `uniform float uT, uA, uRep; varying vec2 vUv;
+      float hs(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p, float P){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); float a = mod(i.x, P), b = mod(i.x + 1.0, P);      // value noise that wraps round the circle
+        return mix(mix(hs(vec2(a, i.y)), hs(vec2(b, i.y)), f.x), mix(hs(vec2(a, i.y + 1.0)), hs(vec2(b, i.y + 1.0)), f.x), f.y); }
+      void main(){
+        float v = vUv.y, u = vUv.x * uRep;
+        float c = vn(vec2(u, uT * 0.8), uRep), tb = vn(vec2(u * 2.0, v * 3.0 - uT * 3.2), uRep * 2.0);                         // c: how tall this tongue is now; tb: turbulence rising through it
+        float top = 0.3 + pow(c, 1.4) * 0.7, m = top - v + (tb - 0.5) * 0.26;                                                   // a row of tongues, each with its own height, licking up
+        if (m < 0.0) discard;
+        float k = clamp(v / top, 0.0, 1.0), rim = 1.0 - smoothstep(0.0, 0.07, m);                                               // k: 0 at the foot of a tongue, 1 at its tip
+        vec3 deep = vec3(0.34, 0.02, 0.78), mag = vec3(0.95, 0.03, 0.55), pink = vec3(1.0, 0.42, 0.85);
+        vec3 col = mix(deep, mag, smoothstep(0.0, 0.45, k)); col = mix(col, pink, smoothstep(0.55, 1.0, k));
+        col += pink * rim * 0.7 + mag * (1.0 - smoothstep(0.0, 0.07, v)) * 1.1;                                                 // a hot rim on every edge, a hot line along the foot
+        gl_FragColor = vec4(col * (0.8 + 0.35 * k), uA * (0.82 + 0.18 * smoothstep(0.0, 0.15, m)));
+      }` });
+  const fireGlowMat = r => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uT: { value: 0 }, uA: { value: 0 }, uR: { value: r } }, vertexShader: SHV,
+    fragmentShader: `uniform float uT, uA, uR; varying vec3 vP;
+      void main(){
+        float d = length(vP.xy) - uR, a = atan(vP.y, vP.x);
+        float g = d < 0.0 ? exp(d / 5.0) * 0.8 + 0.05 : exp(-d / 3.5);                                                            // wide on the inside, the whole floor in it faintly tinted
+        g *= 0.85 + 0.15 * sin(a * 23.0 + uT * 3.0) * sin(a * 7.0 - uT * 1.7);
+        gl_FragColor = vec4(vec3(1.0, 0.1, 0.6) * g * 0.3 * uA, 1.0);
+      }` });
+  function bossLava(x, z, r, T) {                        // the fire wall: it rises, stands T seconds, sinks; on the ground you do not cross it unhurt, in the air you do
+    const G = new THREE.Group(), wall = new THREE.Mesh(lavaWallGeo, fireWallMat(Math.round(2 * Math.PI * r / 2.6)));
+    wall.scale.set(r, 0.01, r); wall.renderOrder = 3;
+    const gl = new THREE.Mesh(new THREE.RingGeometry(0.5, r + 14, 180, 1), fireGlowMat(r)); gl.rotation.x = -Math.PI / 2; gl.position.y = 0.06; gl.renderOrder = 2;
+    const line = new THREE.Mesh(new THREE.RingGeometry(r - 0.22, r + 0.22, 180), glow(new THREE.MeshBasicMaterial({ color: 0xff4ad0, transparent: true, opacity: 0, depthWrite: false }), 3)); line.rotation.x = -Math.PI / 2; line.position.y = 0.09;
+    G.add(gl, line, wall); G.position.set(x, 0, z); scene.add(G); lavas.push({ x, z, r, t: 0, T, G, wall, gl, line });
+    SFX.play('boss_roar', tmp.set(x, 0, z), { rate: 0.45, vol: 0.8 }); if (Math.hypot(car.pos.x - x, car.pos.z - z) < r + 25) flashAlert('FIRE WALL: JUMP IT');
   }
   function lavaOff(L) { scene.remove(L.G); for (const m of L.G.children) { m.material.dispose(); if (m.geometry !== lavaWallGeo) m.geometry.dispose(); } }
   function clearLava() { for (const L of lavas) lavaOff(L); lavas.length = 0; }
   function updateLava(dt) {
     for (let i = lavas.length - 1; i >= 0; i--) { const L = lavas[i]; L.t += dt;
       if (L.t >= L.T) { lavaOff(L); lavas.splice(i, 1); continue; }
-      const up = Math.min(1, L.t / 0.45) * Math.min(1, (L.T - L.t) / 0.4), h = BOSS2.lavaH * up * (1 + 0.12 * Math.sin(L.t * 9));
-      L.wIn.scale.y = Math.max(0.01, h); L.wOut.scale.y = Math.max(0.01, h * 0.7); L.crust.material.opacity = 0.8 * up; L.band.material.opacity = 0.95 * up; L.core.material.opacity = (0.7 + 0.25 * Math.sin(L.t * 14)) * up;
+      const up = Math.min(1, L.t / 0.45) * Math.min(1, (L.T - L.t) / 0.4), h = BOSS2.lavaH * up;
+      L.wall.scale.y = Math.max(0.01, h); L.wall.material.uniforms.uT.value = L.gl.material.uniforms.uT.value = L.t; L.wall.material.uniforms.uA.value = L.gl.material.uniforms.uA.value = up; L.line.material.opacity = (0.75 + 0.25 * Math.sin(L.t * 14)) * up;
       const dx = car.pos.x - L.x, dz = car.pos.z - L.z, d = Math.hypot(dx, dz) || 1e-3, a0 = Math.atan2(dz, dx);
-      for (let j = 0; j < 3; j++) if (Math.random() < dt * 30) { const a = a0 + rand(-0.8, 0.8); spawnParticles(tmp.set(L.x + Math.cos(a) * L.r, 0.5 + Math.random() * h, L.z + Math.sin(a) * L.r), Math.random() < 0.5 ? 0xffb030 : 0xff4a10, 2, 5); }      // embers on the stretch you can see
+      for (let j = 0; j < 3; j++) if (Math.random() < dt * 30) { const a = a0 + rand(-0.8, 0.8); spawnParticles(tmp.set(L.x + Math.cos(a) * L.r, 0.5 + Math.random() * h, L.z + Math.sin(a) * L.r), Math.random() < 0.5 ? 0xff6ae0 : 0xb04aff, 2, 5); }      // embers on the stretch you can see
       if (up > 0.6 && car.alive && car.y < 1.5 && Math.abs(d - L.r) < BOSS2.lavaW + 0.5 && (car.lavaT || 0) < elapsed) { car.lavaT = elapsed + 0.5; const sd = d < L.r ? -1 : 1;
         hurtCar(BOSS2.lavaDmg, tmp.set(dx / d * sd, 0, dz / d * sd).clone()); }      // burnt, and thrown back to the side you came from
     }
