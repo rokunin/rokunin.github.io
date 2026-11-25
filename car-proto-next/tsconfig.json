@@ -1,0 +1,17 @@
+{
+  // TypeScript checks the modules that came out of legacy.js (ADR-0004). TypeScript 7 changed several defaults, so the
+  // ones that matter are spelled out. strict stays off; noImplicitAny goes on per module once its tests cover it.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

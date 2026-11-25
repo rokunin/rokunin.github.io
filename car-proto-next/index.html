@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="chubz-build" content="142">
-<!-- const BUILD = 142 : the text pages of build 136 and older look for to see an update -->
+<meta name="chubz-build" content="143">
+<!-- const BUILD = 143 : the text pages of build 136 and older look for to see an update -->
 <title>Car Proto — isometric</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font-family: system-ui, sans-serif;
@@ -54809,6 +54809,1025 @@ var THREE = {
 	UnrealBloomPass
 };
 if (typeof window !== "undefined" && typeof window.__threeHook === "function") window.__threeHook(THREE);
+// src/audio/synth.ts
+function audioLib(SR) {
+	function rng(seed) {
+		let a = seed >>> 0;
+		return () => {
+			a = a + 1831565813 | 0;
+			let t = Math.imul(a ^ a >>> 15, 1 | a);
+			t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+			return ((t ^ t >>> 14) >>> 0) / 4294967296;
+		};
+	}
+	const N = (sec) => new Float32Array(Math.max(1, Math.round(sec * SR)));
+	function noise(sec, r, color = "white") {
+		const b = N(sec);
+		let l = 0, p0 = 0, p1 = 0, p2 = 0;
+		for (let i = 0; i < b.length; i++) {
+			const w = r() * 2 - 1;
+			if (color === "brown") {
+				l = (l + .02 * w) / 1.02;
+				b[i] = l * 3.5;
+			} else if (color === "pink") {
+				p0 = .997 * p0 + .029591 * w;
+				p1 = .985 * p1 + .032534 * w;
+				p2 = .95 * p2 + .048056 * w;
+				b[i] = (p0 + p1 + p2 + .05 * w) * 2.2;
+			} else b[i] = w;
+		}
+		return b;
+	}
+	function filt(b, type, f, q = .707) {
+		let x1 = 0, x2 = 0, y1 = 0, y2 = 0, b0, b1, b2, a1, a2;
+		const fn = typeof f === "function" ? f : null;
+		const coef = (hz) => {
+			const w = 2 * Math.PI * Math.min(Math.max(hz, 10), SR * .45) / SR, c = Math.cos(w), al = Math.sin(w) / (2 * q), a0 = 1 + al;
+			if (type === "lp") {
+				b0 = (1 - c) / 2;
+				b1 = 1 - c;
+				b2 = b0;
+			} else if (type === "hp") {
+				b0 = (1 + c) / 2;
+				b1 = -(1 + c);
+				b2 = b0;
+			} else {
+				b0 = al;
+				b1 = 0;
+				b2 = -al;
+			}
+			b0 /= a0;
+			b1 /= a0;
+			b2 /= a0;
+			a1 = -2 * c / a0;
+			a2 = (1 - al) / a0;
+		};
+		coef(fn ? fn(0) : f);
+		for (let i = 0; i < b.length; i++) {
+			if (fn && (i & 15) === 0) coef(fn(i / SR));
+			const x = b[i], y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+			x2 = x1;
+			x1 = x;
+			y2 = y1;
+			y1 = y;
+			b[i] = y;
+		}
+		return b;
+	}
+	function env(b, fn) {
+		for (let i = 0; i < b.length; i++) b[i] *= fn(i / SR);
+		return b;
+	}
+	const ad = (a, d) => (t) => t < a ? t / a : Math.exp(-(t - a) / d);
+	const exp = (from, to, tau) => (t) => to + (from - to) * Math.exp(-t / tau);
+	function osc(sec, f, shape = "sine") {
+		const b = N(sec), fn = typeof f === "function" ? f : () => f;
+		let ph = 0;
+		for (let i = 0; i < b.length; i++) {
+			ph += fn(i / SR) / SR;
+			ph -= Math.floor(ph);
+			b[i] = shape === "sine" ? Math.sin(ph * 6.283185) : shape === "saw" ? ph * 2 - 1 : shape === "square" ? ph < .5 ? 1 : -1 : 1 - 4 * Math.abs(ph - .5);
+		}
+		return b;
+	}
+	function modes(sec, list, r) {
+		const b = N(sec);
+		for (const [f, a, d] of list) {
+			const ph = r ? r() * 6.28 : 0, w = 6.283185 * f / SR;
+			for (let i = 0; i < b.length; i++) b[i] += a * Math.sin(w * i + ph) * Math.exp(-i / SR / d);
+		}
+		return b;
+	}
+	function mix(dst, src, g = 1, at = 0) {
+		const o = Math.round(at * SR);
+		for (let i = 0; i < src.length && i + o < dst.length; i++) dst[i + o] += src[i] * g;
+		return dst;
+	}
+	function drive(b, k) {
+		const n = Math.tanh(k);
+		for (let i = 0; i < b.length; i++) b[i] = Math.tanh(b[i] * k) / n;
+		return b;
+	}
+	function norm(b, peak = .9) {
+		let m = 1e-6;
+		for (let i = 0; i < b.length; i++) m = Math.max(m, Math.abs(b[i]));
+		const k = peak / m;
+		for (let i = 0; i < b.length; i++) b[i] *= k;
+		const f = Math.min(b.length, Math.round(.004 * SR));
+		for (let i = 0; i < f; i++) b[b.length - 1 - i] *= i / f;
+		return b;
+	}
+	function looped(sec, gen) {
+		const x = Math.round(.08 * SR), full = gen(sec + x / SR), out = N(sec);
+		for (let i = 0; i < out.length; i++) out[i] = full[i];
+		for (let i = 0; i < x; i++) {
+			const k = i / x;
+			out[i] = out[i] * k + full[out.length + i] * (1 - k);
+		}
+		return out;
+	}
+	function grains(sec, n, r, f0, f1, dec, spread = 1) {
+		const b = N(sec);
+		for (let k = 0; k < n; k++) {
+			const t = Math.pow(r(), spread) * sec * .85, g = noise(dec * 6, r);
+			filt(g, "bp", f0 + r() * (f1 - f0), 1.6);
+			env(g, ad(4e-4, dec));
+			mix(b, g, .4 + r() * .6, t);
+		}
+		return b;
+	}
+	const semis = (n) => Math.pow(2, n / 12);
+	const R = {
+		shot(r) {
+			const len = .24, o = N(len), p = .9 + r() * .2;
+			const body = noise(len, r);
+			filt(body, "bp", exp(1700 * p, 320, .05), .9);
+			env(body, ad(6e-4, .032));
+			const thump = osc(len, exp(170 * p, 44, .012));
+			env(thump, ad(8e-4, .05));
+			const crack = noise(.04, r);
+			filt(crack, "hp", 3200);
+			env(crack, ad(2e-4, .005));
+			const mech = modes(.06, [[
+				2300 * p,
+				.3,
+				.006
+			], [
+				3900 * p,
+				.2,
+				.004
+			]], r);
+			mix(o, body, 1);
+			mix(o, thump, .9);
+			mix(o, crack, .55);
+			mix(o, mech, .4, .012);
+			return norm(filt(drive(o, 2.2), "hp", 45), .95);
+		},
+		hit_wood(r) {
+			const f = 330 + r() * 180, o = modes(.16, [
+				[
+					f,
+					1,
+					.03
+				],
+				[
+					f * 2.31,
+					.55,
+					.017
+				],
+				[
+					f * 4.2,
+					.25,
+					.009
+				]
+			], r);
+			const n = noise(.06, r);
+			filt(n, "bp", 1400 + r() * 600, 1.2);
+			env(n, ad(5e-4, .012));
+			return norm(mix(o, n, .7), .7);
+		},
+		hit_stone(r, v) {
+			const o = N(v >= 2 ? .42 : .12);
+			const n = noise(.05, r);
+			filt(n, "hp", 2600);
+			env(n, ad(2e-4, .006));
+			mix(o, n, 1);
+			const b = noise(.08, r);
+			filt(b, "bp", 1900 + r() * 900, 1.4);
+			env(b, ad(5e-4, .018));
+			mix(o, b, .7);
+			if (v >= 2) {
+				const f0 = 2600 + r() * 1400, rc = osc(.36, (t) => f0 * (.55 + .45 * Math.exp(-t / .25)) * (1 + .012 * Math.sin(t * 90)));
+				env(rc, ad(.01, .1));
+				mix(o, rc, .32, .015);
+			}
+			return norm(o, .65);
+		},
+		hit_flesh(r) {
+			const o = N(.2), n = noise(.2, r);
+			filt(n, "lp", 600);
+			env(n, ad(.001, .045));
+			mix(o, n, 1);
+			const s = osc(.2, exp(120, 55, .04));
+			env(s, ad(.001, .05));
+			mix(o, s, .8);
+			const q = noise(.2, r);
+			filt(q, "bp", exp(1200 + r() * 400, 260, .06), 5);
+			env(q, ad(.004, .06));
+			mix(o, q, .9);
+			return norm(drive(o, 1.6), .7);
+		},
+		hit_dirt(r) {
+			const o = noise(.12, r);
+			filt(o, "lp", 1300);
+			env(o, ad(6e-4, .022));
+			mix(o, grains(.12, 5, r, 1500, 3500, .004), .35);
+			return norm(o, .35);
+		},
+		hit_boss(r) {
+			const f = 480 + r() * 120, o = modes(.22, [
+				[
+					f,
+					1,
+					.05
+				],
+				[
+					f * 1.51,
+					.6,
+					.035
+				],
+				[
+					f * 2.33,
+					.35,
+					.02
+				],
+				[
+					f * 3.9,
+					.2,
+					.01
+				]
+			], r);
+			const n = noise(.03, r);
+			filt(n, "hp", 2400);
+			env(n, ad(2e-4, .004));
+			return norm(mix(o, n, .6), .55);
+		},
+		crate_break(r) {
+			const len = .75, o = N(len);
+			const th = osc(len, exp(100, 46, .03));
+			env(th, ad(.001, .07));
+			mix(o, th, .9);
+			const lo = noise(len, r);
+			filt(lo, "lp", 420);
+			env(lo, ad(.002, .09));
+			mix(o, lo, .9);
+			for (let k = 0; k < 9; k++) {
+				const t = Math.pow(r(), 1.6) * .32, f = 300 + r() * 700;
+				const c = modes(.09, [
+					[
+						f,
+						1,
+						.018
+					],
+					[
+						f * 2.4,
+						.5,
+						.01
+					],
+					[
+						f * 3.9,
+						.3,
+						.006
+					]
+				], r);
+				const s = noise(.03, r);
+				filt(s, "hp", 1600);
+				env(s, ad(2e-4, .004));
+				mix(c, s, .8);
+				mix(o, c, .4 + r() * .5, t);
+			}
+			mix(o, grains(len, 26, r, 1800, 5e3, .004, 1.8), .5);
+			return norm(drive(o, 1.4), .9);
+		},
+		growl(r, v, elite) {
+			const len = elite ? 1 : .72, f0 = elite ? 46 + r() * 8 : 72 + r() * 22, o = N(len);
+			const saw = osc(len, (t) => f0 * (1 + .22 * Math.sin(t * 6.283 * (3 + r() * .01))) * (.85 + .35 * t / len), "saw");
+			env(saw, (t) => .6 + .4 * Math.sin(t * 6.283 * (elite ? 18 : 27)));
+			const f1 = Float32Array.from(saw), f2 = Float32Array.from(saw);
+			filt(f1, "bp", elite ? 380 : 520, 3);
+			filt(f2, "bp", elite ? 900 : 1150, 4);
+			mix(o, f1, 1.2);
+			mix(o, f2, .7);
+			mix(o, filt(Float32Array.from(saw), "lp", 300), .5);
+			const br = noise(len, r);
+			filt(br, "bp", 900, 1.5);
+			mix(o, br, .12);
+			env(o, (t) => Math.min(1, t / .07) * Math.exp(-Math.max(0, t - len * .45) / (len * .25)));
+			drive(o, elite ? 3.2 : 2.6);
+			if (elite) {
+				const sh = N(len);
+				for (let k = 0; k < 6; k++) mix(sh, osc(len, 2200 + r() * 2600), .18);
+				env(sh, (t) => (.5 + .5 * Math.sin(t * 6.283 * 9)) * Math.min(1, t / .2) * Math.exp(-t / .5));
+				mix(o, sh, .5);
+			}
+			return norm(o, .8);
+		},
+		growl_elite(r, v) {
+			return R.growl(r, v, true);
+		},
+		chomp(r) {
+			const o = N(.26);
+			for (const t of [0, .075 + r() * .02]) {
+				const tee = noise(.04, r);
+				filt(tee, "bp", 2600 + r() * 800, 1.2);
+				env(tee, ad(2e-4, .01));
+				const cr = noise(.08, r);
+				filt(cr, "lp", 800);
+				env(cr, ad(5e-4, .03));
+				const lo = osc(.08, exp(150, 80, .03));
+				env(lo, ad(5e-4, .03));
+				mix(o, tee, .8, t);
+				mix(o, cr, .9, t);
+				mix(o, lo, .7, t);
+			}
+			return norm(drive(o, 1.8), .8);
+		},
+		biter_die(r, v, elite) {
+			const o = N(elite ? 1.6 : .65);
+			const sq = noise(.4, r);
+			filt(sq, "bp", exp(1300, 180, .09), 3);
+			env(sq, ad(.002, .12));
+			mix(o, sq, 1.1);
+			const lo = osc(.5, exp(elite ? 120 : 170, elite ? 26 : 40, .1));
+			env(lo, ad(.001, elite ? .32 : .14));
+			mix(o, lo, 1);
+			const pop = noise(.03, r);
+			filt(pop, "hp", 900);
+			env(pop, ad(2e-4, .006));
+			mix(o, pop, .8);
+			mix(o, grains(.5, 10, r, 600, 2400, .008, 1.5), .5, .02);
+			if (elite) for (let k = 0; k < 22; k++) {
+				const f = 2200 + r() * 5200;
+				mix(o, modes(.6, [[
+					f,
+					1,
+					.08 + r() * .3
+				], [
+					f * 2.7,
+					.3,
+					.05
+				]], r), .07 + r() * .08, Math.pow(r(), 2) * .25);
+			}
+			return norm(drive(o, 1.5), .85);
+		},
+		elite_die(r, v) {
+			return R.biter_die(r, v, true);
+		},
+		clang(r) {
+			const f = 170 + r() * 70, ratios = [
+				1,
+				2.76,
+				5.4,
+				8.93,
+				13.34
+			], amps = [
+				1,
+				.6,
+				.42,
+				.25,
+				.15
+			], dec = [
+				.38,
+				.26,
+				.18,
+				.12,
+				.07
+			];
+			const o = modes(.6, ratios.map((k, i) => [
+				f * k * (1 + (r() - .5) * .02),
+				amps[i],
+				dec[i]
+			]), r);
+			const n = noise(.04, r);
+			filt(n, "hp", 1500);
+			env(n, ad(2e-4, .008));
+			mix(o, n, 1.2);
+			const th = osc(.15, exp(130, 60, .03));
+			env(th, ad(.001, .04));
+			mix(o, th, .8);
+			return norm(drive(o, 1.3), .85);
+		},
+		explode(r) {
+			const len = 2.2, o = N(len);
+			const n = noise(len, r);
+			filt(n, "lp", exp(1400, 110, .35));
+			env(n, ad(.003, .5));
+			mix(o, n, 1.3);
+			const sub = osc(len, exp(80, 26, .25));
+			env(sub, ad(.002, .55));
+			mix(o, sub, 1);
+			mix(o, grains(1.6, 70, r, 1500, 4800, .003, 2.2), .55, .03);
+			mix(o, modes(.8, [
+				[
+					260,
+					1,
+					.3
+				],
+				[
+					717,
+					.5,
+					.2
+				],
+				[
+					1405,
+					.3,
+					.12
+				]
+			], r), .35, .05);
+			return norm(drive(o, 2), .95);
+		},
+		tongue(r) {
+			const o = N(.26), n = noise(.26, r);
+			filt(n, "bp", (t) => 450 + 3200 * Math.min(1, t / .12), 4);
+			env(n, ad(.004, .06));
+			mix(o, n, 1);
+			const pl = osc(.2, (t) => 520 + 900 * Math.min(1, t / .08));
+			env(pl, ad(.002, .04));
+			mix(o, pl, .5);
+			return norm(o, .6);
+		},
+		slap(r) {
+			const o = N(.24), n = noise(.05, r);
+			filt(n, "lp", 2e3);
+			env(n, ad(3e-4, .018));
+			mix(o, n, 1);
+			const lo = osc(.12, exp(240, 110, .03));
+			env(lo, ad(5e-4, .04));
+			mix(o, lo, .7);
+			const sq = noise(.2, r);
+			filt(sq, "bp", exp(1600, 420, .05), 5);
+			env(sq, ad(.003, .05));
+			mix(o, sq, .9, .005);
+			return norm(o, .7);
+		},
+		whoosh(r) {
+			const len = .34 + r() * .16, o = noise(len, r, "pink");
+			filt(o, "bp", (t) => 300 + 1500 * Math.sin(Math.PI * Math.min(1, t / len)), 1.1);
+			env(o, (t) => Math.pow(Math.sin(Math.PI * Math.min(1, t / len)), 2));
+			return norm(o, .5);
+		},
+		zap(r) {
+			const o = N(.45), s = osc(.45, exp(1100, 160, .1), "saw");
+			filt(s, "bp", exp(2400, 400, .12), 2);
+			env(s, ad(.002, .14));
+			mix(o, s, 1);
+			const n = noise(.45, r);
+			filt(n, "bp", 3e3, 1);
+			env(n, (t) => Math.exp(-t / .08) * (.5 + .5 * Math.sign(Math.sin(t * 6.283 * 60))));
+			mix(o, n, .5);
+			return norm(drive(o, 2.4), .75);
+		},
+		jump(r) {
+			const o = N(.4), ps = noise(.3, r);
+			filt(ps, "hp", 2200);
+			env(ps, ad(.004, .09));
+			mix(o, ps, .6);
+			const up = osc(.2, (t) => 130 + 900 * t);
+			env(up, ad(.002, .07));
+			mix(o, up, .6);
+			const sp = osc(.4, (t) => 260 * (1 + .08 * Math.sin(t * 6.283 * 22) * Math.exp(-t / .15)));
+			env(sp, ad(.002, .12));
+			mix(o, sp, .25);
+			return norm(o, .6);
+		},
+		jump2(r) {
+			const o = R.whoosh(r);
+			const ch = N(o.length / SR);
+			for (const [k, t] of [
+				[0, 0],
+				[7, .05],
+				[12, .1]
+			]) {
+				const s = osc(.3, 880 * semis(k));
+				env(s, ad(.002, .08));
+				mix(ch, s, .25, t);
+			}
+			return norm(mix(o, ch, 1), .6);
+		},
+		land(r, v) {
+			const heavy = v >= 2, o = N(.5);
+			const th = osc(.3, exp(heavy ? 95 : 85, 42, .03));
+			env(th, ad(.001, heavy ? .1 : .07));
+			mix(o, th, 1);
+			const n = noise(.3, r);
+			filt(n, "lp", 340);
+			env(n, ad(.001, .06));
+			mix(o, n, .9);
+			const cr = osc(.4, (t) => 210 + 25 * Math.sin(t * 6.283 * 7));
+			env(cr, ad(.02, .12));
+			mix(o, cr, .12, .03);
+			mix(o, grains(.35, heavy ? 18 : 9, r, 1200, 3200, .004), .35);
+			return norm(drive(o, 1.5), heavy ? .9 : .7);
+		},
+		dig_down(r) {
+			const len = .65, o = noise(len, r, "brown");
+			filt(o, "lp", 520);
+			env(o, ad(.02, .22));
+			mix(o, grains(len, 22, r, 900, 2600, .008), .6);
+			const rum = osc(len, 48);
+			env(rum, ad(.05, .2));
+			mix(o, rum, .5);
+			return norm(drive(o, 1.6), .8);
+		},
+		dig_up(r) {
+			const o = R.dig_down(r);
+			const pop = osc(.2, exp(320, 110, .04));
+			env(pop, ad(.001, .05));
+			return norm(mix(o, pop, .9, .04), .85);
+		},
+		scratch(r) {
+			const o = N(.14);
+			mix(o, grains(.14, 8, r, 1200, 3800, .005), 1);
+			const n = noise(.14, r, "brown");
+			filt(n, "lp", 700);
+			env(n, ad(.005, .04));
+			mix(o, n, .6);
+			return norm(o, .5);
+		},
+		pickup(r, v, heal) {
+			const notes = heal ? [
+				0,
+				7,
+				12
+			] : [
+				0,
+				4,
+				7,
+				12,
+				16
+			], base = heal ? 660 : 880, o = N(.9);
+			notes.forEach((k, i) => {
+				const f = base * semis(k), s = osc(.6, f);
+				mix(s, osc(.6, f * 2), .25);
+				env(s, ad(.003, .22));
+				mix(o, s, .35, i * .065);
+			});
+			const sp = noise(.6, r);
+			filt(sp, "hp", 6500);
+			env(sp, (t) => Math.exp(-t / .2) * (r() < .04 ? 1 : .15));
+			mix(o, sp, .3);
+			return norm(o, .6);
+		},
+		heal(r, v) {
+			return R.pickup(r, v, true);
+		},
+		loot(r) {
+			const o = N(.5);
+			for (const [k, t] of [[12, 0], [19, .08]]) {
+				const s = osc(.4, 660 * semis(k));
+				env(s, ad(.002, .12));
+				mix(o, s, .4, t);
+			}
+			return norm(o, .5);
+		},
+		boss_emerge(r) {
+			const len = 3.4, o = N(len);
+			const sub = noise(len, r, "brown");
+			filt(sub, "lp", 140);
+			mix(o, sub, 1.3);
+			const gr = noise(len, r);
+			filt(gr, "bp", 260, 2);
+			env(gr, (t) => .5 + .5 * Math.sin(t * 6.283 * 7.3) * Math.sin(t * 6.283 * 2.1));
+			mix(o, gr, .6);
+			const ch = N(len);
+			for (const f of [
+				55,
+				82.4,
+				110,
+				110.6
+			]) mix(ch, osc(len, f, "saw"), .25);
+			filt(ch, "lp", (t) => 180 + 1400 * Math.pow(t / len, 1.6), 1.2);
+			mix(o, ch, .8);
+			mix(o, grains(len, 60, r, 700, 2600, .01, .8), .4);
+			env(o, (t) => Math.min(1, t / .6) * Math.min(1, (len - t) / .5));
+			return norm(drive(o, 1.6), .9);
+		},
+		boss_roar(r) {
+			const len = 1.8, o = N(len);
+			for (const [f, g] of [
+				[55, 1],
+				[82.4, .8],
+				[110, .7],
+				[164.8, .5],
+				[55.4, .6]
+			]) mix(o, osc(len, (t) => f * (1 + .006 * Math.sin(t * 31)), "saw"), g * .3);
+			filt(o, "lp", (t) => 300 + 2400 * Math.exp(-Math.pow((t - .35) / .3, 2)) + 500 * (1 - t / len), 1.4);
+			env(o, (t) => Math.min(1, t / .08) * Math.exp(-Math.max(0, t - .6) / .45));
+			return norm(drive(o, 2.4), .9);
+		},
+		tent_wind(r) {
+			const len = .65, o = noise(len, r);
+			filt(o, "bp", (t) => 600 + 2800 * Math.pow(t / len, 2), 2);
+			env(o, (t) => Math.pow(t / len, 2));
+			const s = osc(len, (t) => 200 + 420 * t / len, "saw");
+			filt(s, "lp", 900);
+			env(s, (t) => .4 * t / len);
+			mix(o, s, 1);
+			return norm(o, .6);
+		},
+		tent_slam(r) {
+			const len = .7, o = N(len);
+			const th = osc(len, exp(80, 34, .04));
+			env(th, ad(.001, .13));
+			mix(o, th, 1.1);
+			const n = noise(len, r);
+			filt(n, "lp", 700);
+			env(n, ad(.001, .1));
+			mix(o, n, .9);
+			const c = noise(.03, r);
+			filt(c, "hp", 2e3);
+			env(c, ad(2e-4, .006));
+			mix(o, c, .9);
+			mix(o, grains(len, 30, r, 800, 3e3, .006, 1.6), .5, .01);
+			return norm(drive(o, 1.8), .9);
+		},
+		boss_lift(r) {
+			const len = 1, o = N(len);
+			for (const f of [
+				220,
+				330,
+				331.5
+			]) mix(o, osc(len, (t) => f * (1 + .5 * t / len)), .3);
+			env(o, (t) => (.6 + .4 * Math.sin(t * 6.283 * 11)) * Math.min(1, t / .2) * Math.min(1, (len - t) / .15));
+			const n = noise(len, r);
+			filt(n, "bp", 1800, 3);
+			env(n, (t) => .2 * t / len);
+			mix(o, n, 1);
+			return norm(o, .45);
+		},
+		boss_die(r) {
+			const len = 3.4, o = N(len);
+			const sub = osc(len, exp(60, 18, .7));
+			env(sub, ad(.002, .9));
+			mix(o, sub, 1.2);
+			const n = noise(len, r);
+			filt(n, "lp", exp(2e3, 90, .5));
+			env(n, ad(.003, .7));
+			mix(o, n, 1.2);
+			for (let k = 0; k < 40; k++) mix(o, modes(.8, [[
+				1800 + r() * 5500,
+				1,
+				.1 + r() * .4
+			]], r), .06, Math.pow(r(), 2) * .6);
+			const ch = N(len);
+			for (const f of [
+				220,
+				277,
+				330
+			]) mix(ch, osc(len, (t) => f * Math.pow(.25, t / len), "saw"), .25);
+			filt(ch, "lp", 1200);
+			env(ch, (t) => Math.min(1, t / .3) * Math.exp(-t / 1.4));
+			mix(o, ch, .7, .2);
+			return norm(drive(o, 1.8), .95);
+		},
+		door(r) {
+			const len = 1.5, o = noise(len, r, "brown");
+			filt(o, "lp", 260);
+			const gr = noise(len, r);
+			filt(gr, "bp", 140, 3);
+			env(gr, (t) => .6 + .4 * Math.sin(t * 6.283 * 13));
+			mix(o, gr, .8);
+			env(o, (t) => Math.min(1, t / .15) * (t < 1.15 ? 1 : Math.exp(-(t - 1.15) / .08)));
+			const th = osc(.35, exp(70, 36, .05));
+			env(th, ad(.001, .1));
+			mix(o, th, 1.2, 1.15);
+			return norm(drive(o, 1.4), .85);
+		},
+		nova(r) {
+			const len = .7, o = N(len);
+			const th = osc(len, exp(320, 70, .08));
+			env(th, ad(.002, .12));
+			mix(o, th, .9);
+			const sw = noise(len, r);
+			filt(sw, "bp", (t) => 500 + 5e3 * Math.min(1, t / .25), 2);
+			env(sw, ad(.01, .15));
+			mix(o, sw, .6);
+			for (const [k, t] of [
+				[24, .02],
+				[31, .06],
+				[36, .1]
+			]) {
+				const s = osc(.4, 220 * semis(k));
+				env(s, ad(.002, .1));
+				mix(o, s, .18, t);
+			}
+			return norm(drive(o, 1.4), .7);
+		},
+		mortar(r) {
+			const len = .9, o = N(len);
+			const th = osc(.3, exp(140, 50, .04));
+			env(th, ad(.001, .07));
+			mix(o, th, 1);
+			const n = noise(.2, r);
+			filt(n, "lp", 900);
+			env(n, ad(.001, .04));
+			mix(o, n, .8);
+			const wh = osc(len, (t) => 1800 - 1100 * t / len);
+			env(wh, (t) => .25 * Math.min(1, t / .2) * Math.min(1, (len - t) / .1));
+			mix(o, wh, 1, .05);
+			return norm(o, .75);
+		},
+		blast(r) {
+			const len = 1.2, o = N(len);
+			const n = noise(len, r);
+			filt(n, "lp", exp(2500, 160, .2));
+			env(n, ad(.002, .25));
+			mix(o, n, 1.2);
+			const sub = osc(len, exp(90, 32, .15));
+			env(sub, ad(.002, .3));
+			mix(o, sub, 1);
+			mix(o, grains(.9, 40, r, 1400, 4500, .003, 2), .5, .02);
+			return norm(drive(o, 2.2), .95);
+		},
+		saw(r) {
+			const o = N(.18), z = osc(.18, (t) => 2600 + 1400 * Math.sin(t * 90), "saw");
+			filt(z, "bp", 3200, 2);
+			env(z, ad(.002, .04));
+			mix(o, z, .7);
+			const n = noise(.05, r);
+			filt(n, "hp", 2500);
+			env(n, ad(3e-4, .01));
+			mix(o, n, .8);
+			return norm(o, .55);
+		},
+		pop(r) {
+			const o = N(.35);
+			const b = osc(.12, exp(900, 180, .03));
+			env(b, ad(.001, .05));
+			mix(o, b, 1);
+			const n = noise(.15, r);
+			filt(n, "bp", 1800, 1.5);
+			env(n, ad(5e-4, .03));
+			mix(o, n, .9);
+			const j = 600 * r(), sq = osc(.15, (t) => 1300 + j + 900 * Math.sin(t * 40));
+			env(sq, ad(.005, .05));
+			mix(o, sq, .25, .03);
+			return norm(drive(o, 1.6), .6);
+		},
+		eshot(r) {
+			const len = .3, o = N(len);
+			const b = osc(len, exp(520, 150, .07), "saw");
+			filt(b, "lp", exp(3200, 500, .08), 3);
+			env(b, ad(.003, .09));
+			mix(o, b, .8);
+			const n = noise(.1, r);
+			filt(n, "bp", 2400, 2);
+			env(n, ad(5e-4, .02));
+			mix(o, n, .5);
+			return norm(drive(o, 1.5), .55);
+		},
+		chub(r) {
+			const len = .22, o = N(len), f0 = 850 + 250 * r();
+			const a = osc(len, (t) => f0 * (1 + 3.2 * t) + 60 * Math.sin(t * 190));
+			env(a, ad(.004, .07));
+			mix(o, a, .8);
+			const b = osc(len, (t) => f0 * 2 * (1 + 3.2 * t));
+			env(b, ad(.004, .04));
+			mix(o, b, .25);
+			return norm(o, .5);
+		},
+		laugh(r) {
+			const n = 6 + Math.floor(r() * 3), o = N(3.4);
+			let t0 = .08, f = 96 * (.94 + .12 * r());
+			for (let i = 0; i < n; i++) {
+				const dur = .17 + .06 * r() + (i === n - 1 ? .2 : 0), amp = Math.max(.3, 1 - i * .085) * (.8 + .4 * r());
+				const fi = f * (i === 0 ? 1.15 : 1), wob = 4 + 3 * r(), ph = r() * 6.283;
+				const src = osc(dur, (t) => fi * (1.2 - .55 * t / dur) * (1 + .03 * Math.sin(t * 6.283 * wob + ph)) * (1 + .035 * (r() - .5)), "saw");
+				const f1 = Float32Array.from(src), f2 = Float32Array.from(src), f3 = Float32Array.from(src);
+				const open = .9 + .2 * r();
+				filt(f1, "bp", 640 * open, 4.5);
+				filt(f2, "bp", 1080 * open, 6);
+				filt(f3, "bp", 2450, 7);
+				filt(src, "lp", 260, .8);
+				const v = N(dur);
+				mix(v, src, .55);
+				mix(v, f1, 1);
+				mix(v, f2, .55);
+				mix(v, f3, .16);
+				const br = noise(dur, r);
+				filt(br, "bp", 1500, 1);
+				mix(v, br, .07);
+				env(v, (t) => Math.min(1, t / .035) * Math.min(1, (dur - t) / .09));
+				const h = noise(.1, r);
+				filt(h, "bp", 1250 * open, 1.3);
+				env(h, (t) => Math.sin(Math.min(1, t / .1) * Math.PI));
+				mix(o, h, .3 * amp, t0 - .07);
+				mix(o, v, amp, t0);
+				t0 += dur + .06 + .07 * r() + (i === 2 && r() < .5 ? .12 : 0);
+				f *= .94 + .03 * r();
+			}
+			const chest = Float32Array.from(o);
+			filt(chest, "lp", 180, .7);
+			mix(o, chest, .5);
+			return norm(drive(o, 1.25), .95);
+		},
+		choir(r) {
+			const len = 9, o = N(len);
+			for (const [k, g] of [
+				[0, 1],
+				[7, .8],
+				[12, .9],
+				[16, .7],
+				[19, .6],
+				[24, .4]
+			]) for (let v = 0; v < 3; v++) {
+				const f0 = 130.8 * semis(k) * (1 + (v - 1) * .006), vr = 4.5 + r() * 1.5, ph = r() * 6.283;
+				const a = osc(len, (t) => f0 * (1 + .006 * Math.sin(t * 6.283 * vr + ph)), "saw");
+				filt(a, "bp", 800, 1.2);
+				filt(a, "lp", 2400, .7);
+				env(a, (t) => Math.min(1, t / 2.5) * Math.min(1, (len - t) / 3));
+				mix(o, a, g * .3);
+			}
+			return norm(o, .7);
+		},
+		spit(r) {
+			const len = .4, o = N(len);
+			const n = noise(len, r);
+			filt(n, "bp", (t) => 700 + 2200 * Math.min(1, t / .08), 3);
+			env(n, ad(.005, .12));
+			mix(o, n, 1);
+			const g = osc(.25, exp(260, 120, .06));
+			env(g, (t) => ad(.01, .08)(t) * (.6 + .4 * Math.sin(t * 6.283 * 45)));
+			mix(o, g, .6);
+			return norm(o, .55);
+		},
+		wave(r) {
+			const len = 2.2, o = N(len);
+			for (const k of [
+				0,
+				7,
+				12
+			]) {
+				const h = osc(len, 98 * semis(k) * (1 + .004 * k), "saw");
+				filt(h, "lp", 900);
+				env(h, (t) => Math.min(1, t / .25) * Math.exp(-Math.max(0, t - .9) / .35) * .3);
+				mix(o, h, 1);
+			}
+			const c = noise(len, r);
+			filt(c, "bp", 420, 1.2);
+			env(c, (t) => Math.min(1, t / .6) * Math.exp(-Math.max(0, t - 1.2) / .4) * (.7 + .3 * Math.sin(t * 6.283 * 7)));
+			mix(o, c, .5);
+			return norm(o, .7);
+		},
+		hoof(r) {
+			const o = N(.16);
+			const b = osc(.12, exp(150 + 40 * r(), 55, .04));
+			env(b, ad(.001, .035));
+			mix(o, b, 1);
+			const n = noise(.05, r);
+			filt(n, "bp", 900 + 500 * r(), 2.5);
+			env(n, ad(4e-4, .012));
+			mix(o, n, .9);
+			return norm(o, .55);
+		},
+		tick(r) {
+			const o = N(.07);
+			const n = noise(.03, r);
+			filt(n, "bp", 3200 + 1500 * r(), 3);
+			env(n, ad(3e-4, .006));
+			mix(o, n, 1);
+			const s = osc(.05, 1500 + 900 * r(), "tri");
+			env(s, ad(5e-4, .012));
+			mix(o, s, .35);
+			return norm(o, .4);
+		},
+		hum_loop() {
+			return looped(4, (sec) => {
+				const b = N(sec);
+				for (const [f, g, v] of [
+					[
+						220,
+						1,
+						.25
+					],
+					[
+						220.5,
+						.7,
+						.5
+					],
+					[
+						277.25,
+						.7,
+						.25
+					],
+					[
+						329.75,
+						.8,
+						.5
+					],
+					[
+						330.25,
+						.5,
+						.25
+					],
+					[
+						440,
+						.45,
+						.75
+					],
+					[
+						554.25,
+						.2,
+						.5
+					],
+					[
+						659.5,
+						.14,
+						.25
+					]
+				]) {
+					const o = osc(sec, f);
+					env(o, (t) => .65 + .35 * Math.sin(t * 6.283 * v + f));
+					mix(b, o, g * .2);
+				}
+				return filt(b, "lp", 1200);
+			});
+		},
+		servo_loop() {
+			return looped(1, (sec) => {
+				const b = osc(sec, 180, "saw");
+				mix(b, osc(sec, 362, "saw"), .5);
+				filt(b, "bp", 1400, 2.5);
+				env(b, (t) => .6 + .4 * Math.sin(t * 6.283 * 22));
+				return b;
+			});
+		},
+		engine_loop() {
+			return looped(1, (sec) => {
+				const b = N(sec), r = rng(7);
+				for (let k = 0; k < Math.ceil(sec * 40); k++) {
+					const p = noise(.03, r);
+					filt(p, "lp", 520);
+					env(p, ad(8e-4, .0075));
+					const s = osc(.03, 40 * (k % 2 ? 2 : 3));
+					env(s, ad(6e-4, .006));
+					mix(p, s, .6);
+					mix(b, p, k % 4 === 0 ? 1 : .7, k / 40);
+				}
+				return filt(b, "lp", 1400);
+			});
+		},
+		drill_loop() {
+			return looped(1, (sec) => {
+				const b = osc(sec, 110, "saw");
+				mix(b, osc(sec, 55, "square"), .35);
+				mix(b, osc(sec, 220.5, "saw"), .2);
+				filt(b, "lp", 1700, 1.2);
+				const n = noise(sec, rng(3));
+				filt(n, "bp", 2600, 1.5);
+				env(n, (t) => .5 + .5 * Math.sin(t * 6.283 * 30));
+				mix(b, n, .25);
+				return b;
+			});
+		},
+		grind_loop() {
+			return looped(1, (sec) => {
+				const r = rng(5), b = noise(sec, r);
+				filt(b, "bp", 1900, .9);
+				const a = noise(sec, r);
+				filt(a, "lp", 35);
+				const m = Math.max(...a.map(Math.abs)) || 1;
+				env(b, (t) => .4 + .6 * Math.abs(a[Math.min(a.length - 1, Math.round(t * SR))] / m));
+				mix(b, grains(sec, 60, r, 1500, 5e3, .003, 1), .6);
+				return b;
+			});
+		},
+		skid_loop() {
+			return looped(1, (sec) => {
+				const b = noise(sec, rng(9)), c = Float32Array.from(b);
+				filt(b, "bp", 1500, 3);
+				filt(c, "bp", 920, 4);
+				return mix(b, c, .8);
+			});
+		},
+		wind_loop() {
+			return looped(4, (sec) => {
+				const b = noise(sec, rng(11), "pink");
+				filt(b, "lp", (t) => 380 + 220 * Math.sin(t * 1.6), .8);
+				return b;
+			});
+		},
+		drone_loop() {
+			return looped(4, (sec) => {
+				const b = N(sec);
+				for (const [f, g] of [
+					[55, 1],
+					[82.5, .6],
+					[110.25, .5],
+					[165, .2]
+				]) mix(b, osc(sec, f, "tri"), g * .3);
+				const n = noise(sec, rng(13));
+				filt(n, "bp", 330, 6);
+				mix(b, n, .4);
+				return b;
+			});
+		}
+	};
+	function synth(name, v) {
+		return R[name](rng(1e3 + v * 7919 + name.length * 131), v);
+	}
+	function normLoop(b, peak) {
+		let m = 1e-6;
+		for (let i = 0; i < b.length; i++) m = Math.max(m, Math.abs(b[i]));
+		for (let i = 0; i < b.length; i++) b[i] *= peak / m;
+		return b;
+	}
+	return {
+		synth,
+		normLoop,
+		R
+	};
+}
 // src/data/weapons.js
 var W_STATS = {
 	spread: {
@@ -55905,1024 +56924,6 @@ var DATA_HASH = (() => {
 			L.intensity = L.userData.i * q * Math.min(1, (1 - q) * 6);
 		}
 		muzzleLight.intensity *= Math.max(0, 1 - 14 * dt);
-	}
-	function audioLib(SR) {
-		function rng(seed) {
-			let a = seed >>> 0;
-			return () => {
-				a = a + 1831565813 | 0;
-				let t = Math.imul(a ^ a >>> 15, 1 | a);
-				t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-				return ((t ^ t >>> 14) >>> 0) / 4294967296;
-			};
-		}
-		const N = (sec) => new Float32Array(Math.max(1, Math.round(sec * SR)));
-		function noise(sec, r, color = "white") {
-			const b = N(sec);
-			let l = 0, p0 = 0, p1 = 0, p2 = 0;
-			for (let i = 0; i < b.length; i++) {
-				const w = r() * 2 - 1;
-				if (color === "brown") {
-					l = (l + .02 * w) / 1.02;
-					b[i] = l * 3.5;
-				} else if (color === "pink") {
-					p0 = .997 * p0 + .029591 * w;
-					p1 = .985 * p1 + .032534 * w;
-					p2 = .95 * p2 + .048056 * w;
-					b[i] = (p0 + p1 + p2 + .05 * w) * 2.2;
-				} else b[i] = w;
-			}
-			return b;
-		}
-		function filt(b, type, f, q = .707) {
-			let x1 = 0, x2 = 0, y1 = 0, y2 = 0, b0, b1, b2, a1, a2;
-			const fn = typeof f === "function" ? f : null;
-			const coef = (hz) => {
-				const w = 2 * Math.PI * Math.min(Math.max(hz, 10), SR * .45) / SR, c = Math.cos(w), al = Math.sin(w) / (2 * q), a0 = 1 + al;
-				if (type === "lp") {
-					b0 = (1 - c) / 2;
-					b1 = 1 - c;
-					b2 = b0;
-				} else if (type === "hp") {
-					b0 = (1 + c) / 2;
-					b1 = -(1 + c);
-					b2 = b0;
-				} else {
-					b0 = al;
-					b1 = 0;
-					b2 = -al;
-				}
-				b0 /= a0;
-				b1 /= a0;
-				b2 /= a0;
-				a1 = -2 * c / a0;
-				a2 = (1 - al) / a0;
-			};
-			coef(fn ? fn(0) : f);
-			for (let i = 0; i < b.length; i++) {
-				if (fn && (i & 15) === 0) coef(fn(i / SR));
-				const x = b[i], y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-				x2 = x1;
-				x1 = x;
-				y2 = y1;
-				y1 = y;
-				b[i] = y;
-			}
-			return b;
-		}
-		function env(b, fn) {
-			for (let i = 0; i < b.length; i++) b[i] *= fn(i / SR);
-			return b;
-		}
-		const ad = (a, d) => (t) => t < a ? t / a : Math.exp(-(t - a) / d);
-		const exp = (from, to, tau) => (t) => to + (from - to) * Math.exp(-t / tau);
-		function osc(sec, f, shape = "sine") {
-			const b = N(sec), fn = typeof f === "function" ? f : () => f;
-			let ph = 0;
-			for (let i = 0; i < b.length; i++) {
-				ph += fn(i / SR) / SR;
-				ph -= Math.floor(ph);
-				b[i] = shape === "sine" ? Math.sin(ph * 6.283185) : shape === "saw" ? ph * 2 - 1 : shape === "square" ? ph < .5 ? 1 : -1 : 1 - 4 * Math.abs(ph - .5);
-			}
-			return b;
-		}
-		function modes(sec, list, r) {
-			const b = N(sec);
-			for (const [f, a, d] of list) {
-				const ph = r ? r() * 6.28 : 0, w = 6.283185 * f / SR;
-				for (let i = 0; i < b.length; i++) b[i] += a * Math.sin(w * i + ph) * Math.exp(-i / SR / d);
-			}
-			return b;
-		}
-		function mix(dst, src, g = 1, at = 0) {
-			const o = Math.round(at * SR);
-			for (let i = 0; i < src.length && i + o < dst.length; i++) dst[i + o] += src[i] * g;
-			return dst;
-		}
-		function drive(b, k) {
-			const n = Math.tanh(k);
-			for (let i = 0; i < b.length; i++) b[i] = Math.tanh(b[i] * k) / n;
-			return b;
-		}
-		function norm(b, peak = .9) {
-			let m = 1e-6;
-			for (let i = 0; i < b.length; i++) m = Math.max(m, Math.abs(b[i]));
-			const k = peak / m;
-			for (let i = 0; i < b.length; i++) b[i] *= k;
-			const f = Math.min(b.length, Math.round(.004 * SR));
-			for (let i = 0; i < f; i++) b[b.length - 1 - i] *= i / f;
-			return b;
-		}
-		function looped(sec, gen) {
-			const x = Math.round(.08 * SR), full = gen(sec + x / SR), out = N(sec);
-			for (let i = 0; i < out.length; i++) out[i] = full[i];
-			for (let i = 0; i < x; i++) {
-				const k = i / x;
-				out[i] = out[i] * k + full[out.length + i] * (1 - k);
-			}
-			return out;
-		}
-		function grains(sec, n, r, f0, f1, dec, spread = 1) {
-			const b = N(sec);
-			for (let k = 0; k < n; k++) {
-				const t = Math.pow(r(), spread) * sec * .85, g = noise(dec * 6, r);
-				filt(g, "bp", f0 + r() * (f1 - f0), 1.6);
-				env(g, ad(4e-4, dec));
-				mix(b, g, .4 + r() * .6, t);
-			}
-			return b;
-		}
-		const semis = (n) => Math.pow(2, n / 12);
-		const R = {
-			shot(r) {
-				const len = .24, o = N(len), p = .9 + r() * .2;
-				const body = noise(len, r);
-				filt(body, "bp", exp(1700 * p, 320, .05), .9);
-				env(body, ad(6e-4, .032));
-				const thump = osc(len, exp(170 * p, 44, .012));
-				env(thump, ad(8e-4, .05));
-				const crack = noise(.04, r);
-				filt(crack, "hp", 3200);
-				env(crack, ad(2e-4, .005));
-				const mech = modes(.06, [[
-					2300 * p,
-					.3,
-					.006
-				], [
-					3900 * p,
-					.2,
-					.004
-				]], r);
-				mix(o, body, 1);
-				mix(o, thump, .9);
-				mix(o, crack, .55);
-				mix(o, mech, .4, .012);
-				return norm(filt(drive(o, 2.2), "hp", 45), .95);
-			},
-			hit_wood(r) {
-				const f = 330 + r() * 180, o = modes(.16, [
-					[
-						f,
-						1,
-						.03
-					],
-					[
-						f * 2.31,
-						.55,
-						.017
-					],
-					[
-						f * 4.2,
-						.25,
-						.009
-					]
-				], r);
-				const n = noise(.06, r);
-				filt(n, "bp", 1400 + r() * 600, 1.2);
-				env(n, ad(5e-4, .012));
-				return norm(mix(o, n, .7), .7);
-			},
-			hit_stone(r, v) {
-				const o = N(v >= 2 ? .42 : .12);
-				const n = noise(.05, r);
-				filt(n, "hp", 2600);
-				env(n, ad(2e-4, .006));
-				mix(o, n, 1);
-				const b = noise(.08, r);
-				filt(b, "bp", 1900 + r() * 900, 1.4);
-				env(b, ad(5e-4, .018));
-				mix(o, b, .7);
-				if (v >= 2) {
-					const f0 = 2600 + r() * 1400, rc = osc(.36, (t) => f0 * (.55 + .45 * Math.exp(-t / .25)) * (1 + .012 * Math.sin(t * 90)));
-					env(rc, ad(.01, .1));
-					mix(o, rc, .32, .015);
-				}
-				return norm(o, .65);
-			},
-			hit_flesh(r) {
-				const o = N(.2), n = noise(.2, r);
-				filt(n, "lp", 600);
-				env(n, ad(.001, .045));
-				mix(o, n, 1);
-				const s = osc(.2, exp(120, 55, .04));
-				env(s, ad(.001, .05));
-				mix(o, s, .8);
-				const q = noise(.2, r);
-				filt(q, "bp", exp(1200 + r() * 400, 260, .06), 5);
-				env(q, ad(.004, .06));
-				mix(o, q, .9);
-				return norm(drive(o, 1.6), .7);
-			},
-			hit_dirt(r) {
-				const o = noise(.12, r);
-				filt(o, "lp", 1300);
-				env(o, ad(6e-4, .022));
-				mix(o, grains(.12, 5, r, 1500, 3500, .004), .35);
-				return norm(o, .35);
-			},
-			hit_boss(r) {
-				const f = 480 + r() * 120, o = modes(.22, [
-					[
-						f,
-						1,
-						.05
-					],
-					[
-						f * 1.51,
-						.6,
-						.035
-					],
-					[
-						f * 2.33,
-						.35,
-						.02
-					],
-					[
-						f * 3.9,
-						.2,
-						.01
-					]
-				], r);
-				const n = noise(.03, r);
-				filt(n, "hp", 2400);
-				env(n, ad(2e-4, .004));
-				return norm(mix(o, n, .6), .55);
-			},
-			crate_break(r) {
-				const len = .75, o = N(len);
-				const th = osc(len, exp(100, 46, .03));
-				env(th, ad(.001, .07));
-				mix(o, th, .9);
-				const lo = noise(len, r);
-				filt(lo, "lp", 420);
-				env(lo, ad(.002, .09));
-				mix(o, lo, .9);
-				for (let k = 0; k < 9; k++) {
-					const t = Math.pow(r(), 1.6) * .32, f = 300 + r() * 700;
-					const c = modes(.09, [
-						[
-							f,
-							1,
-							.018
-						],
-						[
-							f * 2.4,
-							.5,
-							.01
-						],
-						[
-							f * 3.9,
-							.3,
-							.006
-						]
-					], r);
-					const s = noise(.03, r);
-					filt(s, "hp", 1600);
-					env(s, ad(2e-4, .004));
-					mix(c, s, .8);
-					mix(o, c, .4 + r() * .5, t);
-				}
-				mix(o, grains(len, 26, r, 1800, 5e3, .004, 1.8), .5);
-				return norm(drive(o, 1.4), .9);
-			},
-			growl(r, v, elite) {
-				const len = elite ? 1 : .72, f0 = elite ? 46 + r() * 8 : 72 + r() * 22, o = N(len);
-				const saw = osc(len, (t) => f0 * (1 + .22 * Math.sin(t * 6.283 * (3 + r() * .01))) * (.85 + .35 * t / len), "saw");
-				env(saw, (t) => .6 + .4 * Math.sin(t * 6.283 * (elite ? 18 : 27)));
-				const f1 = Float32Array.from(saw), f2 = Float32Array.from(saw);
-				filt(f1, "bp", elite ? 380 : 520, 3);
-				filt(f2, "bp", elite ? 900 : 1150, 4);
-				mix(o, f1, 1.2);
-				mix(o, f2, .7);
-				mix(o, filt(Float32Array.from(saw), "lp", 300), .5);
-				const br = noise(len, r);
-				filt(br, "bp", 900, 1.5);
-				mix(o, br, .12);
-				env(o, (t) => Math.min(1, t / .07) * Math.exp(-Math.max(0, t - len * .45) / (len * .25)));
-				drive(o, elite ? 3.2 : 2.6);
-				if (elite) {
-					const sh = N(len);
-					for (let k = 0; k < 6; k++) mix(sh, osc(len, 2200 + r() * 2600), .18);
-					env(sh, (t) => (.5 + .5 * Math.sin(t * 6.283 * 9)) * Math.min(1, t / .2) * Math.exp(-t / .5));
-					mix(o, sh, .5);
-				}
-				return norm(o, .8);
-			},
-			growl_elite(r, v) {
-				return R.growl(r, v, true);
-			},
-			chomp(r) {
-				const o = N(.26);
-				for (const t of [0, .075 + r() * .02]) {
-					const tee = noise(.04, r);
-					filt(tee, "bp", 2600 + r() * 800, 1.2);
-					env(tee, ad(2e-4, .01));
-					const cr = noise(.08, r);
-					filt(cr, "lp", 800);
-					env(cr, ad(5e-4, .03));
-					const lo = osc(.08, exp(150, 80, .03));
-					env(lo, ad(5e-4, .03));
-					mix(o, tee, .8, t);
-					mix(o, cr, .9, t);
-					mix(o, lo, .7, t);
-				}
-				return norm(drive(o, 1.8), .8);
-			},
-			biter_die(r, v, elite) {
-				const o = N(elite ? 1.6 : .65);
-				const sq = noise(.4, r);
-				filt(sq, "bp", exp(1300, 180, .09), 3);
-				env(sq, ad(.002, .12));
-				mix(o, sq, 1.1);
-				const lo = osc(.5, exp(elite ? 120 : 170, elite ? 26 : 40, .1));
-				env(lo, ad(.001, elite ? .32 : .14));
-				mix(o, lo, 1);
-				const pop = noise(.03, r);
-				filt(pop, "hp", 900);
-				env(pop, ad(2e-4, .006));
-				mix(o, pop, .8);
-				mix(o, grains(.5, 10, r, 600, 2400, .008, 1.5), .5, .02);
-				if (elite) for (let k = 0; k < 22; k++) {
-					const f = 2200 + r() * 5200;
-					mix(o, modes(.6, [[
-						f,
-						1,
-						.08 + r() * .3
-					], [
-						f * 2.7,
-						.3,
-						.05
-					]], r), .07 + r() * .08, Math.pow(r(), 2) * .25);
-				}
-				return norm(drive(o, 1.5), .85);
-			},
-			elite_die(r, v) {
-				return R.biter_die(r, v, true);
-			},
-			clang(r) {
-				const f = 170 + r() * 70, ratios = [
-					1,
-					2.76,
-					5.4,
-					8.93,
-					13.34
-				], amps = [
-					1,
-					.6,
-					.42,
-					.25,
-					.15
-				], dec = [
-					.38,
-					.26,
-					.18,
-					.12,
-					.07
-				];
-				const o = modes(.6, ratios.map((k, i) => [
-					f * k * (1 + (r() - .5) * .02),
-					amps[i],
-					dec[i]
-				]), r);
-				const n = noise(.04, r);
-				filt(n, "hp", 1500);
-				env(n, ad(2e-4, .008));
-				mix(o, n, 1.2);
-				const th = osc(.15, exp(130, 60, .03));
-				env(th, ad(.001, .04));
-				mix(o, th, .8);
-				return norm(drive(o, 1.3), .85);
-			},
-			explode(r) {
-				const len = 2.2, o = N(len);
-				const n = noise(len, r);
-				filt(n, "lp", exp(1400, 110, .35));
-				env(n, ad(.003, .5));
-				mix(o, n, 1.3);
-				const sub = osc(len, exp(80, 26, .25));
-				env(sub, ad(.002, .55));
-				mix(o, sub, 1);
-				mix(o, grains(1.6, 70, r, 1500, 4800, .003, 2.2), .55, .03);
-				mix(o, modes(.8, [
-					[
-						260,
-						1,
-						.3
-					],
-					[
-						717,
-						.5,
-						.2
-					],
-					[
-						1405,
-						.3,
-						.12
-					]
-				], r), .35, .05);
-				return norm(drive(o, 2), .95);
-			},
-			tongue(r) {
-				const o = N(.26), n = noise(.26, r);
-				filt(n, "bp", (t) => 450 + 3200 * Math.min(1, t / .12), 4);
-				env(n, ad(.004, .06));
-				mix(o, n, 1);
-				const pl = osc(.2, (t) => 520 + 900 * Math.min(1, t / .08));
-				env(pl, ad(.002, .04));
-				mix(o, pl, .5);
-				return norm(o, .6);
-			},
-			slap(r) {
-				const o = N(.24), n = noise(.05, r);
-				filt(n, "lp", 2e3);
-				env(n, ad(3e-4, .018));
-				mix(o, n, 1);
-				const lo = osc(.12, exp(240, 110, .03));
-				env(lo, ad(5e-4, .04));
-				mix(o, lo, .7);
-				const sq = noise(.2, r);
-				filt(sq, "bp", exp(1600, 420, .05), 5);
-				env(sq, ad(.003, .05));
-				mix(o, sq, .9, .005);
-				return norm(o, .7);
-			},
-			whoosh(r) {
-				const len = .34 + r() * .16, o = noise(len, r, "pink");
-				filt(o, "bp", (t) => 300 + 1500 * Math.sin(Math.PI * Math.min(1, t / len)), 1.1);
-				env(o, (t) => Math.pow(Math.sin(Math.PI * Math.min(1, t / len)), 2));
-				return norm(o, .5);
-			},
-			zap(r) {
-				const o = N(.45), s = osc(.45, exp(1100, 160, .1), "saw");
-				filt(s, "bp", exp(2400, 400, .12), 2);
-				env(s, ad(.002, .14));
-				mix(o, s, 1);
-				const n = noise(.45, r);
-				filt(n, "bp", 3e3, 1);
-				env(n, (t) => Math.exp(-t / .08) * (.5 + .5 * Math.sign(Math.sin(t * 6.283 * 60))));
-				mix(o, n, .5);
-				return norm(drive(o, 2.4), .75);
-			},
-			jump(r) {
-				const o = N(.4), ps = noise(.3, r);
-				filt(ps, "hp", 2200);
-				env(ps, ad(.004, .09));
-				mix(o, ps, .6);
-				const up = osc(.2, (t) => 130 + 900 * t);
-				env(up, ad(.002, .07));
-				mix(o, up, .6);
-				const sp = osc(.4, (t) => 260 * (1 + .08 * Math.sin(t * 6.283 * 22) * Math.exp(-t / .15)));
-				env(sp, ad(.002, .12));
-				mix(o, sp, .25);
-				return norm(o, .6);
-			},
-			jump2(r) {
-				const o = R.whoosh(r);
-				const ch = N(o.length / SR);
-				for (const [k, t] of [
-					[0, 0],
-					[7, .05],
-					[12, .1]
-				]) {
-					const s = osc(.3, 880 * semis(k));
-					env(s, ad(.002, .08));
-					mix(ch, s, .25, t);
-				}
-				return norm(mix(o, ch, 1), .6);
-			},
-			land(r, v) {
-				const heavy = v >= 2, o = N(.5);
-				const th = osc(.3, exp(heavy ? 95 : 85, 42, .03));
-				env(th, ad(.001, heavy ? .1 : .07));
-				mix(o, th, 1);
-				const n = noise(.3, r);
-				filt(n, "lp", 340);
-				env(n, ad(.001, .06));
-				mix(o, n, .9);
-				const cr = osc(.4, (t) => 210 + 25 * Math.sin(t * 6.283 * 7));
-				env(cr, ad(.02, .12));
-				mix(o, cr, .12, .03);
-				mix(o, grains(.35, heavy ? 18 : 9, r, 1200, 3200, .004), .35);
-				return norm(drive(o, 1.5), heavy ? .9 : .7);
-			},
-			dig_down(r) {
-				const len = .65, o = noise(len, r, "brown");
-				filt(o, "lp", 520);
-				env(o, ad(.02, .22));
-				mix(o, grains(len, 22, r, 900, 2600, .008), .6);
-				const rum = osc(len, 48);
-				env(rum, ad(.05, .2));
-				mix(o, rum, .5);
-				return norm(drive(o, 1.6), .8);
-			},
-			dig_up(r) {
-				const o = R.dig_down(r);
-				const pop = osc(.2, exp(320, 110, .04));
-				env(pop, ad(.001, .05));
-				return norm(mix(o, pop, .9, .04), .85);
-			},
-			scratch(r) {
-				const o = N(.14);
-				mix(o, grains(.14, 8, r, 1200, 3800, .005), 1);
-				const n = noise(.14, r, "brown");
-				filt(n, "lp", 700);
-				env(n, ad(.005, .04));
-				mix(o, n, .6);
-				return norm(o, .5);
-			},
-			pickup(r, v, heal) {
-				const notes = heal ? [
-					0,
-					7,
-					12
-				] : [
-					0,
-					4,
-					7,
-					12,
-					16
-				], base = heal ? 660 : 880, o = N(.9);
-				notes.forEach((k, i) => {
-					const f = base * semis(k), s = osc(.6, f);
-					mix(s, osc(.6, f * 2), .25);
-					env(s, ad(.003, .22));
-					mix(o, s, .35, i * .065);
-				});
-				const sp = noise(.6, r);
-				filt(sp, "hp", 6500);
-				env(sp, (t) => Math.exp(-t / .2) * (r() < .04 ? 1 : .15));
-				mix(o, sp, .3);
-				return norm(o, .6);
-			},
-			heal(r, v) {
-				return R.pickup(r, v, true);
-			},
-			loot(r) {
-				const o = N(.5);
-				for (const [k, t] of [[12, 0], [19, .08]]) {
-					const s = osc(.4, 660 * semis(k));
-					env(s, ad(.002, .12));
-					mix(o, s, .4, t);
-				}
-				return norm(o, .5);
-			},
-			boss_emerge(r) {
-				const len = 3.4, o = N(len);
-				const sub = noise(len, r, "brown");
-				filt(sub, "lp", 140);
-				mix(o, sub, 1.3);
-				const gr = noise(len, r);
-				filt(gr, "bp", 260, 2);
-				env(gr, (t) => .5 + .5 * Math.sin(t * 6.283 * 7.3) * Math.sin(t * 6.283 * 2.1));
-				mix(o, gr, .6);
-				const ch = N(len);
-				for (const f of [
-					55,
-					82.4,
-					110,
-					110.6
-				]) mix(ch, osc(len, f, "saw"), .25);
-				filt(ch, "lp", (t) => 180 + 1400 * Math.pow(t / len, 1.6), 1.2);
-				mix(o, ch, .8);
-				mix(o, grains(len, 60, r, 700, 2600, .01, .8), .4);
-				env(o, (t) => Math.min(1, t / .6) * Math.min(1, (len - t) / .5));
-				return norm(drive(o, 1.6), .9);
-			},
-			boss_roar(r) {
-				const len = 1.8, o = N(len);
-				for (const [f, g] of [
-					[55, 1],
-					[82.4, .8],
-					[110, .7],
-					[164.8, .5],
-					[55.4, .6]
-				]) mix(o, osc(len, (t) => f * (1 + .006 * Math.sin(t * 31)), "saw"), g * .3);
-				filt(o, "lp", (t) => 300 + 2400 * Math.exp(-Math.pow((t - .35) / .3, 2)) + 500 * (1 - t / len), 1.4);
-				env(o, (t) => Math.min(1, t / .08) * Math.exp(-Math.max(0, t - .6) / .45));
-				return norm(drive(o, 2.4), .9);
-			},
-			tent_wind(r) {
-				const len = .65, o = noise(len, r);
-				filt(o, "bp", (t) => 600 + 2800 * Math.pow(t / len, 2), 2);
-				env(o, (t) => Math.pow(t / len, 2));
-				const s = osc(len, (t) => 200 + 420 * t / len, "saw");
-				filt(s, "lp", 900);
-				env(s, (t) => .4 * t / len);
-				mix(o, s, 1);
-				return norm(o, .6);
-			},
-			tent_slam(r) {
-				const len = .7, o = N(len);
-				const th = osc(len, exp(80, 34, .04));
-				env(th, ad(.001, .13));
-				mix(o, th, 1.1);
-				const n = noise(len, r);
-				filt(n, "lp", 700);
-				env(n, ad(.001, .1));
-				mix(o, n, .9);
-				const c = noise(.03, r);
-				filt(c, "hp", 2e3);
-				env(c, ad(2e-4, .006));
-				mix(o, c, .9);
-				mix(o, grains(len, 30, r, 800, 3e3, .006, 1.6), .5, .01);
-				return norm(drive(o, 1.8), .9);
-			},
-			boss_lift(r) {
-				const len = 1, o = N(len);
-				for (const f of [
-					220,
-					330,
-					331.5
-				]) mix(o, osc(len, (t) => f * (1 + .5 * t / len)), .3);
-				env(o, (t) => (.6 + .4 * Math.sin(t * 6.283 * 11)) * Math.min(1, t / .2) * Math.min(1, (len - t) / .15));
-				const n = noise(len, r);
-				filt(n, "bp", 1800, 3);
-				env(n, (t) => .2 * t / len);
-				mix(o, n, 1);
-				return norm(o, .45);
-			},
-			boss_die(r) {
-				const len = 3.4, o = N(len);
-				const sub = osc(len, exp(60, 18, .7));
-				env(sub, ad(.002, .9));
-				mix(o, sub, 1.2);
-				const n = noise(len, r);
-				filt(n, "lp", exp(2e3, 90, .5));
-				env(n, ad(.003, .7));
-				mix(o, n, 1.2);
-				for (let k = 0; k < 40; k++) mix(o, modes(.8, [[
-					1800 + r() * 5500,
-					1,
-					.1 + r() * .4
-				]], r), .06, Math.pow(r(), 2) * .6);
-				const ch = N(len);
-				for (const f of [
-					220,
-					277,
-					330
-				]) mix(ch, osc(len, (t) => f * Math.pow(.25, t / len), "saw"), .25);
-				filt(ch, "lp", 1200);
-				env(ch, (t) => Math.min(1, t / .3) * Math.exp(-t / 1.4));
-				mix(o, ch, .7, .2);
-				return norm(drive(o, 1.8), .95);
-			},
-			door(r) {
-				const len = 1.5, o = noise(len, r, "brown");
-				filt(o, "lp", 260);
-				const gr = noise(len, r);
-				filt(gr, "bp", 140, 3);
-				env(gr, (t) => .6 + .4 * Math.sin(t * 6.283 * 13));
-				mix(o, gr, .8);
-				env(o, (t) => Math.min(1, t / .15) * (t < 1.15 ? 1 : Math.exp(-(t - 1.15) / .08)));
-				const th = osc(.35, exp(70, 36, .05));
-				env(th, ad(.001, .1));
-				mix(o, th, 1.2, 1.15);
-				return norm(drive(o, 1.4), .85);
-			},
-			nova(r) {
-				const len = .7, o = N(len);
-				const th = osc(len, exp(320, 70, .08));
-				env(th, ad(.002, .12));
-				mix(o, th, .9);
-				const sw = noise(len, r);
-				filt(sw, "bp", (t) => 500 + 5e3 * Math.min(1, t / .25), 2);
-				env(sw, ad(.01, .15));
-				mix(o, sw, .6);
-				for (const [k, t] of [
-					[24, .02],
-					[31, .06],
-					[36, .1]
-				]) {
-					const s = osc(.4, 220 * semis(k));
-					env(s, ad(.002, .1));
-					mix(o, s, .18, t);
-				}
-				return norm(drive(o, 1.4), .7);
-			},
-			mortar(r) {
-				const len = .9, o = N(len);
-				const th = osc(.3, exp(140, 50, .04));
-				env(th, ad(.001, .07));
-				mix(o, th, 1);
-				const n = noise(.2, r);
-				filt(n, "lp", 900);
-				env(n, ad(.001, .04));
-				mix(o, n, .8);
-				const wh = osc(len, (t) => 1800 - 1100 * t / len);
-				env(wh, (t) => .25 * Math.min(1, t / .2) * Math.min(1, (len - t) / .1));
-				mix(o, wh, 1, .05);
-				return norm(o, .75);
-			},
-			blast(r) {
-				const len = 1.2, o = N(len);
-				const n = noise(len, r);
-				filt(n, "lp", exp(2500, 160, .2));
-				env(n, ad(.002, .25));
-				mix(o, n, 1.2);
-				const sub = osc(len, exp(90, 32, .15));
-				env(sub, ad(.002, .3));
-				mix(o, sub, 1);
-				mix(o, grains(.9, 40, r, 1400, 4500, .003, 2), .5, .02);
-				return norm(drive(o, 2.2), .95);
-			},
-			saw(r) {
-				const o = N(.18), z = osc(.18, (t) => 2600 + 1400 * Math.sin(t * 90), "saw");
-				filt(z, "bp", 3200, 2);
-				env(z, ad(.002, .04));
-				mix(o, z, .7);
-				const n = noise(.05, r);
-				filt(n, "hp", 2500);
-				env(n, ad(3e-4, .01));
-				mix(o, n, .8);
-				return norm(o, .55);
-			},
-			pop(r) {
-				const o = N(.35);
-				const b = osc(.12, exp(900, 180, .03));
-				env(b, ad(.001, .05));
-				mix(o, b, 1);
-				const n = noise(.15, r);
-				filt(n, "bp", 1800, 1.5);
-				env(n, ad(5e-4, .03));
-				mix(o, n, .9);
-				const j = 600 * r(), sq = osc(.15, (t) => 1300 + j + 900 * Math.sin(t * 40));
-				env(sq, ad(.005, .05));
-				mix(o, sq, .25, .03);
-				return norm(drive(o, 1.6), .6);
-			},
-			eshot(r) {
-				const len = .3, o = N(len);
-				const b = osc(len, exp(520, 150, .07), "saw");
-				filt(b, "lp", exp(3200, 500, .08), 3);
-				env(b, ad(.003, .09));
-				mix(o, b, .8);
-				const n = noise(.1, r);
-				filt(n, "bp", 2400, 2);
-				env(n, ad(5e-4, .02));
-				mix(o, n, .5);
-				return norm(drive(o, 1.5), .55);
-			},
-			chub(r) {
-				const len = .22, o = N(len), f0 = 850 + 250 * r();
-				const a = osc(len, (t) => f0 * (1 + 3.2 * t) + 60 * Math.sin(t * 190));
-				env(a, ad(.004, .07));
-				mix(o, a, .8);
-				const b = osc(len, (t) => f0 * 2 * (1 + 3.2 * t));
-				env(b, ad(.004, .04));
-				mix(o, b, .25);
-				return norm(o, .5);
-			},
-			laugh(r) {
-				const n = 6 + Math.floor(r() * 3), o = N(3.4);
-				let t0 = .08, f = 96 * (.94 + .12 * r());
-				for (let i = 0; i < n; i++) {
-					const dur = .17 + .06 * r() + (i === n - 1 ? .2 : 0), amp = Math.max(.3, 1 - i * .085) * (.8 + .4 * r());
-					const fi = f * (i === 0 ? 1.15 : 1), wob = 4 + 3 * r(), ph = r() * 6.283;
-					const src = osc(dur, (t) => fi * (1.2 - .55 * t / dur) * (1 + .03 * Math.sin(t * 6.283 * wob + ph)) * (1 + .035 * (r() - .5)), "saw");
-					const f1 = Float32Array.from(src), f2 = Float32Array.from(src), f3 = Float32Array.from(src);
-					const open = .9 + .2 * r();
-					filt(f1, "bp", 640 * open, 4.5);
-					filt(f2, "bp", 1080 * open, 6);
-					filt(f3, "bp", 2450, 7);
-					filt(src, "lp", 260, .8);
-					const v = N(dur);
-					mix(v, src, .55);
-					mix(v, f1, 1);
-					mix(v, f2, .55);
-					mix(v, f3, .16);
-					const br = noise(dur, r);
-					filt(br, "bp", 1500, 1);
-					mix(v, br, .07);
-					env(v, (t) => Math.min(1, t / .035) * Math.min(1, (dur - t) / .09));
-					const h = noise(.1, r);
-					filt(h, "bp", 1250 * open, 1.3);
-					env(h, (t) => Math.sin(Math.min(1, t / .1) * Math.PI));
-					mix(o, h, .3 * amp, t0 - .07);
-					mix(o, v, amp, t0);
-					t0 += dur + .06 + .07 * r() + (i === 2 && r() < .5 ? .12 : 0);
-					f *= .94 + .03 * r();
-				}
-				const chest = Float32Array.from(o);
-				filt(chest, "lp", 180, .7);
-				mix(o, chest, .5);
-				return norm(drive(o, 1.25), .95);
-			},
-			choir(r) {
-				const len = 9, o = N(len);
-				for (const [k, g] of [
-					[0, 1],
-					[7, .8],
-					[12, .9],
-					[16, .7],
-					[19, .6],
-					[24, .4]
-				]) for (let v = 0; v < 3; v++) {
-					const f0 = 130.8 * semis(k) * (1 + (v - 1) * .006), vr = 4.5 + r() * 1.5, ph = r() * 6.283;
-					const a = osc(len, (t) => f0 * (1 + .006 * Math.sin(t * 6.283 * vr + ph)), "saw");
-					filt(a, "bp", 800, 1.2);
-					filt(a, "lp", 2400, .7);
-					env(a, (t) => Math.min(1, t / 2.5) * Math.min(1, (len - t) / 3));
-					mix(o, a, g * .3);
-				}
-				return norm(o, .7);
-			},
-			spit(r) {
-				const len = .4, o = N(len);
-				const n = noise(len, r);
-				filt(n, "bp", (t) => 700 + 2200 * Math.min(1, t / .08), 3);
-				env(n, ad(.005, .12));
-				mix(o, n, 1);
-				const g = osc(.25, exp(260, 120, .06));
-				env(g, (t) => ad(.01, .08)(t) * (.6 + .4 * Math.sin(t * 6.283 * 45)));
-				mix(o, g, .6);
-				return norm(o, .55);
-			},
-			wave(r) {
-				const len = 2.2, o = N(len);
-				for (const k of [
-					0,
-					7,
-					12
-				]) {
-					const h = osc(len, 98 * semis(k) * (1 + .004 * k), "saw");
-					filt(h, "lp", 900);
-					env(h, (t) => Math.min(1, t / .25) * Math.exp(-Math.max(0, t - .9) / .35) * .3);
-					mix(o, h, 1);
-				}
-				const c = noise(len, r);
-				filt(c, "bp", 420, 1.2);
-				env(c, (t) => Math.min(1, t / .6) * Math.exp(-Math.max(0, t - 1.2) / .4) * (.7 + .3 * Math.sin(t * 6.283 * 7)));
-				mix(o, c, .5);
-				return norm(o, .7);
-			},
-			hoof(r) {
-				const o = N(.16);
-				const b = osc(.12, exp(150 + 40 * r(), 55, .04));
-				env(b, ad(.001, .035));
-				mix(o, b, 1);
-				const n = noise(.05, r);
-				filt(n, "bp", 900 + 500 * r(), 2.5);
-				env(n, ad(4e-4, .012));
-				mix(o, n, .9);
-				return norm(o, .55);
-			},
-			tick(r) {
-				const o = N(.07);
-				const n = noise(.03, r);
-				filt(n, "bp", 3200 + 1500 * r(), 3);
-				env(n, ad(3e-4, .006));
-				mix(o, n, 1);
-				const s = osc(.05, 1500 + 900 * r(), "tri");
-				env(s, ad(5e-4, .012));
-				mix(o, s, .35);
-				return norm(o, .4);
-			},
-			hum_loop() {
-				return looped(4, (sec) => {
-					const b = N(sec);
-					for (const [f, g, v] of [
-						[
-							220,
-							1,
-							.25
-						],
-						[
-							220.5,
-							.7,
-							.5
-						],
-						[
-							277.25,
-							.7,
-							.25
-						],
-						[
-							329.75,
-							.8,
-							.5
-						],
-						[
-							330.25,
-							.5,
-							.25
-						],
-						[
-							440,
-							.45,
-							.75
-						],
-						[
-							554.25,
-							.2,
-							.5
-						],
-						[
-							659.5,
-							.14,
-							.25
-						]
-					]) {
-						const o = osc(sec, f);
-						env(o, (t) => .65 + .35 * Math.sin(t * 6.283 * v + f));
-						mix(b, o, g * .2);
-					}
-					return filt(b, "lp", 1200);
-				});
-			},
-			servo_loop() {
-				return looped(1, (sec) => {
-					const b = osc(sec, 180, "saw");
-					mix(b, osc(sec, 362, "saw"), .5);
-					filt(b, "bp", 1400, 2.5);
-					env(b, (t) => .6 + .4 * Math.sin(t * 6.283 * 22));
-					return b;
-				});
-			},
-			engine_loop() {
-				return looped(1, (sec) => {
-					const b = N(sec), r = rng(7);
-					for (let k = 0; k < Math.ceil(sec * 40); k++) {
-						const p = noise(.03, r);
-						filt(p, "lp", 520);
-						env(p, ad(8e-4, .0075));
-						const s = osc(.03, 40 * (k % 2 ? 2 : 3));
-						env(s, ad(6e-4, .006));
-						mix(p, s, .6);
-						mix(b, p, k % 4 === 0 ? 1 : .7, k / 40);
-					}
-					return filt(b, "lp", 1400);
-				});
-			},
-			drill_loop() {
-				return looped(1, (sec) => {
-					const b = osc(sec, 110, "saw");
-					mix(b, osc(sec, 55, "square"), .35);
-					mix(b, osc(sec, 220.5, "saw"), .2);
-					filt(b, "lp", 1700, 1.2);
-					const n = noise(sec, rng(3));
-					filt(n, "bp", 2600, 1.5);
-					env(n, (t) => .5 + .5 * Math.sin(t * 6.283 * 30));
-					mix(b, n, .25);
-					return b;
-				});
-			},
-			grind_loop() {
-				return looped(1, (sec) => {
-					const r = rng(5), b = noise(sec, r);
-					filt(b, "bp", 1900, .9);
-					const a = noise(sec, r);
-					filt(a, "lp", 35);
-					const m = Math.max(...a.map(Math.abs)) || 1;
-					env(b, (t) => .4 + .6 * Math.abs(a[Math.min(a.length - 1, Math.round(t * SR))] / m));
-					mix(b, grains(sec, 60, r, 1500, 5e3, .003, 1), .6);
-					return b;
-				});
-			},
-			skid_loop() {
-				return looped(1, (sec) => {
-					const b = noise(sec, rng(9)), c = Float32Array.from(b);
-					filt(b, "bp", 1500, 3);
-					filt(c, "bp", 920, 4);
-					return mix(b, c, .8);
-				});
-			},
-			wind_loop() {
-				return looped(4, (sec) => {
-					const b = noise(sec, rng(11), "pink");
-					filt(b, "lp", (t) => 380 + 220 * Math.sin(t * 1.6), .8);
-					return b;
-				});
-			},
-			drone_loop() {
-				return looped(4, (sec) => {
-					const b = N(sec);
-					for (const [f, g] of [
-						[55, 1],
-						[82.5, .6],
-						[110.25, .5],
-						[165, .2]
-					]) mix(b, osc(sec, f, "tri"), g * .3);
-					const n = noise(sec, rng(13));
-					filt(n, "bp", 330, 6);
-					mix(b, n, .4);
-					return b;
-				});
-			}
-		};
-		function synth(name, v) {
-			return R[name](rng(1e3 + v * 7919 + name.length * 131), v);
-		}
-		function normLoop(b, peak) {
-			let m = 1e-6;
-			for (let i = 0; i < b.length; i++) m = Math.max(m, Math.abs(b[i]));
-			for (let i = 0; i < b.length; i++) b[i] *= peak / m;
-			return b;
-		}
-		return {
-			synth,
-			normLoop,
-			R
-		};
 	}
 	const SFX = (() => {
 		const AC = window.AudioContext || window.webkitAudioContext;

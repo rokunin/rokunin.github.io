@@ -5,13 +5,17 @@
   "description": "CHUBZ: the game's sources live in src/, `npm run build` writes the single index.html next to this file (ADR-0003) and dev/balance/data.json from src/data (ADR-0006)",
   "scripts": {
     "build": "vite build && node dev/tools/export_data.mjs",
-    "lint": "biome lint src"
+    "lint": "biome ci src",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.9",
     "three": "0.187.0",
+    "typescript": "7.0.2",
     "vite": "8.3.8",
-    "vite-plugin-singlefile": "2.3.4"
+    "vite-plugin-singlefile": "2.3.4",
+    "vitest": "5.1.2"
   },
   "engines": {
     "node": ">=22.12"

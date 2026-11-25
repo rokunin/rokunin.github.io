@@ -3,13 +3,13 @@
 Перезаписывается в конце каждой сессии. Только факты: что стоит, как собрать и проверить, что нельзя трогать.
 Истории и рассуждений здесь нет. Проверка файла: новая сессия, которая прочла только его и `RULES.md`, может собрать, проверить и выкатить игру.
 
-Состояние на 25.11.2026: `car-proto-next` **билд 142, VER `'38.' + DATA_HASH`**, Three.js r187 (шаг 1 ждёт взгляда Романа на его железе), шаг 2 сделан в первой части; опубликованная `car-proto` стоит на 134 (VER 36).
+Состояние на 25.11.2026: `car-proto-next` **билд 143, VER `'38.' + DATA_HASH`**, Three.js r187 (шаг 1 ждёт взгляда Романа на его железе), шаг 2 сделан в первой части; шаг 3 начат (вынут `src/audio/synth.ts`); опубликованная `car-proto` стоит на 134 (VER 36).
 
 ## Что это и где лежит
 
 - С 25.11.2026 две копии (слова Романа: «старая версия работала до самого конца работы нашей по базовому адресу»). `car-proto/` — опубликованная игра, билд 134, заморожена; артефакт claude.ai тоже остаётся на 134. Работа идёт в `car-proto-next/` (https://rokunin.github.io/car-proto-next/): здесь игра, `dev/`, `docs/`, глоссарий. Сеть у next отдельная (свой appId по пути страницы), настройки игроков в `localStorage` общие (те же ключи, тот же смысл). В конце `car-proto-next/` занимает адрес `car-proto/`.
 - Игра: изометрическая автобоёвка в браузере, кооп P2P. Исходники в `car-proto-next/src/`: `legacy.js` (вся игра, около 8700 строк, один модуль), `three.js` (Three.js из npm плюс аддоны постобработки, один объект `THREE`), `index.html` (оболочка, CSS, номер билда в `<meta name="chubz-build">`), `data/` (боевые числа: таблицы `world`, `weapons`, `rides`, `monsters`, `waves`, `bosses`, `economy`; `data/index.js` собирает их в `DATA` и считает `DATA_HASH`). `npm run build` (Vite 8 + `vite-plugin-singlefile`) пишет один `car-proto-next/index.html` около 2.2 МБ (gzip 0.7 МБ), без минификации. Его не править руками и коммитить вместе с `src/`.
-- `package.json`, `package-lock.json`: версии закреплены точно (vite 8.3.8, vite-plugin-singlefile 2.3.4, three 0.187.0, @biomejs/biome 2.6.9). `biome.json`: только правила корректности, форматтер выключен. `.github/workflows/car-proto-next.yml` в корне репо: CI.
+- `package.json`, `package-lock.json`: версии закреплены точно (vite 8.3.8, vite-plugin-singlefile 2.3.4, three 0.187.0, @biomejs/biome 2.6.9, typescript 7.0.2, vitest 5.1.2). `biome.json`: только правила корректности, форматтер выключен. `.github/workflows/car-proto-next.yml` в корне репо: CI.
 - `car-proto-next/trystero.js`: сеть для GitHub Pages (WebRTC через публичные релеи). Лежит отдельным файлом рядом со страницей, в сборку не входит (импорт по переменной с `@vite-ignore`); тесты подкладывают под тем же именем `harness/trystero_shim.js`.
 - `car-proto-next/assets/`: картинки комикса и карточек (`crew_ref.jpg`, `style_ref.jpg`, `card_layout2.jpg`, `paper_comp.jpg`).
 - `car-proto-next/dev/`: всё для разработки, в игру не подключается.
@@ -25,6 +25,8 @@
 | `npm ci` (в `car-proto-next/`) | ставит сборку и линтер | 5 с |
 | `npm run build` (в `car-proto-next/`) | собирает `index.html` для игроков и выгружает `dev/balance/data.json` | 1 с |
 | `npx biome ci src` | линтер, правила корректности | 1 с |
+| `npm run typecheck` | TypeScript 7 по вынутым модулям `src/**/*.ts` | 1 с |
+| `npm test` | юнит-тесты Vitest (`src/**/*.test.ts`) | 6 с |
 | `python3 harness/build.py` | тест-страница в `/tmp/chubz-test`: та же сборка Vite в режиме `test` (плюс реестр `__dbg`); пропускается, если входы не менялись | 1 с |
 | `python3 frames.py compare [--dir frames/r128]` | восемь кадров заново и сравнение с эталонами версии Three.js из `node_modules` (`frames/r187/`) или с указанной; бок о бок (слева эталон) в `/tmp/chubz-frames` | 2 мин |
 | `python3 frames.py record` | перезаписать эталоны (только после того, как Роман видел новую картинку) | 2 мин |
@@ -71,6 +73,7 @@
 - Presence-поля удалённого игрока: `ak`, `ks`, `gd`, `tw`, `pp`, `vw`/`vh`.
 - Биты флага монстра в снапшоте: 1 flash, 2 mini, 4 gate, 8 stun, 16 dig, 32 wb, 64 rig, 128 guard, 256 wbLoot.
 - Швы для тестов в коде: `const HX = window.__hx` в начале `legacy.js` (часы кадра, турбо, выключение адаптации качества, пропуск рендера, пропуск картинок «как играть» и прогрева шейдеров), маркер `/* test-seam: debug registry */`, куда сборка в режиме `test` ставит `window.__dbg` (`dev/harness/vite-test.js` по `names.txt`), и `window.__threeHook` в `src/three.js`. `hx.js` и `mock_room.js` харнесс ставит init-скриптами Playwright. Игроки ничего из этого не получают.
+- Модули (шаг 3, ADR-0004): вынутый из `legacy.js` код живёт в `src/<область>/*.ts` с тестом `*.test.ts` рядом; `legacy.js` импортирует его. `tsconfig.json`: `strict: false`, `noImplicitAny` включается по модулю, когда тесты его покрывают. Первый — `src/audio/synth.ts` (`audioLib`): он уходит в воркер текстом (`audioLib.toString()`), поэтому внутри ни одного импорта.
 - Боевые числа (ADR-0006): правка баланса — правка `src/data/*.js`, не кода. Имена таблиц в `legacy.js` те же, что были (импорт из `./data/index.js`). `VER = '38.' + DATA_HASH`: игроки с разными числами не попадут в одно лобби, поднимать `38` нужно только при смене протокола или мира.
 - Случайность в тестах: каждая страница получает свой посеянный `Math.random`, а когда мир построен, игра зовёт `HX.reseed()` и поток начинается заново. Так позиция старта и всё дальнейшее не зависят от того, сколько чисел забрал Three.js при загрузке (у разных версий по-разному).
 - Обновление Three.js (ADR-0005): r151 — запечённые текстуры пишутся в sRGB-цель линейным цветом (цель кодирует сама), шейдер луж читает `vRoughnessMapUv`, зажим bloom проверяется и пишет в журнал, если шейдер поменялся. r164 — цвет ведёт ColorManagement Three (патча `Color.prototype` больше нет; `setHSL` получает `THREE.SRGBColorSpace` явно), текстуры помечены `colorSpace`; материалы со своим `envMapIntensity` называют окружение `ENV` своим `envMap` (с r163 сила окружения сцены от материала не зависит); свет: все силы умножены на `LIGHT = π` (до r155 Three умножал сам), а затухание точечных и прожекторов — прежнее, `(1 - d / distance) ^ decay`, через замену функции в `ShaderChunk.lights_pars_begin` (если чанк поменяется, в журнал пишется ошибка). r187 — тени `PCFShadowMap` (мягкий PCF убран из Three), часы кадра `THREE.Timer` (Clock устарел с r183).
