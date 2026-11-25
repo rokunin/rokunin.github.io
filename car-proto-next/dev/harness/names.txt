@@ -50,7 +50,7 @@ deathToll
 decoys
 domes
 door
-drillRPM
+drillRPM = GS.drillRPM
 dropCoins
 dropLoot
 eaten = GS.chubEaten
@@ -124,8 +124,8 @@ thrown
 TNT
 trails
 updateHints
-upGot
-rw upPts
+upGot = GS.upGot
+! get upPts(){return GS.upPts}, set upPts(v){GS.upPts=v}
 VER
 viewSize = GS.viewSize
 W_GEAR
