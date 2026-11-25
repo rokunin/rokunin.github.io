@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the tests and print one line per test.   python3 run.py [-k part-of-name] [-v]
+"""Run the tests and print one line per test.   python3 run.py [-k part-of-name[,another]] [-v]
 
 Exit code 0 only if every test passed. -v prints each test's own output, otherwise it is shown for failures only.
 """
@@ -7,11 +7,12 @@ import argparse, glob, os, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ap = argparse.ArgumentParser()
-ap.add_argument('-k', default='', help='run only tests whose file name contains this')
+ap.add_argument('-k', default='', help='run only tests whose file name contains this; several, comma-separated: -k shipped,world')
 ap.add_argument('-v', action='store_true')
 a = ap.parse_args()
 
-tests = [f for f in sorted(glob.glob(os.path.join(HERE, 'tests', 'test_*.py'))) if a.k in os.path.basename(f)]
+keys = a.k.split(',')
+tests = [f for f in sorted(glob.glob(os.path.join(HERE, 'tests', 'test_*.py'))) if any(k in os.path.basename(f) for k in keys)]
 if not tests:
     sys.exit('no tests match')
 bad, t_all = [], time.time()

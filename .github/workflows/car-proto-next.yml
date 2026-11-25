@@ -1,0 +1,53 @@
+# CHUBZ (car-proto-next) on every push that touches it: the build, the committed index.html being that build, Biome,
+# the quick harness set and a secret scan (ADR-0008). The whole harness suite runs by hand: Actions → car-proto-next → Run workflow → full.
+name: car-proto-next
+on:
+  push:
+    paths: ['car-proto-next/**', '.github/workflows/car-proto-next.yml']
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run the whole harness suite (about 20 minutes)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: car-proto-next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: car-proto-next/package-lock.json
+      - run: npm ci
+      - name: Build, and the committed index.html is exactly that build
+        run: npm run build && git diff --exit-code --stat -- index.html
+      - name: Biome
+        run: npx biome ci src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Harness dependencies
+        run: pip install -r dev/requirements.txt && python -m playwright install --with-deps chromium
+      - name: Harness, quick set
+        if: ${{ !inputs.full }}
+        run: python dev/run.py -k shipped,world,errors,solo_smoke
+      - name: Harness, whole suite
+        if: ${{ inputs.full }}
+        run: python dev/run.py
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

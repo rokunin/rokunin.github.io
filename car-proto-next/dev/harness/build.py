@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Build the local test page from the game's single source file.
+"""Build the local test page from the game's sources.
 
-    python3 build.py [--src ../../index.html] [--out /tmp/chubz-test]
+    python3 build.py [--src ../../src] [--out /tmp/chubz-test]
+
+The sources are src/ (build 137 on): build.py copies them to dev/.test-src, patches the copy and runs the game's own Vite build
+on it, so the test page is the shipped page plus the hooks below. Given an .html file instead (build 136 and older, e.g. the frozen
+../../../car-proto/index.html), it patches that file the old way and serves three.js from node_modules in place of the CDNs.
 
 What changes against the shipped page, and nothing else:
-  * three.js comes from node_modules instead of the CDNs (the sandbox has no CDN access);
   * window.__dbg exposes the names listed in names.txt, read live through getters;
   * window.__hx owns the frame clock: cap dt, freeze time, step frame by frame, skip idle renders;
   * adaptQuality() is off, so the picture does not change with the machine's speed;
@@ -14,10 +17,12 @@ What changes against the shipped page, and nothing else:
 Every patch asserts that its anchor matched exactly once. If the game's code moved, the build fails here
 and names the anchor, instead of producing a page that silently lacks a hook.
 """
-import argparse, os, re, shutil, subprocess, sys
+import argparse, hashlib, os, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_SRC = os.path.normpath(os.path.join(HERE, '..', '..', 'index.html'))
+PROJECT = os.path.normpath(os.path.join(HERE, '..', '..'))
+DEFAULT_SRC = os.path.join(PROJECT, 'src')
+TEST_SRC = os.path.join(PROJECT, 'dev', '.test-src')
 DEFAULT_OUT = os.environ.get('CHUBZ_OUT', '/tmp/chubz-test')
 
 HX = r"""
@@ -70,16 +75,8 @@ def dbg_object(path):
     return 'window.__dbg = { ' + ', '.join(members) + ', ' + check + ' };', len(names)
 
 
-def build(src=DEFAULT_SRC, out=DEFAULT_OUT, quiet=False):
-    s = open(src, encoding='utf8').read()
-    os.makedirs(out, exist_ok=True)
-
-    n_cdn = s.count('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js') + s.count('https://cdn.jsdelivr.net/npm/three@0.128.0/')
-    s = s.replace('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', 'node_modules/three/build/three.min.js')
-    s = s.replace('https://cdn.jsdelivr.net/npm/three@0.128.0/', 'node_modules/three/')
-    if n_cdn < 2 or 'https://cdn' in s:
-        sys.exit('build.py: the CDN script tags changed; update the replacements in build.py')
-
+def patch_code(s):
+    """The hooks inside the game's code. Same anchors for src/legacy.js and for an old single index.html."""
     dbg, n_names = dbg_object(os.path.join(HERE, 'names.txt'))
     m = re.findall(r'^  applyAbilityVisuals\(\);$', s, re.M)
     if len(m) != 1:
@@ -95,24 +92,89 @@ def build(src=DEFAULT_SRC, out=DEFAULT_OUT, quiet=False):
     # the lobby's "how to play" pictures are five full renders of the game at start-up: 18 of the 22 seconds a headless page takes to boot
     s = sub_once(s, "        if (!composer) throw 0;\n        const cv = renderer.domElement, asp", "        if (!composer || window.__hx) throw 0;\n        const cv = renderer.domElement, asp", 'skip the how-to renders')
     s = sub_once(s, "  (function prewarm() {\n    try {\n", "  (function prewarm() {\n    try {\n      if (window.__noRender) return;      // fast mode draws nothing, so there is nothing to compile\n", 'skip the shader prewarm in fast mode')
-    head = '<script>\n' + HX + open(os.path.join(HERE, 'mock_room.js'), encoding='utf8').read() + '</script>\n'
-    s = sub_once(s, '<script src="node_modules/three/build/three.min.js"', head + '<script src="node_modules/three/build/three.min.js"', 'head scripts')
+    return s, n_names
 
-    open(os.path.join(out, 'index.html'), 'w', encoding='utf8').write(s)
+
+def head_scripts():
+    return '<script>\n' + HX + open(os.path.join(HERE, 'mock_room.js'), encoding='utf8').read() + '</script>\n'
+
+
+def finish(out, quiet, build_no, n_names):
     shutil.copyfile(os.path.join(HERE, 'trystero_shim.js'), os.path.join(out, 'trystero.js'))
-    assets = os.path.join(os.path.dirname(src), 'assets')
-    if os.path.isdir(assets) and not os.path.exists(os.path.join(out, 'assets')):
-        os.symlink(assets, os.path.join(out, 'assets'))
+    assets = os.path.join(PROJECT, 'assets')
+    link = os.path.join(out, 'assets')
+    if os.path.islink(link) and os.readlink(link) != assets:
+        os.remove(link)
+    if os.path.isdir(assets) and not os.path.exists(link):
+        os.symlink(assets, link)
+    info = {'out': out, 'build': build_no, 'names': n_names}
+    if not quiet:
+        print(f"build.py: build {info['build']} -> {out}/index.html, {n_names} debug names")
+    return info
+
+
+def build(src=DEFAULT_SRC, out=DEFAULT_OUT, quiet=False):
+    os.makedirs(out, exist_ok=True)
+    return build_html(src, out, quiet) if src.endswith('.html') else build_src(src, out, quiet)
+
+
+def build_src(src, out, quiet):
+    """src/ → dev/.test-src (patched) → the game's Vite build → out/index.html. Skipped when nothing it reads has changed."""
+    inputs = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in fs)
+    inputs += [os.path.join(HERE, f) for f in ('build.py', 'names.txt', 'mock_room.js')] + [os.path.join(PROJECT, f) for f in ('vite.config.js', 'package-lock.json')]
+    h = hashlib.sha1()
+    for f in inputs:
+        h.update(f.encode()); h.update(open(f, 'rb').read())
+    stamp, page = os.path.join(out, '.stamp'), os.path.join(out, 'index.html')
+    meta = re.search(r'<meta name="chubz-build" content="(\d+)"', open(os.path.join(src, 'index.html'), encoding='utf8').read())
+    build_no = int(meta.group(1)) if meta else None
+    if os.path.exists(page) and os.path.exists(stamp) and open(stamp).read() == h.hexdigest():
+        return finish(out, quiet, build_no, dbg_object(os.path.join(HERE, 'names.txt'))[1])
+
+    if not os.path.isdir(os.path.join(PROJECT, 'node_modules', 'vite')):
+        if not quiet:
+            print('build.py: npm ci in', PROJECT)
+        subprocess.run(['npm', 'ci', '--silent', '--no-audit', '--no-fund'], cwd=PROJECT, check=True)
+    shutil.rmtree(TEST_SRC, ignore_errors=True)
+    shutil.copytree(src, TEST_SRC)
+    code = os.path.join(TEST_SRC, 'legacy.js')
+    s, n_names = patch_code(open(code, encoding='utf8').read())
+    open(code, 'w', encoding='utf8').write(s)
+    shell = os.path.join(TEST_SRC, 'index.html')
+    html = sub_once(open(shell, encoding='utf8').read(), '<script type="module" src="./legacy.js"></script>',
+                    head_scripts() + '<script type="module" src="./legacy.js"></script>', 'head scripts')
+    open(shell, 'w', encoding='utf8').write(html)
+    if os.path.exists(page):
+        os.remove(page)
+    r = subprocess.run(['node', os.path.join(PROJECT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', os.path.join(PROJECT, 'vite.config.js'),
+                        TEST_SRC, '--outDir', out, '--logLevel', 'error'], cwd=PROJECT, capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(page):
+        sys.exit('build.py: vite build failed\n' + r.stdout + r.stderr)
+    open(stamp, 'w').write(h.hexdigest())
+    return finish(out, quiet, build_no, n_names)
+
+
+def build_html(src, out, quiet):
+    """An old single-file page (build 136 and older): three.js from node_modules in place of the CDNs, hooks patched in."""
+    s = open(src, encoding='utf8').read()
+    n_cdn = s.count('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js') + s.count('https://cdn.jsdelivr.net/npm/three@0.128.0/')
+    s = s.replace('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', 'node_modules/three/build/three.min.js')
+    s = s.replace('https://cdn.jsdelivr.net/npm/three@0.128.0/', 'node_modules/three/')
+    if n_cdn < 2 or 'https://cdn' in s:
+        sys.exit('build.py: the CDN script tags changed; update the replacements in build.py')
+    s, n_names = patch_code(s)
+    head = head_scripts()
+    s = sub_once(s, '<script src="node_modules/three/build/three.min.js"', head + '<script src="node_modules/three/build/three.min.js"', 'head scripts')
+    open(os.path.join(out, 'index.html'), 'w', encoding='utf8').write(s)
+    if os.path.exists(os.path.join(out, '.stamp')):
+        os.remove(os.path.join(out, '.stamp'))
     if not os.path.exists(os.path.join(out, 'node_modules', 'three', 'build', 'three.min.js')):
         if not quiet:
             print('build.py: installing three@0.128.0 into', out)
         subprocess.run(['npm', 'i', '--silent', '--no-audit', '--no-fund', '--prefix', out, 'three@0.128.0'], check=True)
 
     b = re.search(r'const BUILD = (\d+)', s)
-    info = {'out': out, 'build': int(b.group(1)) if b else None, 'names': n_names}
-    if not quiet:
-        print(f"build.py: build {info['build']} -> {out}/index.html, {n_names} debug names")
-    return info
+    return finish(out, quiet, int(b.group(1)) if b else None, n_names)
 
 
 if __name__ == '__main__':

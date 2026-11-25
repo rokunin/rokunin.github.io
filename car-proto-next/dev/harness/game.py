@@ -24,14 +24,35 @@ ARGS = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blo
         '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows']
 RIDES = ('buggy', 'halo', 'spider', 'unicorn')
 
+# Every test page lives on one day and draws one stream of random numbers, so a failure replays: the run prints both, and
+# CHUBZ_SEED=7 or CHUBZ_DAY=2026-03-15 (or CHUBZ_DAY=today) runs again with another. Each page of a run gets its own stream
+# (seed * 1000 + page number): two players with one stream would pick the same network id.
+SEED = int(os.environ.get('CHUBZ_SEED', '1'))
+DAY = os.environ.get('CHUBZ_DAY', '2026-01-01')
+
+
+def day_js(day):
+    """The page's clock shows `day` at the time of day it really is; the clock keeps running."""
+    y, m, d = (int(x) for x in day.split('-'))
+    return ("(() => { const D = Date, off = D.UTC(%d, %d, %d) - Math.floor(D.now() / 864e5) * 864e5;"
+            " window.Date = class extends D { constructor(...a) { super(...(a.length ? a : [D.now() + off])); } };"
+            " window.Date.now = D.now; window.Date.UTC = D.UTC; window.Date.parse = D.parse; })();") % (y, m - 1, d)
+
+
+def rng_js(seed):
+    """Math.random becomes a seeded mulberry32 stream for this page."""
+    return ("(() => { let s = %d >>> 0; Math.random = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s;"
+            " t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();") % seed
+
 
 def _free_port():
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close(); return port
 
 
 class Game:
-    def __init__(self, fast=True, size=None, scale=1, src=None, out=None, turbo=0):
+    def __init__(self, fast=True, size=None, scale=1, src=None, out=None, turbo=0, seed=None, day=None):
         self.fast, self.scale = fast, scale
+        self.seed, self.day = SEED if seed is None else seed, day or DAY
         self.size = size or ((700, 440) if fast else (1100, 700))
         self.turbo = turbo
         self.src, self.out = src or _build.DEFAULT_SRC, out or _build.DEFAULT_OUT
@@ -55,6 +76,7 @@ class Game:
         self.ctx = self.browser.new_context(viewport={'width': self.size[0], 'height': self.size[1]}, device_scale_factor=self.scale)
         if self.fast:
             self.ctx.add_init_script("window.__noRender = true; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), %d);" % (0 if self.turbo else 16))
+        print(f'      random seed {self.seed}, day {self.day}  (CHUBZ_SEED= and CHUBZ_DAY= replay or change them)')
         return self
 
     def __exit__(self, *exc):
@@ -68,7 +90,9 @@ class Game:
     # ---- pages ----
     def _open(self, name, query='', init=None):
         p = self.ctx.new_page(); self.pages.append(p)
-        if init: p.add_init_script(init)      # runs before the page's own scripts
+        if self.day != 'today': p.add_init_script(day_js(self.day))
+        p.add_init_script(rng_js(self.seed * 1000 + len(self.pages)))
+        if init: p.add_init_script(init)      # runs before the page's own scripts, after the day and the random stream
         p.on('pageerror', lambda e: self.errs.append(f'{name}: {e}'))
         p.goto(f'http://127.0.0.1:{self.port}/index.html{query}', wait_until='commit')      # not DOMContentLoaded: the game is up in ~2 s, the event comes ~15 s later
         p.wait_for_function('!!window.__dbg', timeout=90000)

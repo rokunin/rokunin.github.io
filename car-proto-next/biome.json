@@ -1,0 +1,41 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"files": { "includes": ["src/**/*.js", "vite.config.js"] },
+	"formatter": { "enabled": false },
+	"assist": { "enabled": false },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "none",
+			"correctness": {
+				"noUndeclaredVariables": "error",
+				"noUnreachable": "error",
+				"noSelfAssign": "error",
+				"noConstAssign": "error",
+				"noInvalidConstructorSuper": "error",
+				"noUnsafeFinally": "error",
+				"noSwitchDeclarations": "error",
+				"noInnerDeclarations": "off",
+				"noInvalidUseBeforeDeclaration": "error",
+				"noUnusedLabels": "error",
+				"useIsNan": "error",
+				"useValidTypeof": "error"
+			},
+			"suspicious": {
+				"noDuplicateObjectKeys": "error",
+				"noDuplicateCase": "error",
+				"noDuplicateParameters": "error",
+				"noDuplicateClassMembers": "error",
+				"noFallthroughSwitchClause": "off",
+				"noRedeclare": "error",
+				"noSelfCompare": "error",
+				"noShadowRestrictedNames": "error",
+				"noGlobalAssign": "error",
+				"noCompareNegZero": "error",
+				"noDoubleEquals": "off",
+				"noAssignInExpressions": "off"
+			}
+		}
+	},
+	"javascript": { "globals": [] }
+}

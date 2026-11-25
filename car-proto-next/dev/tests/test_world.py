@@ -9,7 +9,9 @@ from harness.game import Game, Checks, ev, wait
 FIXED_DAY = "(() => { const D = Date, T = D.UTC(2026, 0, 1, 12); window.Date = class extends D { constructor(...a) { super(...(a.length ? a : [T])); } }; window.Date.now = D.now; window.Date.UTC = D.UTC; window.Date.parse = D.parse; })();"
 # Three draws Math.random for every object id. Here every mesh the page makes also makes a spare object, so Three draws more: with a shared stream
 # (build 135 and older) that moved the whole world. Three calls its own id function directly, so the extra draws have to come from extra objects.
-GREEDY_THREE = "(() => { let T; window.__spare = 0; Object.defineProperty(window, 'THREE', { configurable: true, get() { return T; }, set(v) { T = v; queueMicrotask(() => { const M = T.Mesh; T.Mesh = class extends M { constructor(...a) { super(...a); new T.Object3D(); window.__spare++; } }; }); } }); })();"
+# src/three.js hands its THREE to window.__threeHook before the game runs; pages of build 136 and older get THREE as a global from a script tag.
+GREEDY_THREE = ("(() => { window.__spare = 0; const greedy = T => { const M = T.Mesh; T.Mesh = class extends M { constructor(...a) { super(...a); new T.Object3D(); window.__spare++; } }; };"
+                " window.__threeHook = greedy; let T; Object.defineProperty(window, 'THREE', { configurable: true, get() { return T; }, set(v) { T = v; queueMicrotask(() => greedy(T)); } }); })();")
 PRINT = """const r = v => Math.round(v * 100) / 100, r1 = v => Math.round(v * 10) / 10, parts = [];
 // a guest gets the crates' places from the host to a tenth of a metre, so places are compared at a tenth
 for (const o of d.obstacles) parts.push(['o', r1(o.mesh.position.x), r1(o.mesh.position.z), r(o.hx || 0), r(o.hz || 0)].join());
