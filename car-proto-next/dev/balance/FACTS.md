@@ -1,3 +1,5 @@
+> Snapshot of build 133, not updated. The combat tables now live in `src/data/` and `data.json` (ADR-0006); read those numbers there. What is still only here: mechanics and the numbers that still sit in the game's code.
+
 # car-proto.html balance facts (read-only extraction)
 
 File: /home/claude/car-proto.html. "L123" = line number. Numbers are quoted as in code. "lv" naming: the HUD shows gun levels Lv1..3 and skills Lv1..3 (stars); in code, guns are stored as `weapons[k]` = 1 / 3 / 5 (gainWeapon adds +2 per upgrade, L4971-4975, `W_MAX=5` L4937) and the `W_STATS` arrays have 5 slots, of which ONLY slots 0, 2, 4 are ever used (index = weapons[k]-1). Skills are stored as `abLv[t]` = 0 / 1 / 2 (`AB_LV_MAX=2`, L4641); the jump goes 0..3 (`abMax('jump')=3`).

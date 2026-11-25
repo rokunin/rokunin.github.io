@@ -1,0 +1,467 @@
+{
+ "hash": "d5abba25",
+ "ARENA": 180,
+ "FIRE_RATE": 11,
+ "W_STATS": {
+  "spread": {
+   "n": [3, 5, 5, 7, 9],
+   "arc": [0.3, 0.4, 0.5, 0.6, 0.72],
+   "rate": [1, 1.05, 1.12, 1.18, 1.25]
+  },
+  "nova": {
+   "cd": [2.4, 2.1, 1.8, 1.55, 1.3],
+   "n": [10, 14, 18, 22, 28],
+   "dmg": [1, 1, 1.5, 1.5, 2]
+  },
+  "orbit": {
+   "n": [2, 3, 3, 4, 5],
+   "r": [4, 4.3, 4.6, 5, 5.4],
+   "spd": [3, 3.2, 3.5, 3.8, 4.2],
+   "dmg": [1, 1.2, 1.5, 1.8, 2.2]
+  },
+  "mortar": {
+   "cd": [4.2, 3.6, 3.1, 2.7, 2.2],
+   "r": [4.2, 4.7, 5.2, 5.8, 6.6],
+   "dmg": [4, 5, 6.5, 8, 10]
+  }
+ },
+ "W_ORDER": ["spread", "nova", "orbit", "mortar"],
+ "W_GEAR": ["spread", "nova", "orbit"],
+ "SWORD_T": [1.2, 1.5, 1.9, 2.3, 2.8],
+ "TUNE": {
+  "accel": 26,
+  "reverseAccel": 23.4,
+  "brake": 45,
+  "maxSpeed": 26,
+  "maxReverse": -23.4,
+  "coast": 7,
+  "steerRate": 6,
+  "turnRate": 2.95,
+  "grip": 7,
+  "spinRate": 3.6,
+  "spinSteerRate": 12,
+  "gripHuman": 3.8
+ },
+ "UNI": {
+  "accel": 40,
+  "reverseAccel": 12,
+  "brake": 70,
+  "maxSpeed": 24,
+  "maxReverse": -6,
+  "coast": 22,
+  "steerRate": 9,
+  "turnRate": 3.4,
+  "grip": 16,
+  "spinRate": 4.4,
+  "spinSteerRate": 14,
+  "gripHuman": 16
+ },
+ "BUG": {
+  "accel": 40,
+  "reverseAccel": 36,
+  "brake": 70,
+  "maxSpeed": 26.400000000000002,
+  "maxReverse": -23.76,
+  "coast": 22,
+  "steerRate": 9,
+  "turnRate": 3.4,
+  "grip": 16,
+  "spinRate": 4.4,
+  "spinSteerRate": 14,
+  "gripHuman": 16
+ },
+ "RIDE_KIT": {
+  "buggy": ["drill", "decoy", "jump"],
+  "spider": ["burrow", "jump"],
+  "halo": ["jump", "doubleJump", "cubes"],
+  "unicorn": ["bomb", "trail", "jump"]
+ },
+ "RIDE_ACTIVE": {
+  "buggy": "decoy",
+  "spider": "burrow",
+  "halo": "cubes",
+  "unicorn": "bomb"
+ },
+ "STOMP": {
+  "r": [7, 8.5, 10],
+  "stun": [1.5, 2, 2]
+ },
+ "BROOD": {
+  "n": [6, 10, 10],
+  "r": [9, 11, 11],
+  "slow": [3, 4.5, 4.5]
+ },
+ "SPIKE": {
+  "n": [6, 11, 18],
+  "r": [3, 5, 7.5],
+  "h": [1.7, 2.7, 3.8],
+  "T": [1.3, 2.6, 4],
+  "dmg": [1, 1, 2]
+ },
+ "STARB": {
+  "n": [10, 16, 24],
+  "reach": [9, 13, 17],
+  "dmg": [1, 1, 1.5]
+ },
+ "BOMB": {
+  "r": [7, 9, 11],
+  "T": [2, 3, 4],
+  "cd": [12, 11, 10]
+ },
+ "TRAIL_T": [3, 5, 5],
+ "SW_KINDS": {
+  "gremlin": {
+   "hp": 1,
+   "speed": 12.5,
+   "size": 1.8,
+   "r": 0.55,
+   "bite": 5,
+   "hue": [0.25, 0.14, 0.33]
+  },
+  "stilt": {
+   "hp": 2,
+   "speed": 9.5,
+   "size": 3.4,
+   "r": 0.55,
+   "bite": 7,
+   "hue": [0.75, 0.5, 0.58]
+  },
+  "brute": {
+   "hp": 9,
+   "speed": 6,
+   "size": 3.9,
+   "r": 1.35,
+   "bite": 12,
+   "hue": [0.03, 0.08, 0.95],
+   "heavy": true
+  },
+  "flapper": {
+   "hp": 1.5,
+   "speed": 11,
+   "size": 2.3,
+   "r": 0.65,
+   "bite": 4,
+   "hue": [0.8, 0.88, 0.7],
+   "fly": 2.4
+  },
+  "spitter": {
+   "hp": 2,
+   "speed": 7.5,
+   "size": 2.1,
+   "r": 0.65,
+   "bite": 5,
+   "hue": [0.2, 0.16, 0.42],
+   "ranged": true
+  },
+  "maw": {
+   "hp": 2,
+   "speed": 13.5,
+   "size": 3,
+   "r": 0.6,
+   "bite": 6,
+   "hue": [0.98, 0.3, 0.12]
+  },
+  "oculon": {
+   "hp": 3,
+   "speed": 7,
+   "size": 3.3,
+   "r": 0.7,
+   "bite": 5,
+   "hue": [0.78, 0.02, 0.5],
+   "ranged": true
+  },
+  "gloop": {
+   "hp": 12,
+   "speed": 5,
+   "size": 2.7,
+   "r": 1.2,
+   "bite": 8,
+   "hue": [0.33, 0.55, 0.15],
+   "heavy": true,
+   "split": "gloopling"
+  },
+  "gloopling": {
+   "hp": 2,
+   "speed": 10,
+   "size": 1.5,
+   "r": 0.5,
+   "bite": 4,
+   "hue": [0.33, 0.55, 0.15],
+   "art": "gloop"
+  },
+  "jelly": {
+   "hp": 3,
+   "speed": 8.5,
+   "size": 4.4,
+   "r": 0.6,
+   "bite": 9,
+   "hue": [0.55, 0.85, 0.42]
+  },
+  "grubber": {
+   "hp": 14,
+   "speed": 5.5,
+   "size": 4.9,
+   "r": 1.5,
+   "bite": 14,
+   "hue": [0.08, 0.92, 0.6],
+   "heavy": true
+  },
+  "lamprey": {
+   "hp": 4,
+   "speed": 9.5,
+   "size": 4.2,
+   "r": 0.7,
+   "bite": 10,
+   "hue": [0.92, 0.12, 0.72],
+   "lunge": true
+  },
+  "spike": {
+   "hp": 3,
+   "speed": 15.5,
+   "size": 2.3,
+   "r": 0.75,
+   "bite": 9,
+   "hue": [0.12, 0.62, 0],
+   "spiky": true
+  },
+  "wingmaw": {
+   "hp": 2.5,
+   "speed": 12,
+   "size": 3.1,
+   "r": 0.7,
+   "bite": 6,
+   "hue": [0.7, 0.45, 0.88],
+   "fly": 1
+  }
+ },
+ "MINI_KINDS": ["brute", "grubber", "maw", "jelly", "oculon", "lamprey", "gloop", "stilt", "wingmaw", "spike"],
+ "MINI_SEQ": [
+  {
+   "n": 7,
+   "gap": 0.09
+  },
+  {
+   "n": 3,
+   "gap": 0.4
+  },
+  {
+   "n": 2,
+   "gap": 0.5
+  },
+  {
+   "n": 26,
+   "gap": 0.085
+  },
+  {
+   "n": 5,
+   "gap": 0.22
+  }
+ ],
+ "RIG": {
+  "speed": 2.6,
+  "turn": 0.3,
+  "half": 18.75,
+  "logR": 1.5,
+  "mastR": 5.6,
+  "spin": 0.85,
+  "top": 5.4,
+  "tame": true,
+  "n": {
+   "roll": 2,
+   "scout": 6,
+   "save": 6,
+   "hell": 10,
+   "boss": 0
+  }
+ },
+ "TNT": {
+  "grab": 3.4,
+  "help": 8,
+  "g": 32,
+  "vy": 20,
+  "near": 6,
+  "far": 17,
+  "aim": 0.6
+ },
+ "PHASES": [
+  {
+   "key": "roll",
+   "name": "ROLL OUT",
+   "desc": "Gear up: fight for your guns, then hunt the bosses for skills",
+   "waves": 99,
+   "brk": 8,
+   "mul": 1,
+   "over": 0.6,
+   "cap": 10,
+   "max": 45
+  },
+  {
+   "key": "scout",
+   "name": "SCOUT THE WASTES",
+   "desc": "Find the altars, the chubzik nests and the boss gate",
+   "waves": 99,
+   "brk": 18,
+   "mul": 1.2,
+   "over": 0.6,
+   "cap": 12,
+   "max": 50
+  },
+  {
+   "key": "save",
+   "name": "SAVE & SACRIFICE",
+   "desc": "The chubziks are hatching. Haul them to the altars",
+   "waves": 99,
+   "brk": 18,
+   "mul": 1.5,
+   "over": 0.6,
+   "cap": 12,
+   "max": 60
+  },
+  {
+   "key": "hell",
+   "name": "HELL BREAKS LOOSE",
+   "desc": "Mini-bosses everywhere. Hold the line",
+   "waves": 99,
+   "brk": 18,
+   "mul": 2.6,
+   "over": 0.7,
+   "cap": 11,
+   "max": 75
+  },
+  {
+   "key": "boss",
+   "name": "THE PYRAMIDON",
+   "desc": "The gate is open. Go punch it",
+   "waves": 99,
+   "brk": 0,
+   "mul": 1.4,
+   "over": 0.6,
+   "cap": 14,
+   "max": 45
+  }
+ ],
+ "WAVE_PLANS": [
+  [
+   ["gremlin", 8]
+  ],
+  [
+   ["maw", 7],
+   ["gremlin", 5]
+  ],
+  [
+   ["flapper", 6],
+   ["wingmaw", 5]
+  ],
+  [
+   ["gloop", 2],
+   ["brute", 1],
+   ["gremlin", 8]
+  ],
+  [
+   ["oculon", 3],
+   ["spitter", 2],
+   ["stilt", 6]
+  ],
+  [
+   ["spike", 6],
+   ["jelly", 4]
+  ],
+  [
+   ["grubber", 2],
+   ["lamprey", 4],
+   ["maw", 6]
+  ]
+ ],
+ "BOSS_HP": 1000,
+ "TENT_SP": 0.85,
+ "TENT_MIN": 10,
+ "TENT_MAX": 34,
+ "BOSS2": {
+  "out": [102, 0],
+  "fleeV": 26,
+  "dashV": 30,
+  "near": [14, 22],
+  "sight": 75,
+  "ram": 18,
+  "lairQ": {
+   "n": 3,
+   "r": 13,
+   "dmg": 26,
+   "gap": [12.5, 17.5],
+   "rage": [8.75, 12.5]
+  },
+  "fieldQ": {
+   "n": 6,
+   "r": 26,
+   "dmg": 12,
+   "gap": [6.25, 8.75],
+   "rage": [4.4, 6.25]
+  },
+  "step": 0.5,
+  "lavaR": 40,
+  "lavaW": 1.7,
+  "lavaH": 4.2,
+  "lavaDmg": 20
+ },
+ "LOOT": {
+  "abCost": [100, 200, 300],
+  "wCost": [30, 60],
+  "life": 25,
+  "max": 420,
+  "pull": 18,
+  "pullV": [22, 60]
+ },
+ "SHOP": {
+  "conv": [100, 10],
+  "ult": {
+   "sword": 30,
+   "hands": 50
+  }
+ },
+ "ULT": {
+  "hands": {
+   "n": 10,
+   "ring": 11,
+   "every": 0.13,
+   "fly": 0.3,
+   "lift": 0.14,
+   "fuse": 0.5,
+   "R": 20
+  },
+  "sword": {
+   "ahead": 9,
+   "fall": 0.5,
+   "hold": 0.28,
+   "run": 48,
+   "speed": 30,
+   "w": 5.4,
+   "R0": 9.5,
+   "out": 0.5
+  }
+ },
+ "WEB_N": 4,
+ "WEB_R": [2.3, 2.9, 3.5, 4.2, 5],
+ "WEB_T": 3.2,
+ "HALO_SWORDS": {
+  "n": [4, 5, 6, 7, 8],
+  "len": [7, 9, 11, 13.5, 16],
+  "every": 0.12,
+  "dmgK": 0.9
+ },
+ "BEAM_PER": [1, 2, 2, 3, 3],
+ "BULLET": {
+  "speed": {
+   "base": 70,
+   "star": 52,
+   "holy": 66
+  },
+  "life": {
+   "base": 1.1,
+   "star": 1.4
+  },
+  "fanLife": 0.85,
+  "dmg": 1
+ },
+ "DRILL_DPS": 7,
+ "DRILL_REACH": 6.8999999999999995
+}

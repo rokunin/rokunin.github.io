@@ -2,45 +2,39 @@
 """CHUBZ balance model: a scripted top-down fight, no rendering, no browser.
 
 One car (buggy / spider / halo / unicorn) at one of four gear tiers fights one wave of monsters.
-Every number comes from index.html (see the notes in balance/README.md, line numbers there);
+The game's tables come from data.json (src/data); the few numbers still in the game's code are noted in README.md;
 what the model leaves out is listed there too. It answers "how fast does this ride kill this mix,
 and how much does it get bitten", and which source did the killing.
 
     python3 sim.py                      # the full grid, results to results.json
     python3 sim.py halo 3 hell kite 1   # one run, printed
 """
-import json, math, sys, random
+import json, math, os, sys, random
 import numpy as np
 
 DT = 0.025
 CAR_R = 1.6
+# The game's own tables (src/data, exported by `npm run build` as data.json, ADR-0006); the rest below are model choices
+# or numbers that still sit in the game's code (see README.md).
+D = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.json')))
+LV = (0, 2, 4)                                              # the slots of W_STATS that gun levels 1, 2, 3 use
 # kind: hp, speed, r, bite, fly, heavy, spiky, ranged
-KINDS = {
-    'gremlin': (1, 12.5, 0.55, 5, 0, 0, 0, 0), 'stilt': (2, 9.5, 0.55, 7, 0, 0, 0, 0), 'brute': (9, 6, 1.35, 12, 0, 1, 0, 0),
-    'flapper': (1.5, 11, 0.65, 4, 2.4, 0, 0, 0), 'spitter': (2, 7.5, 0.65, 5, 0, 0, 0, 1), 'maw': (2, 13.5, 0.6, 6, 0, 0, 0, 0),
-    'oculon': (3, 7, 0.7, 5, 0, 0, 0, 1), 'gloop': (12, 5, 1.2, 8, 0, 1, 0, 0), 'gloopling': (2, 10, 0.5, 4, 0, 0, 0, 0),
-    'jelly': (3, 8.5, 0.6, 9, 0, 0, 0, 0), 'grubber': (14, 5.5, 1.5, 14, 0, 1, 0, 0), 'lamprey': (4, 9.5, 0.7, 10, 0, 0, 0, 0),
-    'spike': (3, 15.5, 0.75, 9, 0, 0, 1, 0), 'wingmaw': (2.5, 12, 0.7, 6, 1.0, 0, 0, 0)}
-SIZE = {'gremlin': 1.8, 'stilt': 3.4, 'brute': 3.9, 'flapper': 2.3, 'spitter': 2.1, 'maw': 3.0, 'oculon': 3.3, 'gloop': 2.7, 'gloopling': 1.5,
-        'jelly': 4.4, 'grubber': 4.9, 'lamprey': 4.2, 'spike': 2.3, 'wingmaw': 3.1}
+KINDS = {k: (v['hp'], v['speed'], v['r'], v['bite'], v.get('fly', 0), int(bool(v.get('heavy'))), int(bool(v.get('spiky'))), int(bool(v.get('ranged'))))
+         for k, v in D['SW_KINDS'].items()}
+SIZE = {k: v['size'] for k, v in D['SW_KINDS'].items()}
 MINI_SIZE = 1.15 * 4.9
 
-BASE_SPEED = {'buggy': 70, 'spider': 52, 'halo': 66, 'unicorn': 70}
-BASE_LIFE = {'buggy': 1.1, 'spider': 1.4, 'halo': 1.1, 'unicorn': 1.1}
-SPREAD = {'n': [3, 5, 9], 'arc': [0.3, 0.5, 0.72], 'rate': [1, 1.12, 1.25]}
-NOVA = {'cd': [2.4, 1.8, 1.3], 'n': [10, 18, 28], 'dmg': [1, 1.5, 2]}
-ORBIT = {'n': [2, 3, 5], 'r': [4.0, 4.6, 5.4], 'spd': [3.0, 3.5, 4.2], 'dmg': [1, 1.5, 2.2]}
-SWORD = {'n': [4, 6, 8], 'len': [7, 11, 16], 'T': [1.2, 1.9, 2.8]}
-WEB_R = [2.3, 3.5, 5.0]
-RB_PER = [1, 2, 3]
-STOMP = {'r': [7, 8.5, 10], 'stun': [1.5, 2, 2]}
-BROOD = {'n': [6, 10, 10], 'r': [9, 11, 11], 'slow': [3, 4.5, 4.5]}
-SPIKE = {'n': [6, 11, 18], 'r': [3, 5, 7.5], 'T': [1.3, 2.6, 4], 'dmg': [1, 1, 2]}
-STARB = {'n': [10, 16, 24], 'reach': [9, 13, 17], 'dmg': [1, 1, 1.5]}
-BOMB = {'r': [7, 9, 11], 'T': [2, 3, 4], 'cd': [12, 11, 10]}
-TRAIL_T = [3, 5, 5]
-DRILL_REACH = 6.9
-
+B = D['BULLET']                                             # the spider shoots the star, the halo the holy bullet
+BASE_SPEED = {'buggy': B['speed']['base'], 'spider': B['speed']['star'], 'halo': B['speed']['holy'], 'unicorn': B['speed']['base']}
+BASE_LIFE = {'buggy': B['life']['base'], 'spider': B['life']['star'], 'halo': B['life']['base'], 'unicorn': B['life']['base']}
+SPREAD = {k: [D['W_STATS']['spread'][k][i] for i in LV] for k in ('n', 'arc', 'rate')}
+NOVA = {k: [D['W_STATS']['nova'][k][i] for i in LV] for k in ('cd', 'n', 'dmg')}
+ORBIT = {k: [D['W_STATS']['orbit'][k][i] for i in LV] for k in ('n', 'r', 'spd', 'dmg')}
+SWORD = {'n': [D['HALO_SWORDS']['n'][i] for i in LV], 'len': [D['HALO_SWORDS']['len'][i] for i in LV], 'T': [D['SWORD_T'][i] for i in LV]}
+WEB_R = [D['WEB_R'][i] for i in LV]
+RB_PER = [D['BEAM_PER'][i] for i in LV]
+STOMP, BROOD, SPIKE, STARB, BOMB, TRAIL_T = D['STOMP'], D['BROOD'], D['SPIKE'], D['STARB'], D['BOMB'], D['TRAIL_T']
+DRILL_REACH = D['DRILL_REACH']
 
 class Fight:
     def __init__(self, ride, tier, scen, policy, seed):
@@ -240,7 +234,7 @@ class Fight:
     def guns(self, fx, fz, L):
         r = self.ride
         g = self.gun
-        sp = BASE_SPEED[r]; life = BASE_LIFE[r] * (0.85 if g is not None else 1)
+        sp = BASE_SPEED[r]; life = BASE_LIFE[r] * (B['fanLife'] if g is not None else 1)
         rate = SPREAD['rate'][g] if g is not None else 1
         self.fireT -= DT
         tgt = getattr(self, 'auto', None)
@@ -298,7 +292,7 @@ class Fight:
         elif r == 'halo':
             n, ln, T = SWORD['n'][g], SWORD['len'][g], SWORD['T'][g]
             ph = self.rng.uniform(0, 6.283)
-            self.beams.append(dict(kind='halo', a=[ph + i / n * 6.283 for i in range(n)], len=ln, w=1.1, until=self.t + T, next=self.t, every=0.12, dmg=NOVA['dmg'][g] * 0.9))
+            self.beams.append(dict(kind='halo', a=[ph + i / n * 6.283 for i in range(n)], len=ln, w=1.1, until=self.t + T, next=self.t, every=D['HALO_SWORDS']['every'], dmg=NOVA['dmg'][g] * D['HALO_SWORDS']['dmgK']))
             self.invul_until = max(self.invul_until, self.t + T)
             self.novaT = max(2, NOVA['cd'][g]) + T
         else:
@@ -479,7 +473,7 @@ class Fight:
         """Boss: only what can hurt the Pyramidon (bullets, nova, orbit, drill, beams); everything is measured as damage per second."""
         Bs = self.boss; r = self.ride; g = self.gun; t = self.t
         d = math.hypot(Bs['x'] - self.cx, Bs['z'] - self.cz)
-        sp = BASE_SPEED[r]; life = BASE_LIFE[r] * (0.85 if g is not None else 1)
+        sp = BASE_SPEED[r]; life = BASE_LIFE[r] * (B['fanLife'] if g is not None else 1)
         rate = SPREAD['rate'][g] if g is not None else 1
         self.fireT -= DT
         while self.fireT <= 0:
@@ -500,7 +494,7 @@ class Fight:
             elif r == 'spider': self.novaT = NOVA['cd'][g]
             elif r == 'halo':
                 ph = self.rng.uniform(0, 6.283); n, ln, T = SWORD['n'][g], SWORD['len'][g], SWORD['T'][g]
-                self.beams.append(dict(kind='halo', a=[ph + i / n * 6.283 for i in range(n)], len=ln, w=1.1, until=t + T, next=t, every=0.12, dmg=NOVA['dmg'][g] * 0.9))
+                self.beams.append(dict(kind='halo', a=[ph + i / n * 6.283 for i in range(n)], len=ln, w=1.1, until=t + T, next=t, every=D['HALO_SWORDS']['every'], dmg=NOVA['dmg'][g] * D['HALO_SWORDS']['dmgK']))
                 self.novaT = max(2, NOVA['cd'][g]) + T
             else:
                 per = RB_PER[g]; offs = [0] if per == 1 else [-0.2, 0.2] if per == 2 else [-0.38, 0, 0.38]

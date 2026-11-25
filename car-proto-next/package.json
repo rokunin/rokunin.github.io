@@ -2,9 +2,9 @@
   "name": "chubz",
   "private": true,
   "type": "module",
-  "description": "CHUBZ: the game's sources live in src/, `npm run build` writes the single index.html next to this file (ADR-0003)",
+  "description": "CHUBZ: the game's sources live in src/, `npm run build` writes the single index.html next to this file (ADR-0003) and dev/balance/data.json from src/data (ADR-0006)",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node dev/tools/export_data.mjs",
     "lint": "biome lint src"
   },
   "devDependencies": {
