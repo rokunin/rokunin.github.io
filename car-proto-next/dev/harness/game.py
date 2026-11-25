@@ -66,8 +66,9 @@ class Game:
         return False
 
     # ---- pages ----
-    def _open(self, name, query=''):
+    def _open(self, name, query='', init=None):
         p = self.ctx.new_page(); self.pages.append(p)
+        if init: p.add_init_script(init)      # runs before the page's own scripts
         p.on('pageerror', lambda e: self.errs.append(f'{name}: {e}'))
         p.goto(f'http://127.0.0.1:{self.port}/index.html{query}', wait_until='commit')      # not DOMContentLoaded: the game is up in ~2 s, the event comes ~15 s later
         p.wait_for_function('!!window.__dbg', timeout=90000)
@@ -86,8 +87,8 @@ class Game:
         if god:
             godmode(p)
 
-    def solo(self, ride='buggy', god=True, name='solo'):
-        p = self._open(name); self._ride(p, ride, god); return p
+    def solo(self, ride='buggy', god=True, name='solo', init=None):
+        p = self._open(name, init=init); self._ride(p, ride, god); return p
 
     def host(self, ride='buggy', god=True, name='Host', q=''):
         p = self._open(name, '?p2p' + q); p.fill('#nick', name); p.click('#hostBtn'); p.wait_for_timeout(400)
