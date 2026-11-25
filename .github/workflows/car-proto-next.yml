@@ -20,8 +20,8 @@ jobs:
       run:
         working-directory: car-proto-next
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22.23.4
           cache: npm
@@ -31,7 +31,7 @@ jobs:
         run: npm run build && git diff --exit-code --stat -- index.html
       - name: Biome
         run: npx biome ci src
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Harness dependencies
@@ -45,7 +45,7 @@ jobs:
   secrets:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
