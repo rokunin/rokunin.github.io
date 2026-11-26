@@ -23,7 +23,10 @@ SCENES = [
 ]
 stage = frames.STAGE.replace('(new Function(a[4]))();', 'window.eval(a[4]);')
 lab = open(os.path.join(HERE, 'lab.js')).read().replace('__SCENES__', json.dumps(SCENES, ensure_ascii=False)).replace('__STAGE__', json.dumps(stage))
-init = '\n'.join([day_js('2026-01-01'), rng_js(1001), open(os.path.join(DEV, 'harness', 'hx.js')).read(), open(os.path.join(DEV, 'harness', 'mock_room.js')).read()])
+QUIET = """// the lab's clock stands still, and a sound started then computes a non-finite AudioParam and throws: ignore such values here
+{ const pd = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'value'); Object.defineProperty(AudioParam.prototype, 'value', { get: pd.get, set(v) { if (Number.isFinite(v)) pd.set.call(this, v); } });
+  for (const k of ['setValueAtTime', 'linearRampToValueAtTime', 'exponentialRampToValueAtTime', 'setTargetAtTime']) { const f = AudioParam.prototype[k]; AudioParam.prototype[k] = function (...a) { return a.every(Number.isFinite) ? f.apply(this, a) : this; }; } }"""
+init = '\n'.join([QUIET, day_js('2026-01-01'), rng_js(1001), open(os.path.join(DEV, 'harness', 'hx.js')).read(), open(os.path.join(DEV, 'harness', 'mock_room.js')).read()])
 assert '</script>' not in init and '</script>' not in lab
 s = open(os.path.join(OUT, 'index.html')).read()
 m = re.search(r'<head[^>]*>', s)
