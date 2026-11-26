@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="chubz-build" content="150">
-<!-- const BUILD = 150 : the text pages of build 136 and older look for to see an update -->
+<meta name="chubz-build" content="151">
+<!-- const BUILD = 151 : the text pages of build 136 and older look for to see an update -->
 <title>Car Proto — isometric</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font-family: system-ui, sans-serif;
@@ -65713,7 +65713,7 @@ function createShop(GAME) {
 		}
 		return false;
 	}
-	const uswMat = GAME.glow(new THREE.MeshBasicMaterial({ color: 16186367 }), 1.25), uswGold = GAME.glow(new THREE.MeshBasicMaterial({ color: 16762938 }), 1.2), uswWing = new THREE.MeshBasicMaterial({ color: 16775920 });
+	const uswMat = GAME.glow(new THREE.MeshBasicMaterial({ color: 16771504 }), 1.25), uswGold = GAME.glow(new THREE.MeshBasicMaterial({ color: 16762938 }), 1.2), uswWing = new THREE.MeshBasicMaterial({ color: 16775920 });
 	const gPrism = new THREE.CylinderGeometry(1, 1, 1, 4), gSpike = new THREE.ConeGeometry(1, 1, 4), gBox = new THREE.BoxGeometry(1, 1, 1);
 	const furrowGeo = new THREE.PlaneGeometry(1, 1);
 	furrowGeo.rotateX(-Math.PI / 2);
@@ -74200,6 +74200,15 @@ function createWorldSetup(GAME) {
 			} else logError("bloom clamp: the high-pass shader changed, the clamp is not in");
 		}
 		{
+			const hp = bloom.materialHighPassFilter, at = "float alpha = smoothstep(";
+			if (hp.fragmentShader.includes(at)) {
+				bloom.highPassUniforms.glowMax = { value: 1 };
+				bloom.highPassUniforms.smoothWidth.value = .5;
+				hp.fragmentShader = hp.fragmentShader.replace(at, "v = mix( v, max( texel.r, max( texel.g, texel.b ) ), glowMax );\n" + at).replace("void main()", "uniform float glowMax;\nvoid main()");
+				hp.needsUpdate = true;
+			} else logError("bloom: the high-pass threshold changed");
+		}
+		{
 			const hp = bloom.materialHighPassFilter, lum = "float v = luminance( texel.xyz );";
 			if (hp.fragmentShader.includes(lum)) {
 				hp.fragmentShader = hp.fragmentShader.replace(lum, "float v = dot( texel.xyz, vec3( 0.299, 0.587, 0.114 ) );");
@@ -74261,24 +74270,25 @@ function createWorldSetup(GAME) {
 				exposure: { value: 2 },
 				hurt: { value: 0 },
 				lowHp: { value: 0 },
-				whiteDim: { value: .15 }
+				hueKeep: { value: .7 }
 			},
 			vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
 			fragmentShader: `
-        uniform sampler2D tDiffuse; uniform float time, exposure, hurt, lowHp, whiteDim; varying vec2 vUv;
+        uniform sampler2D tDiffuse; uniform float time, exposure, hurt, lowHp, hueKeep; varying vec2 vUv;
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
         void main(){
           vec2 d = vUv - 0.5; float r2 = dot(d, d);
           vec2 ca = d * r2 * 0.006;                                   // slight chromatic fringe toward the corners
           vec3 c = vec3(texture2D(tDiffuse, vUv + ca).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - ca).b);
-          float lit = smoothstep(0.6, 0.95, max(c.r, max(c.g, c.b)));   // glows: 1 and up in the scene; sunlit white stays under 0.5
-          c = aces(c * exposure);
+          // Glows keep their colour (Roman, 26.11.2026): the curve per channel turns every bright colour white, so what glows
+          // (0.6 and up in the scene; sunlit white stays under 0.5) is scaled as a whole by the curve of its brightest channel.
+          float mx = max(c.r, max(c.g, c.b)), em = mx * exposure;
+          vec3 hued = c * exposure * (aces(vec3(em)).r / max(em, 1e-4));
+          c = mix(aces(c * exposure), hued, hueKeep * smoothstep(0.6, 1.2, mx));
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
           c *= mix(vec3(0.94, 0.98, 1.08), vec3(1.05, 1.0, 0.94), smoothstep(0.0, 0.55, l));   // cool shadows, warm highlights
           c = mix(vec3(l), c, 1.14);                                  // saturation
           c = pow(max(c, 0.0), vec3(1.0 / 2.2));
-          float hi = max(c.r, max(c.g, c.b)), sat = (hi - min(c.r, min(c.g, c.b))) / max(hi, 1e-4);
-          c *= 1.0 - whiteDim * lit * (1.0 - smoothstep(0.1, 0.25, sat));   // Roman, 25.11.2026: what glows white on screen, 15% down
           c *= 1.0 - 0.5 * smoothstep(0.12, 0.62, r2);                // vignette
           float edge = smoothstep(0.06, 0.45, r2);
           c = mix(c, vec3(0.75, 0.04, 0.04), edge * clamp(hurt * 0.55 + lowHp * (0.22 + 0.12 * sin(time * 6.0)), 0.0, 0.8));

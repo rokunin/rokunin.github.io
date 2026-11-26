@@ -68,7 +68,7 @@ export function createShop(GAME) {
     return false;
   }
   // -- the punishing sword --
-  const uswMat = GAME.glow(new THREE.MeshBasicMaterial({ color: 0xf6fbff }), 1.25), uswGold = GAME.glow(new THREE.MeshBasicMaterial({ color: 0xffc83a }), 1.2), uswWing = new THREE.MeshBasicMaterial({ color: 0xfffaf0 });
+  const uswMat = GAME.glow(new THREE.MeshBasicMaterial({ color: 0xffe9b0 }), 1.25), uswGold = GAME.glow(new THREE.MeshBasicMaterial({ color: 0xffc83a }), 1.2), uswWing = new THREE.MeshBasicMaterial({ color: 0xfffaf0 });
   const gPrism = new THREE.CylinderGeometry(1, 1, 1, 4), gSpike = new THREE.ConeGeometry(1, 1, 4), gBox = new THREE.BoxGeometry(1, 1, 1);
   const furrowGeo = new THREE.PlaneGeometry(1, 1); furrowGeo.rotateX(-Math.PI / 2);
   function makeSword() {                                   // point at y = 0, pommel up; the flat of the blade faces the camera

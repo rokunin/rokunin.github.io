@@ -5,7 +5,7 @@
     python3 frames.py compare [--dir frames/r128]         take them again, compare, write side-by-sides to /tmp/chubz-frames
 
 References live per Three.js version: frames/r<N> for the version in node_modules (REF). frames/r128 is the picture before the upgrade;
-since build 150 glowing whites are 15% dimmer (the grade's whiteDim), so the check against r128 uses a second render with whiteDim at 0.
+since build 151 glows keep their colour (the grade's hueKeep, the bloom's glowMax and soft knee), so the check against r128 uses a second render with those off.
 
 A scene is staged in one go on a frozen clock: Math.random is seeded again, the car, camera and objects are put in place,
 then a few frames of 1/30 s run (the fire wall rises, coins land) and the canvas is read right after a render, without the HUD.
@@ -45,9 +45,10 @@ const gp = d.gradePass;
 if (gp) { gp.uniforms.time.value = 1.0; gp.uniforms.hurt.value = 0; gp.uniforms.lowHp.value = 0; }
 d.renderer.shadowMap.needsUpdate = true;
 const draw = () => { if (d.composer) d.composer.render(); else d.renderer.render(d.scene, d.camera); return d.renderer.domElement.toDataURL('image/png'); };
-const shot = draw(), dim = gp && gp.uniforms.whiteDim;                // and once more without the white dim (build 150) for the check against r128
-if (!dim) return [shot, shot];
-const k = dim.value; dim.value = 0; const plain = draw(); dim.value = k;
+const shot = draw(), hk = gp && gp.uniforms.hueKeep, hp = d.composer && d.composer.passes[1].highPassUniforms;   // and once more with build 151's glow look off, for the check against r128
+if (!hk || !hp || !hp.glowMax) return [shot, shot];
+const k = [hk.value, hp.glowMax.value, hp.smoothWidth.value]; hk.value = 0; hp.glowMax.value = 0; hp.smoothWidth.value = 0.01;
+const plain = draw(); hk.value = k[0]; hp.glowMax.value = k[1]; hp.smoothWidth.value = k[2];
 return [shot, plain];
 """
 
@@ -86,7 +87,7 @@ def changed(a, b):
 
 
 def take(names, plain=False):
-    """The scenes as players see them; with plain=True also as a second dict without the white dim (what frames/r128 is compared with)."""
+    """The scenes as players see them; with plain=True also as a second dict without build 151's glow look (what frames/r128 is compared with)."""
     out, flat = {}, {}
     with Game(fast=False, size=SIZE, out=os.environ.get('CHUBZ_OUT', '/tmp/chubz-test') + '-frames') as g:
         p = g.solo('buggy')
